@@ -18,11 +18,11 @@ from backend.measurement.weight_sweep import (FEATURES, compose_from_track_a,
 NOMINAL = 0.5  # stub-scale floor; the real one comes from the threshold session
 
 
-def stub_compose(features, geometry_ratio, w):
+def stub_compose(features, geometry_ratio, w, beta):
     """Same idea as Track A's composite: anomaly-weighted feature half
-    blended 50/50 (beta at default) with the fixed geometry half."""
+    blended with the fixed geometry half; §10 sweeps beta too."""
     feat = 1.0 - float(np.dot(w, [features[f] for f in FEATURES]))
-    return 0.5 * feat + 0.5 * geometry_ratio
+    return beta * feat + (1.0 - beta) * geometry_ratio
 
 
 def _epoch(anom: float, geom: float):

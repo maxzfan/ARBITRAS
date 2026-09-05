@@ -14,11 +14,18 @@ Definitions are §10's, fixed:
     whose verdict (below/above NOMINAL) differs across draws — the epochs
     where the weighting actually decides the outcome.
 
-Harness, not policy: `compose_fn(features, geometry, w) -> confidence` is
-supplied by the caller. The stub in test_measurement.py pins semantics;
+Harness, not policy: `compose_fn(features, geometry, w, beta) -> confidence`
+is supplied by the caller. The stub in test_measurement.py pins semantics;
 `compose_from_track_a` adapts Track A's real `backend.detection.score`.
-Only the feature weights (Dirichlet, dimension = number of features) are
-swept; the feature/geometry blend beta stays at Track A's default.
+Per §10 the draw varies BOTH the feature weights (Dirichlet, dimension =
+number of features) and the feature/geometry blend beta (Uniform(0,1) —
+the geometry term itself stays fixed; it has no weights).
+
+Two FSR readings, per §10's definition ("the arbitrated state is below
+NOMINAL"): `dirichlet_sweep` compares raw confidence against the NOMINAL
+floor (fast, what the tests pin); the CLI's `--arbitrate` mode replays
+the console arbiter (hysteresis, dwell, recovery gating) per draw via
+`console.replay.arbitrate` — that one is the §10 headline number.
 
 Epoch format: (features: dict[str, float], geometry) — geometry is passed
 through to compose_fn untouched (a §5 geometry block for the real score,
@@ -71,15 +78,16 @@ def dirichlet_sweep(compose_fn: Callable, clean_epochs: list[tuple],
     """
     rng = np.random.default_rng(seed)
     draws = rng.dirichlet(np.ones(len(FEATURES)), size=n_draws)
+    betas = rng.uniform(0.0, 1.0, size=n_draws)   # §10: blend is swept too
 
     n_clean, n_attack = len(clean_epochs), len(attack_epochs)
     epochs = list(clean_epochs) + list(attack_epochs)
     # below[draw, epoch] — confidence < nominal under that weighting
     below = np.zeros((n_draws, len(epochs)), dtype=bool)
     for d in range(n_draws):
-        w = tuple(map(float, draws[d]))
+        w, beta = tuple(map(float, draws[d])), float(betas[d])
         for i, (features, geometry) in enumerate(epochs):
-            below[d, i] = compose_fn(features, geometry, w) < nominal
+            below[d, i] = compose_fn(features, geometry, w, beta) < nominal
 
     # §10 FSR: clean epochs below NOMINAL — a distribution over draws.
     fsr = (below[:, :n_clean].mean(axis=1) if n_clean
@@ -110,26 +118,29 @@ def dirichlet_sweep(compose_fn: Callable, clean_epochs: list[tuple],
     }
 
 
-@lru_cache(maxsize=64)
-def _weights_for(w: tuple):
+@lru_cache(maxsize=4096)
+def _weights_for(w: tuple, beta: float | None):
     """One Weights object per draw, not per epoch (draws repeat per epoch)."""
     from backend.detection import Weights
+    kw = {} if beta is None else {"beta": beta}
     return Weights(feature=dict(zip(FEATURES, w)),
-                   note="Dirichlet draw (§10 sweep), beta at default")
+                   note="Dirichlet draw (§10 sweep)", **kw)
 
 
-def compose_from_track_a(features: dict, geometry, w: tuple) -> float:
+def compose_from_track_a(features: dict, geometry, w: tuple,
+                         beta: float | None = None) -> float:
     """Adapter: run Track A's real composite for one epoch and weighting.
 
     `geometry` is the record's §5 geometry block (score reads
     `information_ratio` from it); a bare float is wrapped for convenience.
-    beta stays at the Weights dataclass default — only the feature
-    weighting is swept here.
+    `beta` is the feature/geometry blend for this draw (§10 sweeps it);
+    None keeps the Weights dataclass default.
     """
     from backend.detection import score
     if geometry is not None and not isinstance(geometry, dict):
         geometry = {"information_ratio": float(geometry)}
-    return score(features, geometry, _weights_for(tuple(w)))["confidence"]
+    return score(features, geometry,
+                 _weights_for(tuple(w), beta))["confidence"]
 
 
 def report(result: dict) -> str:
@@ -162,6 +173,44 @@ def report(result: dict) -> str:
     return "\n".join(lines)
 
 
+def arbitrated_fsr(records: list[dict], n_draws: int = 1000,
+                   seed: int = 20260905) -> dict:
+    """§10's FSR, verbatim: fraction of CLEAN-replay epochs whose ARBITRATED
+    state is below NOMINAL — through the console arbiter (hysteresis, dwell,
+    recovery gating), once per weight/blend draw. Same draw sequence as
+    dirichlet_sweep under the same seed.
+
+    `records` are full §5 stream records from the clean replay (credential
+    VALID throughout on the clean day).
+    """
+    from console.replay import arbitrate, false_surrender_rate
+
+    rng = np.random.default_rng(seed)
+    draws = rng.dirichlet(np.ones(len(FEATURES)), size=n_draws)
+    betas = rng.uniform(0.0, 1.0, size=n_draws)
+
+    fsr = np.zeros(n_draws)
+    events = np.zeros(n_draws, dtype=int)
+    for d in range(n_draws):
+        w, beta = tuple(map(float, draws[d])), float(betas[d])
+        epochs = [{"timestamp": r["timestamp"],
+                   "confidence": compose_from_track_a(
+                       r["features"], r.get("geometry"), w, beta),
+                   "credential_status": r.get("credential_status", "VALID")}
+                  for r in records]
+        m = false_surrender_rate(arbitrate(epochs))
+        fsr[d] = m["fsr"]
+        events[d] = m["downgrade_events"]
+    return {
+        "fsr": fsr,
+        "fsr_min": float(fsr.min()), "fsr_median": float(np.median(fsr)),
+        "fsr_max": float(fsr.max()),
+        "downgrade_events_median": float(np.median(events)),
+        "downgrade_events_max": int(events.max()),
+        "n_draws": n_draws, "n_epochs": len(records),
+    }
+
+
 def load_epochs(path) -> list[tuple[datetime, dict, dict]]:
     """Read §5 JSONL stream records -> (timestamp, features, geometry)."""
     epochs = []
@@ -186,6 +235,10 @@ def main(argv=None) -> None:
                     help="NOMINAL confidence floor (from the threshold "
                          "session; never a guess)")
     ap.add_argument("--n-draws", type=int, default=1000)
+    ap.add_argument("--arbitrate", action="store_true",
+                    help="also replay the console arbiter per draw on the "
+                         "clean stream — §10's FSR definition verbatim "
+                         "(hysteresis included)")
     args = ap.parse_args(argv)
 
     clean = [(f, g) for _, f, g in load_epochs(args.clean)]
@@ -199,6 +252,18 @@ def main(argv=None) -> None:
     result = dirichlet_sweep(compose_from_track_a, clean, attack,
                              n_draws=args.n_draws, nominal=args.nominal)
     print(report(result))
+
+    if args.arbitrate:
+        with Path(args.clean).open() as fh:
+            recs = [json.loads(l) for l in fh if l.strip()]
+        a = arbitrated_fsr(recs, n_draws=args.n_draws)
+        print(f"arbitrated FSR (§10 headline, {a['n_draws']} draws x "
+              f"{a['n_epochs']} clean epochs, thresholds from "
+              f"console.arbiter.states):\n"
+              f"  min/median/max: {a['fsr_min']:.4f} / {a['fsr_median']:.4f}"
+              f" / {a['fsr_max']:.4f}   downgrade events median "
+              f"{a['downgrade_events_median']:.0f} max "
+              f"{a['downgrade_events_max']}")
 
 
 if __name__ == "__main__":
