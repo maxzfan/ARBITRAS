@@ -32,14 +32,44 @@ ALERT_LIMIT_PROVENANCE = "PLACEHOLDER"  # -> "agreed" once the team signs off
 GRANT_EPOCHS = 10
 
 # Chi-square cutoff for the weighted residual test and per-satellite residual
-# threshold tau — fit on the clean day at the 21:00 threshold session
-# (TRACK_D.md build order; design.md §10 "Threshold procedure — by hand").
-# While None the dependent checks evaluate to None (not evaluated), the same
-# mechanism as the console's PLACEHOLDER banner (Track B style).
-CHI2_CUTOFF: Optional[float] = None
-CHI2_PROVENANCE = "PLACEHOLDER"
-TAU_M: Optional[float] = None
-TAU_PROVENANCE = "PLACEHOLDER"
+# threshold tau — FIT on the clean day (design.md §10 "Threshold procedure —
+# by hand"; TRACK_D.md 21:00 session). Fit 2026-09-05 by
+# `python -m backend.correction.validate` on the USN8 clean day (2026-08-20,
+# data/USN800USA_R_20262320000_01D_30S_MO.crx.gz, 2,880 epochs, all solved),
+# corrector run per epoch with the demo distrust rule; the fit never sees
+# injected data (backend/replay.py header). Numbers + full distributions in
+# out/correction_thresholds.json.
+#
+# CHI2_CUTOFF: p99.9 of the clean-day per-epoch statistic r^T W r / dof
+# (2,880 samples; p50 2.79, p95 5.22, p99 6.32, max 7.96 m^2). Each clean
+# exceedance is a false revoke costing a 10-epoch re-grant; p99.9 predicts
+# ~3/day — measured clean-day correction_ok availability 0.9816.
+CHI2_CUTOFF: Optional[float] = 7.703
+CHI2_PROVENANCE = ("p99.9 of clean-day r'Wr/dof, USN8 2026-08-20, fit "
+                   "2026-09-05 by backend.correction.validate")
+# TAU_M: p99.9 of the clean-day per-SV |post-fit residual| pool over w>0
+# rows (49,287 samples; p50 0.96, p95 2.82, p99 3.85, max 6.36 m). PL
+# assumes an undetected single fault keeps its residual under tau; tau is
+# the clean day's own p99.9 residual — below it a bias is indistinguishable
+# from the clean floor (unmodelled iono/tropo leakage included: the fit
+# absorbs it rather than assuming it away). Clean-day PL with this tau:
+# p50 3.51 m, p95 4.95 m, max 6.67 m — under the 15 m alert limit.
+TAU_M: Optional[float] = 5.187
+TAU_PROVENANCE = ("p99.9 of clean-day per-SV |post-fit residual|, USN8 "
+                  "2026-08-20, fit 2026-09-05 by backend.correction.validate")
+
+# DR drift bound for the continuity check (check 4). On the replay, dead
+# reckoning is "still at the antenna" with drift 0 + noise floor
+# (TRACK_D.md), so the bound IS the measured clean-day noise floor of the
+# corrected fix: p99.9 of |corrected − antenna| (3D — emit.py's continuity
+# delta is 3D, and the 3D error carries the unmodelled single-frequency
+# atmospheric bias, which the fit absorbs; clean p50 15.18 m, p95 18.92 m,
+# max 21.36 m). Same fit run and dataset as above. On the RC car / a real
+# UGV this must be re-measured against wheel-speed / IMU dead reckoning.
+DRIFT_BOUND_M: Optional[float] = 20.672
+DRIFT_BOUND_PROVENANCE = ("p99.9 of clean-day 3D |corrected − antenna|, "
+                          "USN8 2026-08-20, fit 2026-09-05 by "
+                          "backend.correction.validate")
 
 # Redundancy floor (TRACK_D.md check 2): with no redundancy P is zero, the
 # slope is infinite, and the residual test means nothing.

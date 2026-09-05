@@ -65,8 +65,8 @@ def _d_rho(sat, pr):
 
 # ------------------------------------------------------------------ test 1
 def test_exact_recovery_on_clean_fixture(fx):
-    """All weights 1, zero noise: corrected position == rx_ecef to ~1e-6 m,
-    placeholder-era nulls where TRACK_D.md says null."""
+    """All weights 1, zero noise: corrected position == rx_ecef to ~1e-6 m;
+    fitted-threshold checks evaluate, unwired inputs stay null."""
     sat, pr = fx
     block = correction_block(_context(sat), _d_rho(sat, pr), [], Gate())
 
@@ -79,11 +79,12 @@ def test_exact_recovery_on_clean_fixture(fx):
 
     assert set(block["weights"].values()) == {1.0}
     assert block["trusted_count"] == len(sat)
-    # tau_m is PLACEHOLDER None: no PL can exist, pl_under_al not evaluated
-    assert block["protection_level_m"] is None
-    assert block["checks"]["pl_under_al"] is None
+    # tau_m is fit (backend.correction.validate, clean-day p99.9 = 5.187 m):
+    # PL = tau x max slope = 5.67 m on this geometry, inside the 15 m AL
+    assert block["protection_level_m"] == pytest.approx(5.67, abs=0.01)
+    assert block["checks"]["pl_under_al"] is True
     assert block["checks"]["redundancy"] is True
-    assert block["checks"]["residual_test"] is None    # chi2 PLACEHOLDER
+    assert block["checks"]["residual_test"] is True    # zero-noise residuals
     assert block["checks"]["continuity"] is None       # drift bound not given
     assert block["checks"]["cross_constellation"] is None
     # one clean epoch is not a grant (10-epoch hysteresis)

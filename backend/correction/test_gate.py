@@ -115,9 +115,12 @@ def test_redundancy():
 
 
 def test_residual_test():
-    # Cutoff not yet fit on the clean day -> not evaluated.
+    # An unfit cutoff (None) -> not evaluated; the module default is no
+    # longer that — it was fit on the clean day (backend.correction.validate,
+    # p99.9 of r'Wr/dof, USN8 2026-08-20). Guard the fitted value so a
+    # placeholder regression is caught here, not on the vehicle.
     assert residual_test([0.1] * 8, [1.0] * 8, 2, chi2_cutoff=None) is None
-    assert CHI2_CUTOFF is None  # module default is still PLACEHOLDER
+    assert CHI2_CUTOFF == pytest.approx(7.703)
     # Small residuals, healthy dof, generous cutoff: passes.
     assert residual_test([0.1] * 8, [1.0] * 8, 2, chi2_cutoff=1.0) is True
     # Large residuals: fails.
@@ -148,7 +151,8 @@ def test_evaluate_checks_keys_and_nulls():
     }
     assert checks["pl_under_al"] is True
     assert checks["redundancy"] is True
-    assert checks["residual_test"] is None      # CHI2_CUTOFF still None
+    # fitted CHI2_CUTOFF is the default: 8 * 0.01 / 3 << 7.703 -> True
+    assert checks["residual_test"] is True
     assert checks["continuity"] is True
     assert checks["cross_constellation"] is None
     # Missing inputs -> None, never a silent pass.
