@@ -257,24 +257,34 @@ in that module already ("two statistics of one observable, not two independent
 observables") and it is the honest reason feature 2 has never needed the nav
 file.
 
-The consequence for a coordinated position walk is therefore **worse than the
-per-constellation case you named, and in a different way**:
+The consequence for a coordinated position walk is sharper than "they go
+quiet", and the precise statement matters:
 
-- A per-constellation solution residual would go to zero for a coordinated
-  GPS-only walk because the walk lies in the position columns of H.
-- Code-minus-carrier goes quiet for a *different* reason: a spoofer that moves
-  code and carrier together produces no divergence at all, whatever the
-  geometry. That is exactly what `carrier_rate_error = 0` models, and it is
-  already asserted by test as invisible to features 2 and 3.
+> **At `carrier_rate_error > 0`, features 2 and 3 respond to the spoofer's
+> incoherence at magnitude `carrier_rate_error x t` — a quantity that is
+> INDEPENDENT of how far the vehicle has been displaced. They detect
+> ADVERSARY ERROR, not ATTACK EFFECT.**
 
-So for the directional position walk, **features 2 and 3 see only
-`carrier_rate_error`, never the displacement.** A coherent walk (rate 0) is
-invisible to both no matter how far it moves the vehicle. Detection of the
-walk itself rests on:
+Two consequences that follow directly, and they are the ones to say out loud:
 
-1. **cross_constellation** — authentic E and C disagree with spoofed G;
-2. **cn0_anomaly** — the capture step, which fades within `cn0_window`;
-3. the geometry half (§6b), once Track C lands.
+- **A coherent spoofer displacing the vehicle 500 m is invisible to them.**
+- **A clumsy one displacing it 2 m is not.**
+
+The feature magnitude is a measure of how badly the attacker built their
+transmitter, not of how much danger the vehicle is in. Nothing in features 1-3
+is a function of the displacement:
+
+| feature | responds to | function of displacement? |
+|---|---|---|
+| 1 C/N₀ anomaly | the capture power step, fading over `cn0_window` | no |
+| 2 residual (as built) | code-minus-carrier level = `rate x t` | **no** |
+| 3 divergence | code-minus-carrier rate = `rate` | **no** |
+| 4 cross-constellation | authentic E/C disagreeing with spoofed G | yes |
+
+A per-constellation solution residual would go to zero for a coordinated
+GPS-only walk because the walk lies in the position columns of H — that is a
+geometric blindness. Features 2 and 3 have a *different* and broader
+blindness: they never see geometry at all, at any rate.
 
 This is why §10 must record residuals on the spoofed and authentic subsets
 separately: the residual that appears under a coordinated walk is
@@ -354,3 +364,94 @@ inconsistent with the pooled RMS they were supposed to decompose, which is
 what made it visible. `solve()` now returns `resid_m` per satellite from its
 own final iteration and the duplicate implementation is deleted. Two
 implementations of one quantity is a bug factory; there is now one.
+
+
+---
+
+# `carrier_rate_error` demo pin: 0.0136 m/s
+
+Ruled by hand from the printed arithmetic at k = 2σ, t = 30 s:
+2 × 0.204 / 30 = **0.0136 m/s**. Written into
+`backend.injector.DEMO_CARRIER_RATE_ERROR` and the default of
+`backend.replay --carrier-rate-error`.
+
+**Chosen for demo legibility, not as a physical claim. The reported
+displacement bound is measured at `carrier_rate_error = 0`.**
+
+At the pin, the divergence reaches 2σ of the measured clean code-minus-carrier
+noise by the first observable epoch after lift-off, which is what makes the
+step visible on screen. It says nothing about how coherent a real spoofer's
+carrier would be — and by the finding above, the feature magnitude it produces
+measures the adversary's workmanship, not the vehicle's exposure.
+
+
+---
+
+# Item 1 investigation: are features 2 and 3 the same channel?
+
+Asked by hand, measured before anything was changed. Regenerate with the
+script under the session scratchpad.
+
+## What each computes today
+
+| | formula | statistic |
+|---|---|---|
+| feature 2 `pseudorange_residual` | `\|cmc(t) − mean(trailing 40)\| / σ_cmc` | **level** of code-minus-carrier |
+| feature 3 `code_carrier_divergence` | `\|cmc(t) − cmc(t−1)\| / (σ_cmc·√2)` | **rate** of code-minus-carrier |
+
+`cmc = C1 − λL1`. **Same observable, same channel; one integrated, one
+differenced.** Feature 2 is not the post-fit pseudorange residual §6a.2
+specifies — there is no position solution in it.
+
+## Correlation of the two feature series
+
+| replay | Pearson | Spearman |
+|---|---|---|
+| clean full day | **+0.113** | +0.093 |
+| carry-off, rate 0.0136 | **+0.424** | +0.347 |
+| carry-off, rate 0 | +0.113 | +0.093 |
+| meaconing | +0.113 | +0.093 |
+
+## Composite d′ with feature 2 removed entirely
+
+| scenario | d′ (4 features) | d′ (no feature 2) | change |
+|---|---|---|---|
+| carry-off, rate 0.0136 | 5.23 | 5.42 | **+0.19** |
+| carry-off, rate 0 | 5.09 | 5.21 | **+0.12** |
+| meaconing | 5.04 | 5.07 | **+0.03** |
+
+## Per-feature d′, attack window vs clean
+
+| scenario | C/N₀ | residual | divergence | **cross-const** |
+|---|---|---|---|---|
+| carry-off, rate 0.0136 | 0.03 | 2.04 | 0.57 | **6.01** |
+| carry-off, rate 0 | 0.03 | 0.77 | 0.01 | **6.01** |
+| meaconing | 0.15 | 0.77 | 0.01 | **6.18** |
+
+## What this shows — and the hypothesis it does *not* support
+
+**The 5.04 was not counting one channel twice.** The two features are drawn
+from the same observable but they are nearly uncorrelated (+0.11 on clean
+data), because a level and its own first difference are close to orthogonal
+for a drifting signal. Removing feature 2 does not cut the composite; it
+raises it slightly. So the redundancy framing is not what the numbers say.
+
+**What they say instead is dilution.** The composite d′ of 5.04 is *lower than
+its own best feature*: cross-constellation alone reads 6.18. Three features
+that barely move (0.15, 0.77, 0.01) are averaged with equal weight against one
+that separates cleanly, and the average drags the good one down. That is a
+weighting result, and it is a direct input to the threshold session — it says
+the equal-weight placeholder is actively costing separation, not merely
+untuned.
+
+**Feature 2 as built earns nothing on the scenarios that matter**: d′ 0.77
+against both meaconing and a coherent walk, rising to 2.04 only when the
+spoofer is incoherent — which by the finding above is a measure of adversary
+workmanship, not attack effect. It is the weakest feature in the set and it is
+blind to geometry.
+
+So the case for reimplementing it as the post-fit residual from `solve()`
+stands, but on the original reason rather than on redundancy: **nothing in
+features 1–3 carries geometry, so nothing in features 1–3 can see a
+coordinated position walk.** Feature 4 is currently the only channel that can,
+and a single channel carrying the entire detection is a fragile place to be.

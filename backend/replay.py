@@ -20,7 +20,7 @@ from pathlib import Path
 from .detection import (CrossConstellation, FeatureExtractor, Weights, fit,
                         fit_cross, flagged_sv, record, score, write_jsonl)
 from .detection.emit import ecef_to_lla
-from .injector import SCENARIOS, inject, summarise
+from .injector import DEMO_CARRIER_RATE_ERROR, SCENARIOS, inject, summarise
 from .rinex import ephemeris, noise
 from .rinex.loader import load_obs
 from .rinex.solve import solve_per_constellation
@@ -86,14 +86,20 @@ def main(argv=None) -> None:
                     help="per-SV exclusion multiple behind excluded_sv. No "
                          "default; see detection.flagged_sv for the measured "
                          "clean-day false-exclusion rate of each value.")
-    ap.add_argument("--carrier-rate-error", type=float, default=None,
-                    help="carry-off code/carrier divergence rate, m/s. The "
-                         "demo pin is picked by hand and is pending; carry_off "
-                         "is skipped until one is given.")
+    ap.add_argument("--carrier-rate-error", type=float,
+                    default=DEMO_CARRIER_RATE_ERROR,
+                    help="carry-off code/carrier divergence rate, m/s. "
+                         f"Default is the demo pin {DEMO_CARRIER_RATE_ERROR} "
+                         "(k=2 sigma at t=30 s), chosen for demo legibility, "
+                         "not as a physical claim. Pass 0 for the coherent "
+                         "spoofer the displacement bound is measured against.")
     ap.add_argument("--out", default="out")
     args = ap.parse_args(argv)
 
     onset = datetime.fromisoformat(args.onset)
+    print(f"carrier_rate_error {args.carrier_rate_error} m/s "
+          f"({'demo pin: legibility, not a physical claim'
+             if args.carrier_rate_error == DEMO_CARRIER_RATE_ERROR else 'override'})")
     clean = load_obs(args.obs, systems=args.systems)
     floor = noise.measure(clean)
     print(floor)
@@ -111,11 +117,7 @@ def main(argv=None) -> None:
 
     names = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
     for name in names:
-        if name == "carry_off":
-            if args.carrier_rate_error is None:
-                print("carry_off: SKIPPED -- carrier_rate_error demo pin is "
-                      "pending (picked by hand; pass --carrier-rate-error)")
-                continue
+        if name in ("carry_off", "clock_carry_off"):
             spoof = SCENARIOS[name](onset=onset,
                                     carrier_rate_error=args.carrier_rate_error)
         else:
