@@ -14,10 +14,19 @@ replaced by Track A's real output before anything is recorded.
 The numbers here are shaped to exercise every branch of the arbiter. They are
 not measurements and no number from this file may appear in the video, the
 README, or the slides.
+
+ONE EXCEPTION, AND IT IS NARROW: `geometry.sky` is REAL. Satellite azimuth and
+elevation are propagated from the BRDC00IGS broadcast ephemeris for 2026-08-20
+at each epoch's own timestamp (see backend/geometry/skyview.py). The satellites
+are where they actually were. Everything else in this file -- confidence, the
+four features, information_ratio, displacement_bound_m, the credential
+schedule, the injected displacement -- remains synthetic, and the record still
+carries "_synthetic": true for exactly that reason.
 """
 import json
 import math
 import random
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SEED = 20260905
@@ -25,8 +34,43 @@ N_CLEAN = 200        # beat 1
 N_ATTACK = 200       # beat 3 (and beat 2 with the layer off)
 N_CREDENTIAL = 120   # beat 4: clean sky, authorisation lapses
 
-LAT0, LON0, ALT0 = 38.9207, -77.0669, 58.3
-ALL_SV = ["G07", "G13", "G21", "G30", "E11", "E19"]
+from backend.geometry.skyview import sky_at
+from console.mission import ALT, LAT, LON, M_PER_DEG_LAT, M_PER_DEG_LON
+
+# USN8's SURVEYED position, from the ECEF in design.md §4. Truth is fixed --
+# this is a static reference station, so the spoofer moves what the receiver
+# BELIEVES, not where the antenna is. (The earlier fixture had this backwards,
+# which made the plot read as a vehicle driving away from a stationary fix.)
+LAT0, LON0, ALT0 = LAT, LON, ALT
+EPOCH0 = datetime(2026, 8, 20, 0, 0, tzinfo=timezone.utc)
+ELEV_MASK = 10.0
+N_SPOOFED_SV = 6      # satellites the injector walks off, highest-elevation first
+
+# Displacement the injector achieves by the end of the attack window, in metres.
+# Deliberately past mission.ALERT_LIMIT_M so the alert limit is visibly crossed.
+MAX_DISPLACEMENT_M = 64.0
+BEARING_DEG = 118.0        # east-southeast, arbitrary
+
+
+def _spoof_targets(sky_start, sky_end, n=N_SPOOFED_SV):
+    """Which satellites the injector attacks.
+
+    Chosen from those actually visible for the WHOLE attack window, highest
+    elevation first -- a spoofer goes after the satellites the receiver is
+    tracking most strongly, and a target that sets halfway through would make
+    the excluded_sv list reference satellites that are not in the sky.
+    """
+    common = {s["sv"] for s in sky_start} & {s["sv"] for s in sky_end}
+    el = {s["sv"]: s["el"] for s in sky_start}
+    return sorted(common, key=lambda sv: -el[sv])[:n]
+
+
+def _displaced(t):
+    """Believed position at attack progress t in [0,1]. Walk-off, not a jump."""
+    d = MAX_DISPLACEMENT_M * min(1.0, t * 1.35)
+    br = math.radians(BEARING_DEG)
+    return (LAT0 + (d * math.cos(br)) / M_PER_DEG_LAT,
+            LON0 + (d * math.sin(br)) / M_PER_DEG_LON)
 
 
 def _iso(i):
@@ -39,7 +83,21 @@ def generate(path: Path):
     rng = random.Random(SEED)
     rows = []
 
+    # The attack runs epochs N_CLEAN .. N_CLEAN+N_ATTACK. Pick its targets from
+    # satellites genuinely visible across that whole span.
+    attack_sv = _spoof_targets(
+        sky_at(EPOCH0 + timedelta(seconds=30 * N_CLEAN), mask_deg=ELEV_MASK),
+        sky_at(EPOCH0 + timedelta(seconds=30 * (N_CLEAN + N_ATTACK - 1)),
+               mask_deg=ELEV_MASK),
+    )
+
     def row(i, confidence, features, geometry, credential, believed, truth):
+        # Real sky at this epoch's own timestamp, with trust flags applied.
+        sky = sky_at(EPOCH0 + timedelta(seconds=30 * i), mask_deg=ELEV_MASK)
+        excluded = set(geometry.get("excluded_sv", []))
+        geometry = dict(geometry)
+        geometry["sky"] = [{**s, "trusted": s["sv"] not in excluded} for s in sky]
+        trusted = sum(1 for s in geometry["sky"] if s["trusted"])
         return {
             "timestamp": _iso(i),
             "confidence": round(max(0.0, min(1.0, confidence)), 4),
@@ -48,7 +106,7 @@ def generate(path: Path):
                          "alt": ALT0},
             "features": {k: round(max(0.0, min(1.0, v)), 4) for k, v in features.items()},
             "geometry": geometry,
-            "satellites_tracked": 11 - len(geometry.get("excluded_sv", [])),
+            "satellites_tracked": trusted,
             # Out-of-contract replay metadata. A real vehicle does not have this;
             # a replay does, because we injected the attack. Needed for video
             # beat 2 (believed vs true track separating) -- see NOTE below.
@@ -83,7 +141,8 @@ def generate(path: Path):
         resid = 0.05 + 0.80 * min(1.0, t * 1.9)
         ccd = 0.04 + 0.55 * min(1.0, t * 1.5)
         xc = 0.05 + 0.30 * min(1.0, t * 1.2)
-        excluded = [s for k, s in enumerate(ALL_SV) if t > (k + 1) / (len(ALL_SV) + 1.5)]
+        excluded = [s for k, s in enumerate(attack_sv)
+                    if t > (k + 1) / (len(attack_sv) + 1.5)]
         rows.append(row(
             i,
             0.90 - 0.80 * min(1.0, t * 1.35) + rng.gauss(0, 0.012),
@@ -94,8 +153,8 @@ def generate(path: Path):
              "displacement_bound_m": round(8 + 120 * t ** 1.5, 1),
              "next_best_observation": "E" if excluded and excluded[0][0] == "G" else "G"},
             "VALID",
-            (LAT0, LON0),                                    # believed: unmoved
-            (LAT0 - 0.00045 * t * 1.0, LON0 + 0.00062 * t),  # true: walking off
+            _displaced(t),        # believed: dragged off by the spoofer
+            (LAT0, LON0),         # truth: surveyed, fixed
         ))
 
     # -- beat 4: clean sky, perfect fix, authorisation lapses -------------
