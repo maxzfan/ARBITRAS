@@ -25,7 +25,7 @@ import pandas as pd
 
 BRDC_GZ = Path("data/BRDC00IGS_R_20262320000_01D_MN.rnx.gz")
 BRDC = Path("data/brdc_filtered.rnx")
-CACHE = Path(".cache/rinex/nav.pkl")
+CACHE = Path(".cache/rinex/nav-v2.pkl")
 
 # (mu, earth rotation rate) per system ICD
 GM_OMEGA = {
@@ -38,7 +38,13 @@ MAX_EPH_AGE_S = 4 * 3600.0
 
 KEPLER_FIELDS = ("sqrtA", "Eccentricity", "M0", "DeltaN", "Toe", "Omega0",
                  "OmegaDot", "Io", "IDOT", "omega", "Cuc", "Cus", "Crc",
-                 "Crs", "Cic", "Cis")
+                 "Crs", "Cic", "Cis",
+                 # not a Kepler element, but rides along: the broadcast SV
+                 # clock bias af0 (s). A pseudorange is range + c*(dt_rx -
+                 # dt_sv); any range check that ignores af0 mis-reads a big
+                 # satellite clock as a propagation error (E11 runs 5.7 ms
+                 # off, which is 1700 km if read as geometry).
+                 "SVclockBias")
 
 
 def _ensure_filtered() -> Path:
@@ -69,7 +75,7 @@ def load_nav(systems: str = "GEC") -> pd.DataFrame:
         for i, t in enumerate(pd.to_datetime(ds["time"].values)):
             rec = {f: float(sub[f].values[i]) for f in KEPLER_FIELDS
                    if f in sub}
-            if any(not np.isfinite(v) for v in rec.values()) or len(rec) < 16:
+            if any(not np.isfinite(v) for v in rec.values()) or len(rec) < 17:
                 continue
             rec["sv"], rec["t"] = sv, t.to_pydatetime()
             rows.append(rec)
@@ -112,8 +118,12 @@ def _kepler_ecef(eph: pd.Series, t: datetime, system: str) -> np.ndarray:
     inc = eph["Io"] + eph["IDOT"] * tk + eph["Cis"] * s2 + eph["Cic"] * c2
 
     xp, yp = r * np.cos(u), r * np.sin(u)
+    # The node term uses Toe exactly as broadcast: Omega0 is referenced to
+    # the system's own timescale, so the BDT offset lives in tk alone.
+    # Putting it here too rotates the node by 14 s of earth rotation (~1 mrad,
+    # kilometres on the line of sight) -- measured before being fixed.
     lon = (eph["Omega0"] + (eph["OmegaDot"] - omega_e) * tk
-           - omega_e * (eph["Toe"] + TOE_OFFSET_S.get(system, 0.0)))
+           - omega_e * eph["Toe"])
     return np.array([xp * np.cos(lon) - yp * np.cos(inc) * np.sin(lon),
                      xp * np.sin(lon) + yp * np.cos(inc) * np.cos(lon),
                      yp * np.sin(inc)])
@@ -135,6 +145,14 @@ def positions_at(t: datetime, svs, nav: pd.DataFrame | None = None) -> pd.DataFr
     df = pd.DataFrame(out, index=["x", "y", "z"]).T
     df.index.name = "sv"
     return df
+
+
+def clock_bias(sv: str, t: datetime, nav: pd.DataFrame | None = None) -> float:
+    """Broadcast SV clock bias af0 (seconds) from the record nearest t."""
+    nav = load_nav() if nav is None else nav
+    recs = nav.loc[sv]
+    i = int(np.argmin(np.abs((recs.index - t).total_seconds())))
+    return float(recs.iloc[i]["SVclockBias"])
 
 
 def elevations(sat_ecef: pd.DataFrame, sta_ecef) -> pd.Series:
