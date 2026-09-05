@@ -252,6 +252,44 @@ def test_propagator_matches_gnss_lib_py_oracle():
 
 
 @needs_data
+def test_next_best_readmits_dropped_galileo_on_real_geometry():
+    # Meaconing response drops ALL of Galileo; next_best_observation must
+    # recommend readmitting E — a whole constellation's worth of geometry
+    # plus its clock column beats any partial-constellation alternative.
+    from backend.geometry.ephemeris import load_records, sv_positions_at
+    from backend.geometry.information import next_best_observation
+    rx = np.array([1112161.8802, -4842854.4026, 3985497.3830])
+    pos = sv_positions_at(load_records(), datetime(2026, 8, 20, 12, 0, 0))
+    visible = {sv: p for sv, p in pos.items()
+               if elevation_deg(p, rx) > 10.0}
+    trusted = sorted(sv for sv in visible if sv[0] != "E")
+    assert next_best_observation(visible, trusted, rx) == "E"
+
+
+@needs_data
+def test_displacement_bound_widens_on_real_geometry():
+    # With sigma parameterised at 1.0 m the bound is pure geometry: the
+    # full visible set gives a few metres; stripping 6 GPS SVs must widen
+    # it (design.md: geometry dominates the shrinking chi2 threshold).
+    from backend.geometry.ephemeris import load_records, sv_positions_at
+    from backend.geometry.information import displacement_bound_m
+    rx = np.array([1112161.8802, -4842854.4026, 3985497.3830])
+    pos = sv_positions_at(load_records(), datetime(2026, 8, 20, 12, 0, 0))
+    visible = {sv: p for sv, p in pos.items()
+               if elevation_deg(p, rx) > 10.0}
+    h_full, _, _ = build_H(visible, rx)
+    gps = sorted((sv for sv in visible if sv[0] == "G"),
+                 key=lambda sv: -elevation_deg(visible[sv], rx))
+    h_cut, _, _ = build_H({s: p for s, p in visible.items()
+                           if s not in set(gps[:6])}, rx)
+    b_full = displacement_bound_m(h_full, 1.0)
+    b_cut = displacement_bound_m(h_cut, 1.0)
+    assert b_full is not None and b_cut is not None
+    assert 1.0 < b_full < 50.0, b_full
+    assert b_cut > b_full, (b_cut, b_full)
+
+
+@needs_data
 def test_usn8_visible_gps_count_in_band():
     from backend.geometry.ephemeris import load_records, sv_positions_at
     rx = np.array([1112161.8802, -4842854.4026, 3985497.3830])
