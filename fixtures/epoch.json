@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-08-20T00:14:30Z",
+  "confidence": 0.42,
+  "credential_status": "VALID",
+  "position": { "lat": 38.9207, "lon": -77.0669, "alt": 58.3 },
+  "features": {
+    "cn0_anomaly": 0.71,
+    "pseudorange_residual": 0.15,
+    "code_carrier_divergence": 0.08,
+    "cross_constellation": 0.34
+  },
+  "geometry": {
+    "information_ratio": 0.58,
+    "excluded_sv": ["G07", "G13"],
+    "displacement_bound_m": 41.2,
+    "next_best_observation": "E"
+  },
+  "satellites_tracked": 11
+}
