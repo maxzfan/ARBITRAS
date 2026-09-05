@@ -455,3 +455,74 @@ stands, but on the original reason rather than on redundancy: **nothing in
 features 1–3 carries geometry, so nothing in features 1–3 can see a
 coordinated position walk.** Feature 4 is currently the only channel that can,
 and a single channel carrying the entire detection is a fragile place to be.
+
+
+---
+
+# Item 1 fix: feature 2 reimplemented as the post-fit residual
+
+`pseudorange_residual` is now the per-satellite post-fit residual of the
+all-in-view least-squares solution (`solve()['resid_m']`) against its own
+trailing median, normalised by a per-satellite sigma measured on the clean day
+(median **0.51 m**). This is what §6a.2 specified. Saturating |z| moved from
+12.7 to 8.4.
+
+## Per-feature d′, before and after
+
+| scenario | feature 2 before | feature 2 after |
+|---|---|---|
+| carry-off, incoherence pin | 2.04 | **8.59** |
+| carry-off, **coherent (rate 0)** | 0.77 | **8.59** |
+| meaconing (clock domain) | 0.77 | **0.02** |
+
+The middle row is the whole point: **8.59 at `carrier_rate_error = 0`.** The
+old feature 2 could only see the spoofer's incoherence, so it read 0.77
+against a coherent walk however far the vehicle moved. The post-fit residual
+sees the *displacement*, so a perfectly coherent spoofer no longer hides from
+it. Detection of a position walk no longer rests on feature 4 alone.
+
+## Composite d′, before and after
+
+| scenario | before | after | without feature 2 |
+|---|---|---|---|
+| carry-off, pin | 5.23 | **8.48** | 5.42 |
+| carry-off, coherent | 5.09 | **8.32** | 5.21 |
+| meaconing | 5.04 | **3.84** | 5.07 |
+
+Feature 2 went from dead weight to load-bearing on the position walk:
+removing it now costs 3.07 of d′ where before it gained 0.19.
+
+**And the meaconing row got worse, which is correct and worth stating.** A
+uniform clock-domain bias is absorbed by the constellation clock unknown, so
+the post-fit residual is ~zero by construction — feature 2 correctly sees
+nothing (d′ 0.02). But under equal weights its silence is averaged in, and the
+meaconing composite falls 5.04 → 3.84. Dropping feature 2 would restore it to
+5.07.
+
+So the dilution finding from the investigation now cuts both ways: **the same
+feature is the strongest signal on one scenario and pure dilution on another.**
+No single fixed weight vector is right for both. That is the sharpest input
+this track can hand the threshold session, and it is an argument for the
+§10 Dirichlet sweep being reported per scenario rather than pooled.
+
+Clean composite confidence with the new feature 2: mean **0.768**, σ 0.061,
+p1 0.598. Correlation between features 2 and 3 fell to +0.098 (clean) and
++0.001 under a coherent walk — they are now genuinely different channels.
+
+## Dependency taken on, stated
+
+Feature 2 now needs satellite positions, so it needs the nav file. §6b warned
+one file failure costs two components; it now costs three. The fallback is
+explicit rather than silent: with no residual supplied, feature 2 is **not
+scored at all** (NaN, excluded from the aggregate) rather than quietly reading
+zero, and the calibration prints `resid sigma UNSET (feature 2 not scored)`.
+
+## A cache-collision hazard closed while doing this
+
+`residual_panel` was keyed on the replay span and epoch count. A clean replay
+and an injected one cover the same span with the same count, so the second
+would have silently received the first's residuals — calibrating an attack
+against its own injected data. The key now fingerprints the observables
+themselves. Nothing shipped with the collision; it is recorded because the
+class of bug (span-keyed caches over mutated data) applies to the other caches
+in the loader too.

@@ -14,16 +14,18 @@ normal, and the false-surrender rate measured afterwards would be meaningless.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from .detection import (CrossConstellation, FeatureExtractor, Weights, fit,
-                        fit_cross, flagged_sv, record, score, write_jsonl)
-from .detection.emit import ecef_to_lla
+from .detection import (CrossConstellation, ExclusionRule, FeatureExtractor,
+                        FLAT_K5, MASKED_K3, Weights, fit, fit_cross,
+                        flagged_sv, record, score, write_jsonl)
+from .detection.emit import USN8_ECEF, ecef_to_lla
 from .injector import DEMO_CARRIER_RATE_ERROR, SCENARIOS, inject, summarise
 from .rinex import ephemeris, noise
 from .rinex.loader import load_obs
-from .rinex.solve import solve_per_constellation
+from .rinex.solve import residual_panel, solve_per_constellation
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
 ONSET = datetime(2026, 8, 20, 12, 30)
@@ -31,7 +33,7 @@ ONSET = datetime(2026, 8, 20, 12, 30)
 
 def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
         xc: CrossConstellation | None = None, nav=None,
-        exclude_z: float | None = None):
+        exclusion: ExclusionRule | None = None):
     """Score a replay. Returns the list of §5 records.
 
     `geometry_for(epoch)` and `credential_for(epoch)` are the seams for Track C
@@ -45,26 +47,37 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
     Without them the feature reads 0.0 and the surveyed position is emitted,
     exactly the degraded fallback §6b requires to be visible.
 
-    `exclude_z` is the per-satellite exclusion multiple behind `excluded_sv`
-    (detection.flagged_sv). It has no default: unset, the list is empty and
-    the geometry block carries whatever Track C put there. See flagged_sv for
-    the measured clean-day cost of each candidate value.
+    `exclusion` is the rule behind `excluded_sv` (detection.ExclusionRule).
+    The ruled default MASKED_K3 is disarmed until its mask cutoff is set, so
+    the list is empty and the geometry block carries whatever Track C put
+    there. See ExclusionRule for the measured clean-day cost.
     """
     weights = weights or Weights()
     fx = FeatureExtractor(cal)
     out = []
     for ep in epochs:
-        res = fx.step(ep)
+        # One solve per epoch, shared: feature 2 needs the post-fit residuals,
+        # feature 4 needs the per-constellation solutions, and §5 needs the
+        # believed position. Solving twice would be the same quantity computed
+        # two ways, which is how implementations drift.
+        sols = solve_per_constellation(ep, nav) if nav is not None else {}
+        res = fx.step(ep, resid=(sols.get("all") or {}).get("resid_m"))
         feats = res["features"]
         position = None
         if xc is not None and nav is not None:
-            sols = solve_per_constellation(ep, nav)
             feats["cross_constellation"] = xc.score(ep, sols)["value"]
             if "all" in sols:
                 position = ecef_to_lla(*sols["all"]["pos"])
         geom = geometry_for(ep) if geometry_for else None
         cred = credential_for(ep) if credential_for else "VALID"
-        excluded = flagged_sv(res["per_sv"], cal.z_sat, exclude_z)
+        el = None
+        if (isinstance(exclusion, ExclusionRule)
+                and exclusion.elevation_mask_deg is not None
+                and nav is not None):
+            el = ephemeris.elevations_at(ep.time, list(ep.df.index),
+                                         USN8_ECEF, nav)
+        excluded = flagged_sv(res["per_sv"], cal.z_sat, exclusion,
+                              elevations=el)
         if excluded:
             # The detector's own distrust list. Track C owns the rest of the
             # block; this is the one field only the detector can fill.
@@ -82,10 +95,15 @@ def main(argv=None) -> None:
     ap.add_argument("--systems", default="GERCS")
     ap.add_argument("--scenario", choices=list(SCENARIOS) + ["all"], default="all")
     ap.add_argument("--onset", default=ONSET.isoformat())
-    ap.add_argument("--exclude-z", type=float, default=None,
-                    help="per-SV exclusion multiple behind excluded_sv. No "
-                         "default; see detection.flagged_sv for the measured "
-                         "clean-day false-exclusion rate of each value.")
+    ap.add_argument("--exclusion", choices=("masked_k3", "flat_k5", "off"),
+                    default="masked_k3",
+                    help="exclusion rule behind excluded_sv. masked_k3 is the "
+                         "ruled default and is DISARMED until its mask cutoff "
+                         "is set (emits nothing); flat_k5 is the configured "
+                         "fallback.")
+    ap.add_argument("--elevation-mask-deg", type=float, default=None,
+                    help="mask cutoff for masked_k3. Deliberately unset: "
+                         "picking it is a threshold-session decision.")
     ap.add_argument("--carrier-rate-error", type=float,
                     default=DEMO_CARRIER_RATE_ERROR,
                     help="carry-off code/carrier divergence rate, m/s. "
@@ -104,14 +122,23 @@ def main(argv=None) -> None:
     floor = noise.measure(clean)
     print(floor)
 
-    cal = fit(clean, floor)
-    print(cal)
     nav = ephemeris.load_nav()
+    resid = residual_panel(clean, nav)
+    print(f"post-fit residual panel: {resid.shape[0]} epochs x "
+          f"{resid.shape[1]} SV")
+    cal = fit(clean, floor, resid_panel=resid)
+    print(cal)
     xc = CrossConstellation(fit_cross(clean, nav), nav)
     print(xc.cal)
 
     xc.reset()
-    recs = run(clean, cal, xc=xc, nav=nav, exclude_z=args.exclude_z)
+    rule = {"masked_k3": MASKED_K3, "flat_k5": FLAT_K5,
+            "off": None}[args.exclusion]
+    if rule is not None and args.elevation_mask_deg is not None:
+        rule = replace(rule, elevation_mask_deg=args.elevation_mask_deg)
+    print(rule if rule else "exclusion rule: off")
+
+    recs = run(clean, cal, xc=xc, nav=nav, exclusion=rule)
     print(f"clean    {len(recs):5d} epochs -> "
           f"{write_jsonl(recs, Path(args.out) / 'clean.jsonl')}")
 
@@ -124,7 +151,7 @@ def main(argv=None) -> None:
             spoof = SCENARIOS[name](onset=onset)
         injected, truth = inject(clean, spoof, floor)
         xc.reset()
-        recs = run(injected, cal, xc=xc, nav=nav, exclude_z=args.exclude_z)
+        recs = run(injected, cal, xc=xc, nav=nav, exclusion=rule)
         truth.to_csv(Path(args.out) / f"{name}_truth.csv")
         print(f"{name:9s}{len(recs):5d} epochs -> "
               f"{write_jsonl(recs, Path(args.out) / f'{name}.jsonl')}")
