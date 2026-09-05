@@ -104,6 +104,17 @@ def test_credential_lapse_forces_a_visible_drop(demo):
     assert all(d.state is TrustState.SURRENDERED for d in decisions[i0:])
 
 
+def test_provenance_states_the_beat4_threshold_dependency():
+    """The 21:00 threshold session must see that beat 4's steadiness depends on
+    the NOMINAL threshold, right next to the credential row."""
+    doc = Path("docs/stream_provenance.md")
+    if not doc.exists():
+        pytest.skip("provenance not generated; run python -m backend.demo")
+    text = doc.read_text()
+    assert "Threshold dependency for beat 4" in text
+    assert "before PENDING begins" in text
+
+
 def test_clean_epochs_have_truth_equal_to_position(clean):
     for r in clean:
         assert r["_truth"]["lat"] == r["position"]["lat"]

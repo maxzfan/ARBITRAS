@@ -14,6 +14,10 @@ seams `backend.replay.run` leaves open:
                  EXPIRED) standing in for the TESLA layer until T1 lands.
                  T_int and d are venue-tuned (§9) so each state is legible
                  at the demo replay rate; PENDING is always T_int x d.
+                 There is no "fading" phase: the §5 enum has nothing between
+                 VALID and PENDING, and TESLA has no such state either -- a
+                 held authorisation is VALID to the end of its window, then
+                 absence of renewal is the revocation (fail-closed, §9).
 
 Nothing in Track A's modules is edited. The feature extractor is driven
 directly (not via replay.run) because that helper throws away `per_sv`, and the
@@ -55,14 +59,16 @@ CARRIER_RATE_ERROR_MPS = 0.02
 
 EPOCH_S = 30
 DEMO_RATE_EPS = 15.0     # §5 demo replay rate (10-20 epochs/s); legibility budget below
-LEGIBLE_EPOCHS = 45      # 3.0 s on screen at DEMO_RATE_EPS -- the minimum a credential
-                         # state must hold for video beat 4 to be readable (§11b)
+LEGIBLE_EPOCHS = 120     # 8.0 s on screen at DEMO_RATE_EPS -- the minimum a credential
+                         # state must hold for video beat 4 to be readable (§11b):
+                         # long enough to read the legend and understand PENDING
+PRE_LAPSE_EPOCHS = 45    # 3.0 s before PENDING begins; reported for the threshold pick
 
 # Team demo window built around Track A's code-default onset of 12:30, so every
 # file on the team attacks at the same epoch. Lead-in and attack are unchanged
 # from the 12:00-14:00 window agreed on 2026-09-05; the tail was extended to
-# 15:00 so the credential lapse holds on screen. 360 epochs: 60 clean lead-in,
-# 90 carry-off, 210 clean tail.
+# 16:15 so the credential lapse holds on screen. 510 epochs: 60 clean lead-in,
+# 90 carry-off, 360 clean tail.
 PRE_EPOCHS = 60          # beat 1: 12:00:00 -> 12:29:30
 ATTACK_EPOCHS = 90       # beats 2/3: 12:30:00 -> 13:14:30
 
@@ -70,16 +76,19 @@ ATTACK_EPOCHS = 90       # beats 2/3: 12:30:00 -> 13:14:30
 # known weaknesses: "interval length and disclosure lag become operational
 # parameters tuned against comms reliability"). The §9 defaults (T_int 10, d 2
 # -> PENDING 20 epochs) flash past in 1.3 s at DEMO_RATE_EPS and beat 4 is
-# illegible. Tuned to T_int 30 x d 2 = 60 epochs (4.0 s). PENDING is always
-# derived from T_int x d; never a literal.
-T_INT_EPOCHS, DISCLOSURE_LAG_INTERVALS = 30, 2
+# illegible. Tuned to T_int 60 x d 2 = 120 epochs (8.0 s). d stays at the §9
+# default: d is the disclosure lag -- the forgery window a clock-dragging
+# spoofer has to work with (§9 clock coupling) -- and lengthening it weakens the
+# protocol for no display benefit; T_int is the renewal cadence and is the
+# right knob. PENDING is always derived from T_int x d; never a literal.
+T_INT_EPOCHS, DISCLOSURE_LAG_INTERVALS = 60, 2
 PENDING_EPOCHS = T_INT_EPOCHS * DISCLOSURE_LAG_INTERVALS
 # Tail composition. VALID must outlast the arbiter's recovery from RESTRICTED
-# (~40 epochs under the placeholder thresholds) by >= LEGIBLE_EPOCHS of
-# NOMINAL+VALID; EXPIRED holds SURRENDERED-under-a-clean-sky >= LEGIBLE_EPOCHS.
-POST_VALID_EPOCHS = 90   # 13:15:00 -> 13:59:30
-POST_EXPIRED_EPOCHS = 60 # 14:30:00 -> 14:59:30
-POST_EPOCHS = POST_VALID_EPOCHS + PENDING_EPOCHS + POST_EXPIRED_EPOCHS   # 210
+# (~40 epochs under the placeholder thresholds) and hold >= LEGIBLE_EPOCHS;
+# EXPIRED holds SURRENDERED-under-a-clean-sky >= LEGIBLE_EPOCHS.
+POST_VALID_EPOCHS = 120   # 13:15:00 -> 14:14:30
+POST_EXPIRED_EPOCHS = 120 # 15:15:00 -> 16:14:30
+POST_EPOCHS = POST_VALID_EPOCHS + PENDING_EPOCHS + POST_EXPIRED_EPOCHS   # 360
 for _name, _n in (("POST_VALID_EPOCHS", POST_VALID_EPOCHS),
                   ("PENDING_EPOCHS", PENDING_EPOCHS),
                   ("POST_EXPIRED_EPOCHS", POST_EXPIRED_EPOCHS)):
@@ -243,8 +252,18 @@ def _write_provenance(clean, floor, cal, truth, demo, onset_i, lo, hi, clean_rec
     ta0 = demo[PRE_EPOCHS]["timestamp"]
     ta1 = demo[PRE_EPOCHS + ATTACK_EPOCHS - 1]["timestamp"]
     tv0 = demo[PRE_EPOCHS + ATTACK_EPOCHS]["timestamp"]
-    tp0 = demo[creds.index("PENDING")]["timestamp"]
+    ip = creds.index("PENDING")
+    tp0 = demo[ip]["timestamp"]
     te0 = demo[creds.index("EXPIRED")]["timestamp"]
+    pre = [r["confidence"] for r in demo[ip - PRE_LAPSE_EPOCHS:ip]]
+    pre_min, pre_med = min(pre), float(np.median(pre))
+    pre_below = sum(c < 0.75 for c in pre)
+    pre_lapse = (f"**Threshold dependency for beat 4:** in the {PRE_LAPSE_EPOCHS} epochs "
+                 f"({PRE_LAPSE_EPOCHS / DEMO_RATE_EPS:.0f} s) before PENDING begins, "
+                 f"confidence min {pre_min:.3f} / median {pre_med:.3f}; "
+                 f"{pre_below} of {PRE_LAPSE_EPOCHS} sit below the placeholder NOMINAL "
+                 f"threshold 0.75. Whether the vehicle is steadily NOMINAL when the "
+                 f"credential lapses depends on the 21:00 threshold pick, not on this stream.")
     md = f"""# Stream provenance — out/demo.jsonl, out/clean.jsonl, out/carryoff.jsonl
 
 Generated by `python -m backend.demo`. Every field below is classified so that
@@ -269,7 +288,7 @@ systems {SYSTEMS}. {floor}
 | `geometry.sky[]` | propagated | real az/el from `backend/geometry/skyview.py` (gnss-lib-py, G+E only, 10° mask). **A second, pseudorange-validated propagator with BeiDou exists in `backend/rinex/ephemeris.py` (Track A); convergence is an 18:30 checkpoint item.** |
 | `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `{DISTRUST_FEATURE}` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day {ex_clean:.1%} of epochs have ≥1 excluded SV |
 | `geometry.information_ratio`, `displacement_bound_m`, `next_best_observation` | **null, awaiting Track C** | not fabricated |
-| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last {20 / DEMO_RATE_EPS:.1f} s at the {DEMO_RATE_EPS:.0f} epochs/s demo rate; tuned to {T_INT_EPOCHS} × {DISCLOSURE_LAG_INTERVALS} so every credential state holds ≥ {LEGIBLE_EPOCHS / DEMO_RATE_EPS:.0f} s on screen. Stands in for the live TESLA verifier until Track A's T1 lands |
+| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last {20 / DEMO_RATE_EPS:.1f} s at the {DEMO_RATE_EPS:.0f} epochs/s demo rate; tuned to {T_INT_EPOCHS} × {DISCLOSURE_LAG_INTERVALS} so every credential state holds ≥ {LEGIBLE_EPOCHS / DEMO_RATE_EPS:.0f} s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. {pre_lapse} |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 

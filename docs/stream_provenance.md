@@ -22,7 +22,7 @@ calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_a
 | `geometry.sky[]` | propagated | real az/el from `backend/geometry/skyview.py` (gnss-lib-py, G+E only, 10° mask). **A second, pseudorange-validated propagator with BeiDou exists in `backend/rinex/ephemeris.py` (Track A); convergence is an 18:30 checkpoint item.** |
 | `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `pseudorange_residual` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day 52.7% of epochs have ≥1 excluded SV |
 | `geometry.information_ratio`, `displacement_bound_m`, `next_best_observation` | **null, awaiting Track C** | not fabricated |
-| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (60 epochs = T_int 30 × d 2) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last 1.3 s at the 15 epochs/s demo rate; tuned to 30 × 2 so every credential state holds ≥ 3 s on screen. Stands in for the live TESLA verifier until Track A's T1 lands |
+| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (120 epochs = T_int 60 × d 2) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last 1.3 s at the 15 epochs/s demo rate; tuned to 60 × 2 so every credential state holds ≥ 8 s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. **Threshold dependency for beat 4:** in the 45 epochs (3 s) before PENDING begins, confidence min 0.653 / median 0.744; 26 of 45 sit below the placeholder NOMINAL threshold 0.75. Whether the vehicle is steadily NOMINAL when the credential lapses depends on the 21:00 threshold pick, not on this stream. |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 
@@ -34,13 +34,13 @@ No record carries `_synthetic`.
 |---|---|---|
 | clean.jsonl | 2880 | whole day, no injection, credential VALID |
 | carryoff.jsonl | 2880 | whole day, carry-off 2026-08-20T12:30:00Z → 2026-08-20T13:14:30Z then clean |
-| demo.jsonl | 360 | slice [1440, 1800) of carryoff: 2026-08-20T12:00:00Z → 2026-08-20T14:59:30Z |
+| demo.jsonl | 510 | slice [1440, 1950) of carryoff: 2026-08-20T12:00:00Z → 2026-08-20T16:14:30Z |
 
 demo.jsonl beats: 60 clean · 90 attack (2026-08-20T12:30:00Z → 2026-08-20T13:14:30Z) ·
-210 post-attack clean with credential 90 VALID (2026-08-20T13:15:00Z → 2026-08-20T14:00:00Z) /
-60 PENDING (2026-08-20T14:00:00Z → 2026-08-20T14:30:00Z) / 60 EXPIRED (2026-08-20T14:30:00Z → 2026-08-20T14:59:30Z).
-At 15 epochs/s: VALID tail 6.0 s ·
-PENDING 4.0 s · EXPIRED 4.0 s.
+360 post-attack clean with credential 120 VALID (2026-08-20T13:15:00Z → 2026-08-20T14:15:00Z) /
+120 PENDING (2026-08-20T14:15:00Z → 2026-08-20T15:15:00Z) / 120 EXPIRED (2026-08-20T15:15:00Z → 2026-08-20T16:14:30Z).
+At 15 epochs/s: VALID tail 8.0 s ·
+PENDING 8.0 s · EXPIRED 8.0 s.
 
 ## Injector parameters (design.md §7 carry-off, Track A defaults)
 
