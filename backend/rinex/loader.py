@@ -18,7 +18,7 @@ Frame columns, all float except `system`:
     code_1  code_2    pseudorange, metres
     phase_1 phase_2   carrier phase, cycles
     cn0_1   cn0_2     carrier-to-noise density, dB-Hz
-    lam_1   lam_2     carrier wavelength, metres
+    lam_1   lam_2     carrier wavelength, metres (GLONASS: per-satellite)
     phase_m_1/2       carrier phase in metres (phase * lambda)
 
 Band 1 is the L1-class signal, band 2 the second civil/legacy band; the
@@ -36,7 +36,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import bands
+from . import bands, glonass
 
 CACHE = Path(".cache/rinex")
 
@@ -56,7 +56,7 @@ class Epoch:
 
 
 def _cache_key(path: Path, systems: str, tlim) -> Path:
-    raw = f"{path.resolve()}|{path.stat().st_mtime_ns}|{systems}|{tlim}"
+    raw = f"{path.resolve()}|{path.stat().st_mtime_ns}|{systems}|{tlim}|v2-glonass"
     return CACHE / (hashlib.sha1(raw.encode()).hexdigest()[:16] + ".pkl")
 
 
@@ -83,6 +83,10 @@ def load_obs(path, systems: str = "GERCS", tlim=None, use_cache: bool = True):
         ds = gr.load(str(path), use=set(systems), tlim=tlim)
 
     eps = _to_epochs(ds, systems)
+    if "R" in systems:
+        # GLONASS is FDMA: the per-satellite carrier frequency is not in the
+        # observation file. Recover it before anything forms code-minus-carrier.
+        glonass.apply_channels(eps, glonass.fit_channels(eps))
     if use_cache:
         CACHE.mkdir(parents=True, exist_ok=True)
         with key.open("wb") as fh:
