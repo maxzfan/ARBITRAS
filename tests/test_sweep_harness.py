@@ -68,3 +68,31 @@ def test_underdetermined_subset_scores_zero():
     full = sky(GPS + GAL)
     trusted = full.loc[GPS[:3]]                    # 3 rows < 3+1 unknowns
     assert information_ratio(trusted, full)["norm"] == 0.0
+
+
+# -- grid enumeration ---------------------------------------------------------
+
+def test_grid_covers_both_domains_and_only_position_gets_bearings():
+    from backend.measurement.sweep import SweepConfig
+    cfg = SweepConfig(subset_sizes=(12, 4), carrier_rate_errors=(0.0, 0.1))
+    cells = list(cfg.cells())
+    pos = [c for c in cells if c[0] == "position"]
+    clk = [c for c in cells if c[0] == "clock"]
+    assert len(pos) == 2 * 2 * len(cfg.bearings_deg)
+    assert len(clk) == 2 * 2
+    assert all(c[3] is None for c in clk)
+    assert {c[3] for c in pos} == set(cfg.bearings_deg)
+
+
+def test_swept_bearings_are_eight_directions_45_apart():
+    from backend.injector import SWEEP_BEARINGS_DEG, EAST_BEARING_DEG
+    assert len(SWEEP_BEARINGS_DEG) == 8
+    assert sorted(SWEEP_BEARINGS_DEG) == list(range(0, 360, 45))
+    assert EAST_BEARING_DEG in SWEEP_BEARINGS_DEG
+
+
+def test_sweep_is_gated_without_run_flag():
+    import pytest as _pytest
+    from backend.measurement.sweep import main
+    with _pytest.raises(SystemExit):
+        main([])

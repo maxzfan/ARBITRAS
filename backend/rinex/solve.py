@@ -133,8 +133,15 @@ def solve(epoch, systems: str = SOLVABLE, nav: pd.DataFrame | None = None,
         if np.linalg.norm(dx[:3]) < 1e-4:
             break
     resid = dy - h @ dx
+    used = [sv for sv, u in zip(svs, use) if u]
     return {"pos": x, "clock_m": clocks, "n_used": int(use.sum()),
-            "svs_used": [sv for sv, u in zip(svs, use) if u],
+            "svs_used": used,
+            # Post-fit residual per satellite, from the solver's own final
+            # iteration. Exposed so nothing downstream reconstructs it: a
+            # second implementation silently drifts (an early version of the
+            # sweep omitted the Sagnac rotation and read 19 m where the
+            # solver read 4 m).
+            "resid_m": dict(zip(used, map(float, resid))),
             "resid_rms_m": float(np.sqrt(np.mean(resid ** 2))),
             "systems": "".join(sorted(set(sys_of[use])))}
 

@@ -299,3 +299,58 @@ paints as distrusted during demo beat 1, and a row removed from Track C's H.
 The heavy tail is the same low-elevation multipath structure the C/N0 section
 describes. Numbers printed; `k` is a threshold-session decision and is not
 chosen here.
+
+
+---
+
+# Sweep harness — three axes, both domains. BUILT, GATED, NOT RUN.
+
+`python -m backend.measurement.sweep` refuses without `--run`. Grid:
+
+| axis | values |
+|---|---|
+| domain | position, clock |
+| subset size | 12 / 8 / 6 / 4 (top-N by elevation at capture, frozen) |
+| `carrier_rate_error` | 0.0 / 0.005 / 0.01 / 0.02 / 0.05 / 0.1 m/s |
+| bearing | 8 directions 45° apart (position domain only) |
+
+## Verified on a 2-cell x 6-epoch build check, not the sweep
+
+The numbers below come from a deliberately tiny configuration written to the
+scratchpad, run to prove the machinery executes and the recorded quantities
+mean what the field names say. **The sweep itself has not been run.**
+
+| commanded | achieved | resid all | resid spoofed | resid authentic | **resid G-only** |
+|---|---|---|---|---|---|
+| 0 m | 0.00 m | 3.98 | 5.39 | 2.98 | **5.35** |
+| 20 m | 8.18 m | 6.49 | 8.56 | 5.08 | **5.00** |
+| 50 m | 20.47 m | 14.79 | 19.32 | 11.73 | **4.73** |
+| 80 m | 32.75 m | 22.94 | 30.11 | 18.06 | **5.31** |
+| 110 m | 45.05 m | 30.86 | 40.43 | 24.35 | **4.77** |
+| 140 m | 57.35 m | 40.01 | 52.42 | 31.58 | **4.85** |
+
+Three things this establishes:
+
+1. **Achieved is 0.41 x commanded**, steady. The authentic E and C
+   observations pull the least-squares back toward truth, so a spoofer that
+   commands 140 m of displacement achieves 57 m. That factor is what the
+   third constellation buys, and it is why §10 must measure achieved from the
+   solved position and never report commanded.
+2. **A spoofed-constellation-only solve is blind to its own walk.** Its
+   residual sits at 4.7–5.4 m across the whole range while commanded goes
+   0 → 140 m. The walk lies in the position columns of H, so a GPS-only
+   solution absorbs it into its own position estimate. **Every metre of
+   residual in the all-in-view solution is cross-constellation
+   disagreement**, not GPS-internal inconsistency — which is the same
+   conclusion the feature-2 note reaches from the other direction.
+3. **The clock domain achieves 0.0 m**, as its own scenario should.
+
+## A bug the consistency check caught
+
+The first version of the residual split recomputed post-fit residuals inside
+the sweep instead of taking the solver's. It omitted the Sagnac rotation and
+read **19 m where the solver read 4 m** — and the partitioned numbers were
+inconsistent with the pooled RMS they were supposed to decompose, which is
+what made it visible. `solve()` now returns `resid_m` per satellite from its
+own final iteration and the duplicate implementation is deleted. Two
+implementations of one quantity is a bug factory; there is now one.
