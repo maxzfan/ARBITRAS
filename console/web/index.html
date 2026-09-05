@@ -181,6 +181,22 @@
           padding:15px 24px;display:grid;grid-template-columns:minmax(260px,26%) 1fr;
           gap:30px;align-items:start;overflow:hidden;
           height:calc(4 * 13px * 1.62 + 30px + 1px)}
+  /* env view: three columns -- summary | detail | scene key -- at a FIXED height
+     (8 lines of the 15px key: five items, then the counts line wrapping to at most
+     three), so the bar is still a constant height in every configuration and
+     nothing above it can resize. The detail column is narrower here, so it may
+     clamp at 5 lines instead of 4. */
+  .expbar.env{height:calc(8 * 15px + 30px + 1px);grid-template-columns:minmax(220px,22%) 1fr auto;gap:24px}
+  .expbar.env .d{-webkit-line-clamp:5}
+  .expkey{height:120px;max-width:380px;overflow:hidden;
+          font-family:var(--sans);font-weight:500;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .expkey .keys div{display:flex;align-items:center;gap:8px;white-space:nowrap;line-height:15px}
+  .expkey i{width:8px;height:8px;display:inline-block;flex:0 0 auto}
+  .expkey i.gh{background:#E4551F66;outline:1px solid var(--accent);outline-offset:-1px}
+  .expkey .n2{font-family:var(--mono);font-weight:400;font-size:10px;color:var(--faint);letter-spacing:.02em;
+              text-transform:none;line-height:15px}
+  .expkey .n2 b{color:var(--fg);font-weight:500}
+  .expkey .st{color:var(--degraded);letter-spacing:.04em}
   .expbar .h{font-family:var(--sans);font-weight:700;font-size:19px;line-height:1.28;
            letter-spacing:-.005em;display:-webkit-box;-webkit-box-orient:vertical;
            -webkit-line-clamp:3;overflow:hidden}
@@ -197,22 +213,36 @@
   .stage.env::after{bottom:0;height:150px;background:linear-gradient(rgba(6,8,10,0),rgba(6,8,10,.78))}
   .stage.env .readout .n.safe{color:var(--fg)}
   .stage.env .readout .n,.stage.env .readout .u,.stage.env .hint{text-shadow:0 1px 3px #000c,0 0 10px #0009}
-  .envhud{position:absolute;top:120px;left:20px;z-index:5;font-family:var(--sans);font-weight:500;
-          border:1px solid var(--keyline);background:#0B0D0Fd9;padding:10px 12px 12px;
-          font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);
-          text-shadow:0 1px 2px #000c,0 0 8px #0008}
-  .envhud div{display:flex;align-items:center;gap:9px;margin-top:6px}
-  .envhud i{width:8px;height:8px;display:inline-block;flex:0 0 auto}
-  .envhud i.gh{background:#E4551F66;outline:1px solid var(--accent);outline-offset:-1px}
-  .envhud .n2{display:block;font-family:var(--mono);font-weight:400;font-size:10px;color:var(--faint);
-              margin-top:10px;letter-spacing:.02em;text-transform:none}
-  .envhud .n2 b{color:var(--fg);font-weight:500}
-  .envhud .st{display:block;font-family:var(--mono);font-weight:400;font-size:10px;color:var(--degraded);
-              margin-top:6px;letter-spacing:.04em}
+  /* Bottom band of the env stage: caption + attribution bottom-left, the satellite
+     view in the actual bottom-right corner; the hint moves under the trust-layer
+     box and the scene key lives in the footer bar (.expkey). --insetW is the inset
+     MAP width; the panel adds 2x8px padding + 2x1px border. */
+  .stage.env{--insetW:260px}
+  .stage.env .hint{top:64px;bottom:auto}
+  .stage.env .rcap{bottom:36px}
+  /* satellite-view inset: a rendered top-down of the scene, not imagery. The only
+     measured thing in it is the offset between the two pins (st.Dmag, as the readout). */
+  .inset{position:absolute;right:20px;bottom:18px;z-index:5;width:calc(var(--insetW) + 18px);
+         border:1px solid var(--keyline);background:#0B0D0Fd9;padding:8px 8px 7px;
+         font-family:var(--sans);font-weight:500;font-size:9px;letter-spacing:.1em;
+         text-transform:uppercase;color:var(--faint);text-shadow:0 1px 2px #000c,0 0 8px #0008}
+  .inset .map{position:relative;width:100%;overflow:hidden;background:#0E1114}
+  .inset .map canvas{display:block}
+  .inset .cap{margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .inset .cap b{color:var(--dim);font-weight:500}
+  .inset .pin{stroke:#0B0D0F;stroke-width:1;fill-rule:evenodd}
+  .inset .pin.t{fill:#8A857A}
+  .inset .pin.b{fill:var(--accent)}
+  .inset .pin.edge{fill-opacity:.35}            /* clamped to the frame edge: beyond the framed margin */
+  .inset .link{stroke:var(--accent);stroke-width:1;stroke-dasharray:3 3;opacity:.8}
+  .inset .sb line{stroke:#8794A2;stroke-width:1.5}
+  .inset .sb text{fill:#8794A2;font-family:var(--mono);font-size:9px;letter-spacing:.1em}
+  .inset .gs rect{fill:none;stroke:var(--truth);stroke-width:1.2}
+  .inset .gs line{stroke:var(--truth);stroke-width:1.2}
   .rcap{position:absolute;bottom:18px;left:20px;z-index:5;font-family:var(--mono);font-size:10px;max-width:calc(100% - 360px);line-height:1.5;
         letter-spacing:.08em;text-transform:uppercase;color:var(--faint);text-shadow:0 1px 2px #000c,0 0 8px #0008}
   .stage:not(.env) .pane .rcap{bottom:46px}   /* map pane: clear the scale bar */
-  .attrib{position:absolute;bottom:38px;right:20px;z-index:5;font-family:var(--mono);font-size:9.5px;
+  .attrib{position:absolute;bottom:18px;left:20px;z-index:5;font-family:var(--mono);font-size:9.5px;
           letter-spacing:.04em;color:var(--faint);text-shadow:0 1px 2px #000c,0 0 8px #0008}
   .skl.gs{color:var(--truth);opacity:.9}
   .legend i.dash{border-top-style:dashed}
@@ -706,6 +736,13 @@ const ENV = {
   // Headless captures cannot judge absolute brightness (see TRACK_B.md); tune on
   // the demo machine with ?exposure=1.2 etc. Default errs bright for a 0.1-albedo ground.
   exposure: QS.has('exposure') ? +QS.get('exposure') : 1.5,
+  // Chase rig: low behind the rover and tilted up, wide enough that the rover, its
+  // lines of sight and the satellites overhead share one frame (the top of the
+  // frame reaches ~38 deg elevation at the defaults). ?fov= ?pitch= ?camh= to tune.
+  fov: QS.has('fov') ? +QS.get('fov') : 62,
+  pitch: QS.has('pitch') ? +QS.get('pitch') : 14,     // degrees the camera tilts up after aiming at the rover
+  camH: QS.has('camh') ? +QS.get('camh') : 2.0,       // metres above ground at the closest chase distance
+  camDist: 17,                                        // closest chase distance, metres (grows with |D|)
   // Procedural sky ~2 stops darker than the measured HDRI sky, so the additive
   // satellite sprites and LOS rays stay legible (the HDRI is NOT the background).
   horizon: 0x8F94A1, mid: 0x7891B0, zenith: 0x5F7FB5, fogDensity: 0.0022,
@@ -718,6 +755,15 @@ const ENV = {
   attribNoModel: 'Sky, ground: Poly Haven, CC0',
 };
 const POST = QS.get('post') !== '0';        // ?post=0 bypasses the composer if a machine misbehaves
+// Satellite-view inset (bottom-right of the env view): ONE north-up orthographic
+// render of the static scene into a texture; pins placed by a linear ENU->pixel map.
+const INSET_LAYER = 1;                      // three.js layer: terrain, rocks, corridor, ground station, lights
+// Framing margin around the route (+ ground station) so BOTH pins always fit: the
+// largest measured displacement in out/demo.jsonl is 273.5 m, rounded up to the
+// next 50 m step. A believed pin beyond it is clamped to the frame edge and drawn faded.
+const INSET_MARGIN_M = 300;
+// Map pin, tip at (0,0), 13 x 18 px, with a hole (evenodd).
+const PIN_D = 'M0 0C-3.4-4.6-6.4-7.4-6.4-11.4A6.4 6.4 0 1 1 6.4-11.4C6.4-7.4 3.4-4.6 0 0ZM0-11.4m-2.3 0a2.3 2.3 0 1 0 4.6 0a2.3 2.3 0 1 0-4.6 0';
 const noise = makeNoise(7);
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x-a)/(b-a))); return t*t*(3-2*t); };
 // Terrain height is built per mission inside EnvScene (it must be flat along
@@ -870,6 +916,8 @@ function ghostOf(root, ghostMat) {
 
 function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
   const box = useRef(null), lab = useRef(null), S = useRef(null), statusRef = useRef(onStatus);
+  const insMap = useRef(null), insCv = useRef(null), insSvg = useRef(null),
+        insLink = useRef(null), insT = useRef(null), insB = useRef(null);   // satellite-view inset
   statusRef.current = onStatus;
   const [ok, setOk] = useState(typeof THREE !== 'undefined');
 
@@ -903,7 +951,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
 
     const scene = new T.Scene();
     scene.fog = new T.FogExp2(ENV.horizon, ENV.fogDensity);
-    const cam = new T.PerspectiveCamera(38, 1, 0.5, 1500);
+    const cam = new T.PerspectiveCamera(ENV.fov, 1, 0.5, 1500);
     const rnd = mulberry32(11);
     const terrainHeight = makeTerrain(m);
     const toScene = (e, n, y=0) => new T.Vector3(e, y, -n);          // ENU -> scene (x=E, y=Up, z=S)
@@ -921,8 +969,8 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
     key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
     Object.assign(key.shadow.camera, {left:-60, right:60, top:60, bottom:-60, near:10, far:420});
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03;
-    scene.add(key); scene.add(key.target);
-    const hemi = new T.HemisphereLight(0x4A5A78, 0x2A241E, 0.6); scene.add(hemi);
+    key.layers.enable(INSET_LAYER); scene.add(key); scene.add(key.target);
+    const hemi = new T.HemisphereLight(0x4A5A78, 0x2A241E, 0.6); hemi.layers.enable(INSET_LAYER); scene.add(hemi);
 
     // -- terrain: covers the whole route (+margin), flat along the corridor --------
     const groundMat = new T.MeshStandardMaterial({color:ENV.ground, roughness:1, metalness:0, envMapIntensity:1.0});
@@ -936,7 +984,8 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       for (let i = 0; i < pa.count; i++) pa.setZ(i, terrainHeight(pa.getX(i) + TCx, -pa.getY(i) + TCz));
       geo.computeVertexNormals();
       const ground = new T.Mesh(geo, groundMat);
-      ground.rotation.x = -Math.PI/2; ground.position.set(TCx, 0, TCz); ground.receiveShadow = true; scene.add(ground);
+      ground.rotation.x = -Math.PI/2; ground.position.set(TCx, 0, TCz); ground.receiveShadow = true;
+      ground.layers.enable(INSET_LAYER); scene.add(ground);
     }
     const rockMat = new T.MeshStandardMaterial({color:ENV.rock, roughness:0.92, metalness:0.02, envMapIntensity:0.55});
     {
@@ -962,7 +1011,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       }
       for (let i = 0; i < 20; i++) { const a = rnd()*Math.PI*2, d = 160 + rnd()*200;   // skyline outcrops
         put(TCx + Math.sin(a)*d, TCz + Math.cos(a)*d, 5 + rnd()*9); }
-      rocks.count = n; rocks.castShadow = true; rocks.receiveShadow = true; scene.add(rocks);
+      rocks.count = n; rocks.castShadow = true; rocks.receiveShadow = true; rocks.layers.enable(INSET_LAYER); scene.add(rocks);
     }
     Promise.all([
       loadTexture(ENV.tex.diff, true, 225, aniso), loadTexture(ENV.tex.nor, false, 225, aniso),
@@ -973,7 +1022,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       for (const t of [map, nor, rough]) { t.repeat.set(rep, rep); t.needsUpdate = true; }
       Object.assign(groundMat, {map, normalMap:nor, roughnessMap:rough, color:new T.Color(0xFFFFFF), metalness:0, envMapIntensity:1.0});
       groundMat.normalScale.set(0.8, 0.8); groundMat.needsUpdate = true;
-      status.ground = 'loaded'; report();
+      status.ground = 'loaded'; report(); if (st.inset) st.inset.dirty = true;
     }).catch(() => { status.ground = 'fallback'; report(); });
     Promise.all([
       loadTexture(ENV.rockTex.diff, true, 1.6, aniso), loadTexture(ENV.rockTex.nor, false, 1.6, aniso),
@@ -981,7 +1030,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
     ]).then(([rm, rn, rr]) => {
       if (!alive) return;
       Object.assign(rockMat, {map:rm, normalMap:rn, roughnessMap:rr, color:new T.Color(0xB8AC9C), envMapIntensity:1.0});
-      rockMat.needsUpdate = true;
+      rockMat.needsUpdate = true; if (st.inset) st.inset.dirty = true;
     }).catch(() => {});
 
     // -- corridor: ONE ribbon mesh + two dashed edge lines + a faint centreline ---
@@ -993,14 +1042,16 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
         if (i) idx.push(2*i-2, 2*i-1, 2*i, 2*i-1, 2*i+1, 2*i);
       }
       const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(pos, 3)); g.setIndex(idx);
-      scene.add(new T.Mesh(g, new T.MeshBasicMaterial({color:0xE8A21C, transparent:true, opacity:0.10,
-        depthWrite:false, side:T.DoubleSide, toneMapped:false, fog:true})));
+      const ribbon = new T.Mesh(g, new T.MeshBasicMaterial({color:0xE8A21C, transparent:true, opacity:0.10,
+        depthWrite:false, side:T.DoubleSide, toneMapped:false, fog:true}));
+      ribbon.layers.enable(INSET_LAYER); scene.add(ribbon);
       const edge = pts => { const l = new T.Line(new T.BufferGeometry().setFromPoints(pts.map(q => toScene(q.e, q.n, 0.09))),
         new T.LineDashedMaterial({color:0xE8A21C, dashSize:2.2, gapSize:1.4, transparent:true, opacity:0.85, toneMapped:false}));
-        l.computeLineDistances(); scene.add(l); return l; };
+        l.computeLineDistances(); l.layers.enable(INSET_LAYER); scene.add(l); return l; };
       edge(Lp); edge(Rp);
-      scene.add(new T.Line(new T.BufferGeometry().setFromPoints(m.route.map(q => toScene(q.e, q.n, 0.08))),
-        new T.LineBasicMaterial({color:0x8794A2, transparent:true, opacity:0.35, toneMapped:false})));
+      const centre = new T.Line(new T.BufferGeometry().setFromPoints(m.route.map(q => toScene(q.e, q.n, 0.08))),
+        new T.LineBasicMaterial({color:0x8794A2, transparent:true, opacity:0.35, toneMapped:false}));
+      centre.layers.enable(INSET_LAYER); scene.add(centre);
     }
 
     // -- sky: HDRI environment + background; gradient sphere only as fallback ----
@@ -1022,7 +1073,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       // Sanity: the measured sun (EARTH_BACKDROP.md) and the brightest HDR pixel should agree.
       const dAz = ((Math.atan2(h.sunDir.x, -h.sunDir.z)/D2R) + 360) % 360;
       st.sunCheck = {hdrAz:+dAz.toFixed(1), hdrEl:+h.sunEl.toFixed(1), specAz:ENV.sunAz, specEl:ENV.sunEl};
-      status.sky = 'loaded'; report();
+      status.sky = 'loaded'; report(); if (st.inset) st.inset.dirty = true;
     }).catch(() => { if (!alive) return; status.sky = 'fallback'; report(); });
 
     // -- vehicles: pivot groups so yaw/position per frame never disturb the model's
@@ -1080,7 +1131,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       const mat = new T.MeshStandardMaterial({color:0x8A857A, roughness:0.6, metalness:0.35});
       const dark = new T.MeshStandardMaterial({color:0x2E2F33, roughness:0.9, metalness:0.1});
       const add = (geo, mt, x, y, z, rx=0) => { const o = new T.Mesh(geo, mt); o.position.set(x, y, z); o.rotation.x = rx;
-        o.castShadow = o.receiveShadow = true; scene.add(o); return o; };
+        o.castShadow = o.receiveShadow = true; o.layers.enable(INSET_LAYER); scene.add(o); return o; };
       add(new T.BoxGeometry(3.2, 2.4, 3.2), dark, gsE, gsY + 1.2, -gsN);
       add(new T.CylinderGeometry(0.12, 0.16, 7, 10), mat, gsE, gsY + 3.5, -gsN);
       add(new T.ConeGeometry(1.5, 0.7, 24, 1, true), mat, gsE, gsY + 6.6, -gsN, -0.9).material.side = T.DoubleSide;
@@ -1095,6 +1146,52 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
     const upGeo = new T.BufferGeometry().setFromPoints([gsTop.clone(), gsTop.clone()]);
     upGeo.setAttribute('lineDistance', new T.BufferAttribute(new Float32Array(2), 1));
     const uplink = new T.Line(upGeo, upMats.VALID); scene.add(uplink);
+
+    // -- satellite-view inset: a north-up orthographic render of the STATIC scene
+    //    (everything on INSET_LAYER: terrain, rocks, corridor, ground station) into
+    //    a render target, read back into a fixed-size 2D canvas. Rendered once, and
+    //    again only when a ground texture or the HDRI arrives -- never per frame,
+    //    and never through the composer. The pins are SVG, placed by the SAME
+    //    linear ENU->pixel map the camera was framed with, so no projection is
+    //    involved: px = (e - eMin)*ppm, py = (top - n)*ppm. ------------------------
+    {
+      const M = INSET_MARGIN_M, eMin = minE - M, eMax = maxE + M, nMin = minN - M, nMax = maxN + M;
+      const mapEl = insMap.current, W = Math.round(mapEl.clientWidth) || 300, ppm = W / (eMax - eMin);
+      const H = Math.round((nMax - nMin) * ppm), nSpan = H / ppm;         // integer px; the camera takes the exact aspect
+      const cE = (eMin + eMax)/2, cN = (nMin + nMax)/2, top = cN + nSpan/2;
+      mapEl.style.height = H + 'px';
+      const ocam = new T.OrthographicCamera(-(eMax - eMin)/2, (eMax - eMin)/2, nSpan/2, -nSpan/2, 1, 200);
+      // 60 m up, straight down, north (-z) at the top of the frame. Low enough that
+      // the scene's exp2 fog is negligible ((60*0.0022)^2 ~ 2%), so the fog stays on.
+      ocam.position.set(cE, 60, -cN); ocam.up.set(0, 0, -1); ocam.lookAt(cE, 0, -cN);
+      ocam.layers.set(INSET_LAYER); ocam.updateMatrixWorld(true);
+      const K = 2, RW = W*K, RH = H*K;                                      // 2x supersample for the CSS downscale
+      const rt = new T.WebGLRenderTarget(RW, RH, {samples: renderer.capabilities.isWebGL2 ? 4 : 0, stencilBuffer:false});
+      const cv = insCv.current; cv.width = RW; cv.height = RH; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      const ctx = cv.getContext('2d'), img = ctx.createImageData(RW, RH), buf = new Uint8Array(RW*RH*4);
+      const lut = new Uint8ClampedArray(256);                              // RT output is linear (r147); the screen is sRGB
+      for (let i = 0; i < 256; i++) { const c = i/255; lut[i] = Math.round(255*(c <= 0.0031308 ? 12.92*c : 1.055*Math.pow(c, 1/2.4) - 0.055)); }
+      const svg = insSvg.current; svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      const X = e => (e - eMin)*ppm, Y = n => (top - n)*ppm, f = x => x.toFixed(1);
+      const barM = niceStep((eMax - eMin)*0.25), barPx = barM*ppm;         // 1/2/5 step of a quarter of the frame width
+      svg.querySelector('.sb').innerHTML = `<g transform="translate(8,${H - 8})"><line x1="0" y1="0" x2="${f(barPx)}" y2="0"/>`
+        + `<line x1="0" y1="-4" x2="0" y2="4"/><line x1="${f(barPx)}" y1="-4" x2="${f(barPx)}" y2="4"/>`
+        + `<text x="${f(barPx + 6)}" y="3">${barM} M</text></g><text x="${W - 8}" y="12" text-anchor="end">N \u2191</text>`;
+      svg.querySelector('.gs').innerHTML = `<rect x="${f(X(gsE) - 3)}" y="${f(Y(gsN) - 3)}" width="6" height="6"/>`
+        + `<line x1="${f(X(gsE))}" y1="${f(Y(gsN) - 3)}" x2="${f(X(gsE))}" y2="${f(Y(gsN) - 9)}"/>`;
+      const I = st.inset = {W, H, ppm, eMin, top, barM, renders:0, dirty:true, rt,
+        link:insLink.current, pinT:insT.current, pinB:insB.current, px:{}};
+      I.render = () => {
+        renderer.setRenderTarget(rt); renderer.render(scene, ocam); renderer.setRenderTarget(null);
+        renderer.readRenderTargetPixels(rt, 0, 0, RW, RH, buf);
+        const d = img.data, row = RW*4;
+        for (let y = 0; y < RH; y++) {                                      // GL rows are bottom-up
+          const s0 = (RH - 1 - y)*row, t0 = y*row;
+          for (let x = 0; x < row; x += 4) { d[t0+x] = lut[buf[s0+x]]; d[t0+x+1] = lut[buf[s0+x+1]]; d[t0+x+2] = lut[buf[s0+x+2]]; d[t0+x+3] = 255; }
+        }
+        ctx.putImageData(img, 0, 0); I.renders++; I.dirty = false;
+      };
+    }
 
     // -- post: RenderPass -> SSAO -> bloom -> gamma --------------------------------
     let composer = null, ssao = null, bloom = null;
@@ -1148,12 +1245,17 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
     window.__envProject = (az, el) => project(azel(az, el).multiplyScalar(ENV.R).add(st.truePos));
     window.__envInfo = () => ({...renderer.info.render, passes:st.passes, model:st.model, status:{...status},
       sunAz:st.sunAz, sunEl:st.sunEl, sunCheck:st.sunCheck, D:st.Dmag, envSet:!!scene.environment, exposure:renderer.toneMappingExposure, key:key.intensity, hemi:hemi.intensity, groundMap:!!groundMat.map, epoch:st.lastEpoch, ghostVisible:ghostG.visible, cred:st.cred,
-      veh:{e:+st.truePos.x.toFixed(2), n:+(-st.truePos.z).toFixed(2), az:+st.travelAz.toFixed(1), s:+st.sCur.toFixed(1)},
+      veh:{e:+st.truePos.x.toFixed(2), n:+(-st.truePos.z).toFixed(2), az:+st.travelAz.toFixed(1), s:+st.sCur.toFixed(1),
+           px:project(st.truePos).slice(0, 2).map(x => Math.round(x))},      // rover base on screen, CSS px
       camMode: st.userCam ? 'orbit' : 'chase', antenna:st.antW.toArray().map(x => +x.toFixed(2)),
       uplink:{material:uplink.material.type, dashed:!!uplink.material.isLineDashedMaterial, color:'#'+uplink.material.color.getHexString(),
               len:+gsTop.distanceTo(new T.Vector3().fromBufferAttribute(upGeo.attributes.position, 1)).toFixed(1),
               full:+gsTop.distanceTo(st.antW).toFixed(1)}});
     window.__envDrag = () => { st.userCam = true; };
+    window.__insetInfo = () => { const I = st.inset, p = I.px, dpx = p.shown ? Math.hypot(p.bx - p.tx, p.by - p.ty) : 0;
+      return {W:I.W, H:I.H, ppm:+I.ppm.toFixed(6), mPerPx:+(1/I.ppm).toFixed(3), eMin:I.eMin, top:I.top, barM:I.barM, renders:I.renders,
+        pins:{...p}, pxDist:+dpx.toFixed(2), mFromPx:+(dpx/I.ppm).toFixed(2), D:st.Dmag,
+        gCur:+Math.hypot(st.gCur.x, st.gCur.z).toFixed(2), epoch:st.lastEpoch, ghostVisible:ghostG.visible}; };
 
     let last = performance.now(), raf = 0, march = 0;
     const loop = () => {
@@ -1179,6 +1281,23 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
         st.lblGhost.p.copy(gAnt).y += 1.1;
       }
       st.lblGhost.el.style.display = show ? '' : 'none';
+      // -- satellite-view pins: the same truePos, gCur and `show` as the scene, so the
+      //    inset can never show a believed pin the scene does not. Screen y grows
+      //    south, so +z maps straight to +py. ---------------------------------------
+      { const I = st.inset, tx = (st.truePos.x - I.eMin)*I.ppm, ty = (I.top + st.truePos.z)*I.ppm;   // n = -z
+        I.pinT.setAttribute('transform', `translate(${tx.toFixed(1)} ${ty.toFixed(1)})`);
+        I.px.tx = tx; I.px.ty = ty; I.px.shown = show;
+        if (show) {
+          const bx = tx + st.gCur.x*I.ppm, by = ty + st.gCur.z*I.ppm;
+          const cx = Math.max(3, Math.min(I.W - 3, bx)), cy = Math.max(3, Math.min(I.H - 3, by));
+          I.pinB.setAttribute('transform', `translate(${cx.toFixed(1)} ${cy.toFixed(1)})`);
+          I.pinB.classList.toggle('edge', cx !== bx || cy !== by);
+          I.link.setAttribute('x1', tx.toFixed(1)); I.link.setAttribute('y1', ty.toFixed(1));
+          I.link.setAttribute('x2', cx.toFixed(1)); I.link.setAttribute('y2', cy.toFixed(1));
+          I.px.bx = bx; I.px.by = by;
+        }
+        I.pinB.style.display = I.link.style.display = show ? '' : 'none';
+      }
       // -- ground uplink: geometry to the antenna, material by credential ----------
       { const pa = upGeo.attributes.position, end = st.cred === 'EXPIRED' || st.cred === 'REVOKED'
           ? tv.copy(gsTop).lerp(st.antW, 0.45) : st.antW;
@@ -1195,7 +1314,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       } else {
         // Offsets are RELATIVE to the true vehicle: the rig rides with it (no lag at
         // any frame rate); only the offset -- which depends on heading and |D| -- is damped.
-        const dist = Math.min(92, 16 + st.Dmag*1.15), hgt = 3.5 + dist*0.22;   // cap: rover stays readable; ghost gets an edge marker
+        const dist = Math.min(92, ENV.camDist + st.Dmag*1.15), hgt = ENV.camH + dist*0.10;   // cap: rover stays readable; ghost gets an edge marker
         let camAz = az + Math.PI - 0.62;                                   // over the left shoulder
         if (orbit) camAz += now/1000*0.03;
         const gm = Math.hypot(st.gCur.x, st.gCur.z), gk = show ? Math.min(0.5, 30/Math.max(gm, 1)) : 0;   // look toward the ghost, at most 30 m of bias
@@ -1207,6 +1326,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
         cp.copy(st.truePos).add(st.camOff); cl.copy(st.truePos).add(st.lookOff);
         cp.y = Math.max(cp.y, terrainHeight(cp.x, cp.z) + 2.0);           // never below ground
         cam.position.copy(cp); cam.lookAt(cl);
+        cam.rotateX(ENV.pitch*D2R);          // tilt up: the rover sits low in frame, the sky and satellites above it
         if (controls) controls.target.copy(cl);
       }
       cam.getWorldDirection(camFwd);
@@ -1232,6 +1352,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
           st.lblGhost.el.textContent = (dx < 0 && Math.abs(dx) > Math.abs(dy) ? arrow : '') + st.lblGhost.base + ' · OFF FRAME' + (dx < 0 && Math.abs(dx) > Math.abs(dy) ? '' : arrow);
         }
       }
+      if (st.inset.dirty) st.inset.render();               // once, then only when an asset arrives
       draw(); st.frames = (st.frames || 0) + 1;
       raf = requestAnimationFrame(loop);
     };
@@ -1258,7 +1379,8 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       if (scene.environment) scene.environment.dispose();
       if (scene.background && scene.background.dispose) scene.background.dispose();
       if (composer) composer.dispose && composer.dispose();
-      delete window.__envProject; delete window.__envInfo; delete window.__envDrag;
+      if (st.inset) st.inset.rt.dispose();
+      delete window.__envProject; delete window.__envInfo; delete window.__envDrag; delete window.__insetInfo;
       renderer.dispose(); el.removeChild(renderer.domElement); S.current = null;
     };
   }, [orbit]);
@@ -1279,6 +1401,17 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
   return html`
     <div className="sky" ref=${box}></div>
     <div className="skylabels" ref=${lab}></div>
+    ${ok && html`<div className="inset">
+      <div className="map" ref=${insMap}>
+        <canvas ref=${insCv}></canvas>
+        <svg ref=${insSvg}><g className="sb"></g><g className="gs"></g>
+          <line ref=${insLink} className="link" style=${{display:'none'}}/>
+          <path ref=${insT} className="pin t" d=${PIN_D}/>
+          <path ref=${insB} className="pin b" d=${PIN_D} style=${{display:'none'}}/>
+        </svg>
+      </div>
+      <div className="cap"><b>Satellite view</b> · rendered · north up</div>
+    </div>`}
     ${!ok && html`<div className="skyidle">3D unavailable — three.js did not load</div>`}`;
 }
 
@@ -1502,17 +1635,6 @@ function App() {
             ? html`<${EnvScene} sky=${sky} epochIndex=${d ? d.epoch_index : null} D=${D} mission=${mission}
                                 orbit=${ORBIT} onStatus=${setEnvStatus} credential=${credShown}/>`
             : html`<div className="idle">loading mission</div>`}
-          <div className="envhud">
-            <div><i style=${{background:'#8A857A'}}></i>solid · true (route frame)</div>
-            <div><i className="gh"></i>ghost · believed = true + measured displacement</div>
-            <div><i style=${{background:'#A9CCEA'}}></i>satellite links · ranging (position)</div>
-            <div><i style=${{background:'var(--accent)'}}></i>excluded satellite · link dropped</div>
-            <div><i style=${{background:'none',borderTop:'2px solid #A9CCEA',height:0}}></i>ground uplink · TESLA mission authorisation (authority)</div>
-            <div className="n2"><b>${nTrusted}</b> trusted · <b>${nExcl}</b> excluded · real ephemeris, ${ts}
-              · route <b>${routeM.toFixed(0)}</b> / ${mission ? mission.route_length_m.toFixed(0) : '—'} m</div>
-            ${mission && sep < 0.5 && html`<div className="st" style=${{color:'var(--truth)'}}>believed = true · no measured displacement in this stream</div>`}
-            ${envStatus.note && html`<div className="st">${envStatus.note}</div>`}
-          </div>
           <div className="rcap">Rendered scene · route and motion are a presentation frame; the receiver is static · position divergence and satellites are from data · terrain and vehicle model illustrative</div>
           <div className="attrib">${envStatus.attrib}</div>
         </div>`}
@@ -1552,9 +1674,23 @@ function App() {
       </div>
     </div>
 
-    <div className="expbar">
+    <div className=${'expbar' + (showEnv ? ' env' : '')}>
       <div className="h">${d && d.explanation ? d.explanation.headline : ''}</div>
       <div className="d">${d && d.explanation ? d.explanation.detail : ''}</div>
+      ${showEnv && html`<div className="expkey">
+        <div className="keys">
+          <div><i style=${{background:'#8A857A'}}></i>solid · true (route frame)</div>
+          <div><i className="gh"></i>ghost · believed = true + measured displacement</div>
+          <div><i style=${{background:'#A9CCEA'}}></i>satellite links · ranging (position)</div>
+          <div><i style=${{background:'var(--accent)'}}></i>excluded satellite · link dropped</div>
+          <div><i style=${{background:'none',borderTop:'2px solid #A9CCEA',height:0}}></i>ground uplink · TESLA mission authorisation (authority)</div>
+        </div>
+        <div className="n2"><b>${nTrusted}</b> trusted · <b>${nExcl}</b> excluded · real ephemeris, ${ts}</div>
+        <div className="n2">route <b>${routeM.toFixed(0)}</b> / ${mission ? mission.route_length_m.toFixed(0) : '—'} m
+          ${mission && sep < 0.5 && html`<span className="st" style=${{color:'var(--truth)'}}> · believed = true · no measured displacement</span>`}
+          ${envStatus.note && html`<span className="st"> · ${envStatus.note}</span>`}
+        </div>
+      </div>`}
     </div>`;
 }
 
