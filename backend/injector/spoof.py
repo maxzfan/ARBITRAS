@@ -67,9 +67,18 @@ class Spoof:
     duration_s: float | None = None  # None = runs to the end of the replay
     common_bias_m: float = 0.0       # meaconing: fixed rebroadcast path delay
 
+    # Code/carrier divergence during walk-off, ruled by hand 2026-09-05:
+    # the spoofer commands a code delay and applies carrier Doppler from its
+    # own range-rate model; a mismatch between those two models diverges
+    # LINEARLY. Divergence at time t after lift-off is carrier_rate_error * t.
+    # 0.0 is a supported case -- a fully carrier-coherent spoofer: code and
+    # carrier stay coherent through the entire walk-off and features 2 and 3
+    # see nothing (including no lift-off CMC transient; a coherent spoofer
+    # produces no code/carrier distortion to spike).
+    carrier_rate_error: float = 0.0  # m/s of code-minus-carrier divergence
+
     # Magnitudes with no figure in §7, expressed against the measured floor.
     capture_jitter_sigma: float = 3.0   # x clean C/N0 sigma, during capture only
-    carrier_mismatch_sigma: float = 2.0  # x clean code-minus-carrier sigma, per epoch
     liftoff_transient_sigma: float = 6.0  # x clean cmc sigma, at lift-off
 
     seed: int = 20260820
@@ -151,15 +160,25 @@ def SIMPLISTIC(onset: datetime, **kw) -> Spoof:
     """
     return replace(Spoof(name="simplistic", power_db=15.0, walk_off_mps=0.0,
                          onset=onset, svs="all", liftoff_delay_s=0.0,
-                         common_bias_m=250.0), **kw)
+                         common_bias_m=250.0,
+                         # Carries the pre-ruling assumption forward: 2 sigma of
+                         # measured clean CMC noise per 30 s epoch = 0.014 m/s.
+                         # Stated, not derived. Pipeline validation only.
+                         carrier_rate_error=0.014), **kw)
 
 
-def CARRY_OFF(onset: datetime, target_svs="all_gps", **kw) -> Spoof:
+def CARRY_OFF(onset: datetime, carrier_rate_error: float,
+              target_svs="all_gps", **kw) -> Spoof:
     """§7 row 2 — sophisticated. Capture, then gradual walk-off on an SV subset.
 
     The primary demo (TRACK_A.md §2). 2 dB is the midpoint of the §7 1-3 dB
     range; against the measured C/N0 floor that is a few sigma, which is the
     whole design point of a low-power spoofer.
+
+    `carrier_rate_error` has NO default: the demo pin is picked by hand from
+    the printed arithmetic (ruling of 2026-09-05) and has not been given yet.
+    Tests pass an explicit test value; the demo config carries none until the
+    number arrives.
 
     `target_svs` names the captured subset: an explicit SV list, "all_gps"
     (the demo default), or `top_n_by_elevation(n)`. Whatever the rule, it is
@@ -168,6 +187,7 @@ def CARRY_OFF(onset: datetime, target_svs="all_gps", **kw) -> Spoof:
     """
     return replace(Spoof(name="carry_off", power_db=2.0, walk_off_mps=1.0,
                          onset=onset, svs="G", target=target_svs,
+                         carrier_rate_error=carrier_rate_error,
                          liftoff_delay_s=0.0), **kw)
 
 
@@ -191,7 +211,7 @@ def MEACONING(onset: datetime, **kw) -> Spoof:
     return replace(Spoof(name="meaconing", power_db=8.0, walk_off_mps=0.0,
                          onset=onset, svs="G", common_bias_m=300.0,
                          capture_jitter_sigma=1.0,
-                         carrier_mismatch_sigma=0.0,
+                         carrier_rate_error=0.0,
                          liftoff_transient_sigma=0.0), **kw)
 
 

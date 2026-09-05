@@ -17,11 +17,13 @@ What gets modified, per spoofed satellite per band:
     phase   += range offset - divergence    the spoofer's carrier does not
                                             perfectly match its own code
 
-The divergence rate is one measured clean code-minus-carrier sigma per epoch
-per unit of `carrier_mismatch_sigma`. Expressing it against the floor rather
-than in metres per second means the injected attack is always a stated number
-of sigma out of the noise, on this station, on this day — the same convention
-§4 uses for C/N0 ("a 1-3 dB spoofer is 2-6 sigma out").
+Divergence is linear: `carrier_rate_error * t` metres at t seconds after
+lift-off (ruling of 2026-09-05). The spoofer commands a code delay and applies
+carrier Doppler from its own range-rate model; a mismatch between those two
+models diverges linearly — not a random walk, not IID noise inflation. At
+`carrier_rate_error = 0.0` the spoofer is fully carrier-coherent: code and
+carrier agree through the entire walk-off, no lift-off CMC transient fires,
+and features 2 and 3 see nothing by construction.
 """
 from __future__ import annotations
 
@@ -44,13 +46,7 @@ def epoch_interval_s(epochs) -> float:
 
 def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2)):
     """Return (injected_epochs, truth_frame)."""
-    dt_s = epoch_interval_s(epochs)
     rng = np.random.default_rng(spoof.seed)
-
-    # Code/carrier divergence rate: `carrier_mismatch_sigma` sigma of clean
-    # code-minus-carrier noise accumulated per epoch of walk-off.
-    diverge_mps = spoof.carrier_mismatch_sigma * floor.cmc_sigma / dt_s
-
     out, rows, liftoff_done = [], [], False
     frozen = None                    # target set, resolved once at capture
     for ep in epochs:
@@ -68,11 +64,14 @@ def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2)):
 
         offset = spoof.range_offset_m(ep.time)
         walked_s = max(0.0, since - spoof.capture_s - spoof.liftoff_delay_s)
-        divergence = diverge_mps * walked_s
+        divergence = spoof.carrier_rate_error * walked_s
 
         if n:
-            if stage == WALK and not liftoff_done:
-                # §7 stage 3: distortion spikes briefly again at lift-off.
+            if (stage == WALK and not liftoff_done
+                    and spoof.carrier_rate_error > 0):
+                # §7 stage 3: distortion spikes briefly again at lift-off. A
+                # fully coherent spoofer (rate 0) produces no code/carrier
+                # distortion, so no transient either.
                 divergence += spoof.liftoff_transient_sigma * floor.cmc_sigma
                 liftoff_done = True
 

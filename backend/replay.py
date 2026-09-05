@@ -52,6 +52,10 @@ def main(argv=None) -> None:
     ap.add_argument("--systems", default="GERCS")
     ap.add_argument("--scenario", choices=list(SCENARIOS) + ["all"], default="all")
     ap.add_argument("--onset", default=ONSET.isoformat())
+    ap.add_argument("--carrier-rate-error", type=float, default=None,
+                    help="carry-off code/carrier divergence rate, m/s. The "
+                         "demo pin is picked by hand and is pending; carry_off "
+                         "is skipped until one is given.")
     ap.add_argument("--out", default="out")
     args = ap.parse_args(argv)
 
@@ -69,7 +73,15 @@ def main(argv=None) -> None:
 
     names = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
     for name in names:
-        spoof = SCENARIOS[name](onset=onset)
+        if name == "carry_off":
+            if args.carrier_rate_error is None:
+                print("carry_off: SKIPPED -- carrier_rate_error demo pin is "
+                      "pending (picked by hand; pass --carrier-rate-error)")
+                continue
+            spoof = SCENARIOS[name](onset=onset,
+                                    carrier_rate_error=args.carrier_rate_error)
+        else:
+            spoof = SCENARIOS[name](onset=onset)
         injected, truth = inject(clean, spoof, floor)
         recs = run(injected, cal)
         truth.to_csv(Path(args.out) / f"{name}_truth.csv")

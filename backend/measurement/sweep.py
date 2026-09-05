@@ -4,12 +4,19 @@
     and only when explicitly cleared. `python -m backend.measurement.sweep`
     refuses without --run.
 
-What it will measure, per decision of 2026-09-05: carry-off attacks with the
-captured subset at sizes 12 / 8 / 6 / 4, selected top-N by elevation at the
-capture epoch and held fixed. Per (subset_size, epoch) it records the truth
-range offset, the confidence trajectory, and the geometry score
-det(HtT Ht) / det(HfT Hf) in both raw and normalised form. One JSONL record
-per (subset_size, epoch); a summary record per subset size. No plotting.
+What it will measure, per decisions of 2026-09-05: carry-off attacks over a
+two-axis grid --
+
+    subset size          12 / 8 / 6 / 4, top-N by elevation at capture, frozen
+    carrier_rate_error   0.0 / 0.005 / 0.01 / 0.02 / 0.05 / 0.1 m/s (cap 0.1)
+
+Per (subset_size, rate, epoch) it records the truth range offset, the
+confidence trajectory, and the geometry score det(HtT Ht) / det(HfT Hf) in
+raw and normalised form. One JSONL record per grid epoch; a summary record
+per grid cell. No plotting. At carrier_rate_error = 0.0 every record carries
+`cmc_features_inactive: true` -- the spoofer is fully carrier-coherent, so
+features 2 and 3 are structurally blind there; that fact is written into the
+output rather than left to be inferred.
 
 **The verification target.** Small-subset spoofs leave most of GPS authentic,
 so excluding only the spoofed satellites should barely move the determinant
@@ -67,6 +74,7 @@ GATE = ("GATED: run only after demo beats 1, 2 and 7 pass end to end, "
 @dataclass
 class SweepConfig:
     subset_sizes: tuple = (12, 8, 6, 4)
+    carrier_rate_errors: tuple = (0.0, 0.005, 0.01, 0.02, 0.05, 0.1)  # m/s
     onset: datetime = ONSET
     obs: str = OBS
     systems: str = "GERCS"
@@ -126,10 +134,13 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w") as fh:
         for n in cfg.subset_sizes:
-            spoof = CARRY_OFF(onset=cfg.onset, target_svs=top_n_by_elevation(n))
+          for rate in cfg.carrier_rate_errors:
+            spoof = CARRY_OFF(onset=cfg.onset, carrier_rate_error=rate,
+                              target_svs=top_n_by_elevation(n))
             injected, truth = inject(clean, spoof, floor)
             fx = FeatureExtractor(cal)
             ratios = []
+            inactive = rate == 0.0
             for ep, tr in zip(injected, truth.itertuples()):
                 feats = fx.step(ep)["features"]
                 excluded = set(tr.spoofed_sv.split(",")) if tr.spoofed_sv else set()
@@ -145,6 +156,8 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
                 ratios.append(ratio["norm"])
                 fh.write(json.dumps({
                     "type": "epoch", "subset_size": n,
+                    "carrier_rate_error": rate,
+                    "cmc_features_inactive": inactive,
                     "time": ep.time.isoformat() + "Z", "stage": tr.stage,
                     "n_spoofed": tr.n_spoofed, "excluded_sv": sorted(excluded),
                     "range_offset_m": tr.range_offset_m,
@@ -159,6 +172,12 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
             r = pd.Series(ratios)[att.to_numpy()]
             fh.write(json.dumps({
                 "type": "summary", "subset_size": n,
+                "carrier_rate_error": rate,
+                "cmc_features_inactive": inactive,
+                "inactive_note": ("carrier_rate_error = 0: spoofer is fully "
+                                  "carrier-coherent; pseudorange_residual and "
+                                  "code_carrier_divergence are structurally "
+                                  "blind on this run") if inactive else None,
                 "max_range_offset_m": float(truth["range_offset_m"].max()),
                 "final_state": None,
                 "note": "states unset: thresholds are set by hand (design.md "
@@ -169,9 +188,10 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
                     "p50": float(r.quantile(.5)), "p90": float(r.quantile(.9)),
                 },
             }) + "\n")
-            print(f"subset {n:2d}: attack-window info_ratio_norm "
-                  f"p10 {r.quantile(.1):.3f}  p50 {r.quantile(.5):.3f}  "
-                  f"p90 {r.quantile(.9):.3f}  min {r.min():.3f}")
+            print(f"subset {n:2d} rate {rate:5.3f}"
+                  f"{'  [features 2+3 inactive]' if inactive else '':<26}"
+                  f" info_ratio_norm p10 {r.quantile(.1):.3f}"
+                  f"  p50 {r.quantile(.5):.3f}  min {r.min():.3f}")
     print(f"wrote {out}")
     print("Distributions above are the output. No threshold is picked here.")
     return out

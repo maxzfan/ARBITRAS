@@ -100,6 +100,7 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
   "confidence": 0.42,
   "credential_status": "VALID",
   "position": { "lat": 38.9207, "lon": -77.0669, "alt": 58.3 },
+  "position_source": "surveyed",
   "features": {
     "cn0_anomaly": 0.71,
     "pseudorange_residual": 0.15,
@@ -112,7 +113,17 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
     "displacement_bound_m": 41.2,
     "next_best_observation": "E"
   },
-  "satellites_tracked": 11
+  "satellites_tracked": 11,
+  "score_detail": {
+    "feature_score": 0.29,
+    "geometry_deficit": 0.42,
+    "beta": 0.5,
+    "geometry_available": true,
+    "weights_tuned": false,
+    "weights": { "cn0_anomaly": 0.25, "pseudorange_residual": 0.25,
+                 "code_carrier_divergence": 0.25, "cross_constellation": 0.25 },
+    "weight_sensitive_fraction": 0.5
+  }
 }
 ```
 
@@ -121,6 +132,19 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
   - `PENDING` is normal and transient: MAC received, key not yet disclosed. Lasts exactly the disclosure lag.
 - `position` — what the receiver *believes*. Under attack this is the spoofed position. That is the point.
 - `features` — each [0,1], higher = more anomalous. **Always emitted alongside the composite**, so the explanation layer can name which signal diverged and so we never report a single number alone.
+- `position_source` — `"solution"` | `"surveyed"` *(added 5 Sep)*. Until the
+  position solution exists the backend reports the station's surveyed position
+  flagged `"surveyed"`, so a displacement read off it is visibly zero by
+  construction rather than quietly wrong. The console may render either; it
+  must not compute displacement from a `"surveyed"` position.
+- `score_detail` — *(added 5 Sep)* the decomposition of `confidence`:
+  `feature_score` (the tuned half), `geometry_deficit` (1 − information ratio),
+  `beta` (the blend actually applied; forced to 1 when `geometry` is null),
+  `geometry_available`, `weights_tuned` (**false until the threshold session —
+  any number produced while false is a placeholder**), `weights`, and
+  `weight_sensitive_fraction` (the share of the composite a re-weighting can
+  move; the answer to the arXiv 2607.05415 objection). Additive: the composite
+  is never shipped without the parts that made it.
 - `geometry` — the weight-independent half of the score. `information_ratio` ∈ [0,1] is the determinant ratio of the trusted-subset information matrix against the full solution. `excluded_sv` is which satellites the detector stopped trusting and therefore which rows came out. `displacement_bound_m` is the analytic bound at this epoch. `next_best_observation` is the observation that would recover the most information — consumed by the console in `DEGRADED`, ignored elsewhere.
 
 **Transport:** JSON Lines appended to a file; console tails it.

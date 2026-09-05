@@ -15,6 +15,9 @@ from backend.rinex.loader import load_obs
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
 ONSET = datetime(2026, 8, 20, 12, 30)
+# Test value for the divergence rate. NOT the demo pin, which is
+# picked by hand from the printed arithmetic and is still pending.
+TEST_RATE = 0.02  # m/s
 
 
 @pytest.fixture(scope="module")
@@ -103,7 +106,7 @@ def test_pseudorange_residual_stays_elevated_after_cn0_fades(day, cal, floor,
                                                              clean_features):
     """§6a.2's stated role. This is the feature that carries the sustained
     detection once the C/N0 signal is gone."""
-    got, _ = attacked(day, cal, floor, CARRY_OFF(onset=ONSET))
+    got, _ = attacked(day, cal, floor, CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE))
     later = got[(got.index >= ONSET + timedelta(minutes=30))
                 & (got.index < ONSET + timedelta(minutes=90))]
     assert later["pseudorange_residual"].mean() > clean_features[
@@ -123,10 +126,23 @@ def test_meaconing_is_invisible_to_the_code_carrier_features(day, cal, floor,
         assert later[f].mean() <= clean_features[f].quantile(0.99)
 
 
+def test_zero_rate_spoofer_is_invisible_to_features_2_and_3(day, cal, floor,
+                                                            clean_features):
+    """The ruling's stated consequence, asserted at the feature level: with a
+    fully carrier-coherent spoofer the residual and divergence features see
+    nothing, sustained."""
+    got, _ = attacked(day, cal, floor,
+                      CARRY_OFF(onset=ONSET, carrier_rate_error=0.0))
+    later = got[(got.index >= ONSET + timedelta(minutes=30))
+                & (got.index < ONSET + timedelta(minutes=90))]
+    for f in ("pseudorange_residual", "code_carrier_divergence"):
+        assert later[f].mean() <= clean_features[f].quantile(0.99)
+
+
 def test_carry_off_separates_from_the_clean_day(day, cal, floor, clean_features):
     """The primary demo (§7 row 2) has to be detectable. d' over the sustained
     window, against the clean distribution of the same feature."""
-    got, _ = attacked(day, cal, floor, CARRY_OFF(onset=ONSET))
+    got, _ = attacked(day, cal, floor, CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE))
     att = got[(got.index >= ONSET) & (got.index < ONSET + timedelta(minutes=90))]
     f = "pseudorange_residual"
     d = abs(att[f].mean() - clean_features[f].mean()) / np.sqrt(
