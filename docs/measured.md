@@ -290,7 +290,7 @@ This is why §10 must record residuals on the spoofed and authentic subsets
 separately: the residual that appears under a coordinated walk is
 cross-constellation disagreement, not GPS-internal inconsistency.
 
-# `excluded_sv`: the rule is built, unset, and its clean-day cost measured
+# `excluded_sv`: SUPERSEDED -- see the ExclusionRule section at the end
 
 `detection.flagged_sv` names the satellites whose worst per-SV score reaches
 `k x` its calibrated saturation. `k` has **no default**; unset, the list is
@@ -526,3 +526,70 @@ against its own injected data. The key now fingerprints the observables
 themselves. Nothing shipped with the collision; it is recorded because the
 class of bug (span-keyed caches over mutated data) applies to the other caches
 in the loader too.
+
+
+---
+
+# Item 4: exclusion rate with the right denominator, and the elevation floor
+
+Both requested measurements, taken on the clean full day **after** feature 2
+became the post-fit residual (the earlier table was computed with the old
+feature and is superseded).
+
+## P(at least one SV excluded in an epoch)
+
+Per epoch is the denominator that matters, because it is epochs that lose H
+rows. The per-SV-epoch rate is given for scale and is ~40x smaller, since the
+station tracks 39.9 satellites per epoch.
+
+| k | **P(≥1 SV excluded)** | mean SV excluded | P(per SV-epoch) |
+|---|---|---|---|
+| 1.0 | **61.1%** | 0.92 | 2.30% |
+| 1.5 | **22.6%** | 0.25 | 0.63% |
+| 2.0 | **9.5%** | 0.10 | 0.25% |
+| 3.0 | **2.2%** | 0.02 | 0.06% |
+| 5.0 | **0.3%** | 0.00 | 0.01% |
+
+To be precise about the earlier figures: they were **already** per-epoch, not
+per-SV — the 78.9% quoted before was P(≥1 SV excluded per epoch) with the old
+feature 2. Replacing that feature cut the rate by roughly a fifth at every k
+(78.9% → 61.1% at k=1.0, 2.7% → 2.2% at k=3.0) as a side effect.
+
+## Is the floor elevation-driven? Yes, essentially entirely.
+
+Exclusion rate binned by satellite elevation, sampled every 8th epoch (359
+epochs, 10,177 SV-epochs with ephemeris):
+
+| elevation bin | n | excl% (k=3) | share of exclusions (k=3) | excl% (k=5) |
+|---|---|---|---|---|
+| 0–15° | 2640 | **0.08%** | **100.0%** | 0.00% |
+| 15–30° | 2359 | 0.00% | 0.0% | 0.00% |
+| 30–60° | 3386 | 0.00% | 0.0% | 0.00% |
+| 60–90° | 1792 | 0.00% | 0.0% | 0.00% |
+
+At k=3 the surviving exclusions sit at a **median elevation of 0.4°** (p90
+0.8°, max 0.9°) — they are satellites on the horizon, not satellites being
+spoofed. Above 15° the clean rate is zero in every bin at both k values.
+
+**Caveat:** elevations come from Keplerian broadcast ephemeris, which covers
+G/E/C only. GLONASS and SBAS — about a quarter of the tracked sky — are absent
+from the bin table. The k-rate table above covers all five constellations.
+
+## Implemented
+
+`detection.ExclusionRule`:
+
+- **`MASKED_K3`** — the ruled rule, `k = 3.0` plus a low-elevation mask, with
+  the cutoff **UNSET**. `armed` is False and it emits nothing until a cutoff
+  is given. This is the default in `backend.replay`.
+- **`FLAT_K5`** — the configured fallback, `k = 5.0`, no mask, usable without
+  elevations.
+
+A satellite below the mask cutoff is **not** excluded: the mask means "this
+satellite's score is not trustworthy evidence of spoofing", which is the
+opposite of "this satellite is spoofed". Whether a low-elevation satellite
+should be dropped from H for its own noise is a separate question and Track
+C's.
+
+The elevation-binned distribution is printed above. **The cutoff is not
+chosen here.**

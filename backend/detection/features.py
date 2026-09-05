@@ -108,17 +108,33 @@ class ExclusionRule:
     """When the detector stops trusting a satellite. Ruled by hand 2026-09-05.
 
     `k` is the multiple of a satellite's calibrated saturation its worst
-    per-SV score must reach. Measured on the clean full day, per epoch (the
-    denominator that matters, because it is epochs that lose H rows):
+    per-SV score must reach. Measured on the clean full day, PER EPOCH -- the
+    denominator that matters, because it is epochs that lose H rows (the
+    per-SV-epoch rate is given alongside for scale, and is ~40x smaller since
+    the station tracks 39.9 satellites per epoch):
 
-        k = 1.0 -> 78.9% of epochs flag >= 1 SV, 1.78 SV mean
-        k = 1.5 -> 34.6%   k = 2.0 -> 12.7%   k = 3.0 -> 2.7%   k = 5.0 -> 0.5%
+        k      P(>=1 SV excluded)   mean SV excluded   P(per SV-epoch)
+        1.0                 61.1%               0.92            2.30%
+        1.5                 22.6%               0.25            0.63%
+        2.0                  9.5%               0.10            0.25%
+        3.0                  2.2%               0.02            0.06%
+        5.0                  0.3%               0.00            0.01%
 
-    The tails are an order of magnitude heavier than Gaussian at every k and
-    floor at 0.5%. That floor IS elevation-driven, and overwhelmingly so:
-    binned by elevation at both k = 3 and k = 5, **100% of clean-day
-    exclusions fall in the 0-15 degree bin**, with a median elevation of 0.7
-    degrees. Above 15 degrees the clean exclusion rate is 0.00% in every bin.
+    (Measured after feature 2 became the post-fit residual. With the earlier
+    code-minus-carrier feature 2 every rate was higher -- 78.9% at k = 1.0 --
+    so replacing that feature cut the false-exclusion rate by about a fifth at
+    every k as a side effect.)
+
+    The tails stay an order of magnitude heavier than Gaussian at every k and
+    floor at 0.3%. **That floor is elevation-driven, and essentially
+    entirely:** binned by elevation, 100% of clean-day exclusions at k = 3
+    fall in the 0-15 degree bin, at a median elevation of 0.4 degrees. Above
+    15 degrees the clean exclusion rate is 0.00% in every bin, at both k = 3
+    and k = 5.
+
+    Caveat on the binning: elevations come from Keplerian broadcast ephemeris,
+    which covers G/E/C only, so GLONASS and SBAS SV-epochs (about a quarter of
+    the sky) are absent from the bin table.
 
     So the ruled rule is `k = 3.0` plus a low-elevation mask. **The mask
     cutoff is UNSET and the rule returns nothing until a cutoff is given** --
