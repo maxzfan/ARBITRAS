@@ -43,6 +43,22 @@ class GeometryEngine:
         self.alpha = alpha
         self._frozen: dict[str, np.ndarray] | None = None
         self.divergence_log: list[tuple[datetime, float, float]] = []
+        self._last_context: dict | None = None
+
+    def solve_context(self) -> dict | None:
+        """Per-epoch solve context for Track D's corrector (TRACK_D.md).
+
+        Returns the state of the most recent compute() call:
+          t, H_trusted (n x (3+k)), sv_order, const_order (row/column
+          orderings of H_trusted), trusted_sat_pos ({sv: ECEF}),
+          frozen_basis (the LOS set the epoch was evaluated against —
+          the last-NOMINAL snapshot under freeze), frozen (bool),
+          rx_ecef (the linearisation point).
+
+        Track D builds its weighted-RAIM S-matrix and slope-based PL on
+        this; it must not re-derive any of it. None before first compute.
+        """
+        return self._last_context
 
     def visible_svs(self, t: datetime) -> dict[str, np.ndarray]:
         pos = sv_positions_at(self.records, t)
@@ -68,8 +84,22 @@ class GeometryEngine:
 
         h_full, _, _ = build_H(basis, self.rx_ecef) if basis else (
             np.zeros((0, 3)), [], [])
-        h_trusted, _, _ = build_H(trusted, self.rx_ecef) if trusted else (
-            np.zeros((0, 3)), [], [])
+        h_trusted, sv_order, const_order = build_H(trusted, self.rx_ecef) \
+            if trusted else (np.zeros((0, 3)), [], [])
+
+        # Solve context for Track D (backend/correction/, TRACK_D.md): the
+        # weighted-RAIM corrector consumes exactly this epoch state — it must
+        # NOT rebuild H, LOS, or the trusted set. Read via solve_context().
+        self._last_context = {
+            "t": t,
+            "H_trusted": h_trusted,
+            "sv_order": sv_order,
+            "const_order": const_order,
+            "trusted_sat_pos": trusted,
+            "frozen_basis": basis,
+            "frozen": freeze,
+            "rx_ecef": self.rx_ecef,
+        }
 
         ratio = information_ratio(h_trusted, h_full) if len(basis) else 0.0
 

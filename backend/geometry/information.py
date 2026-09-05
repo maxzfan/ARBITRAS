@@ -21,6 +21,11 @@ opposing effects as SVs are excluded: lambda_max grows monotonically
 (information decreases — a theorem), while T shrinks with residual DOF
 (a smaller acceptance region constrains the attacker more). Geometry
 dominates; the bound widens as trust erodes.
+    Successor note (TRACK_D.md, deferred): the weighted-RAIM slope form
+PL = tau * max_i(||S[0:3,i]|| / sqrt(P_ii)) computed on the corrected
+solution is the planned replacement for this eigenvalue form — one
+definition of the bound, reconciled when backend/correction/ lands.
+Until then this is the single source.
 
 Next-best observation — adding a row is the rank-one update
 det(G + hh') = det(G) (1 + h' G^-1 h), so ranking candidates is one
