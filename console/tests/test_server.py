@@ -116,14 +116,25 @@ def test_layer_off_suppresses_arbitration_for_video_beat_2():
     # feature bars under a badge reading OFF contradicts the whole beat.
     assert payload["confidence"] is None
     assert payload["features"] == {}
-    assert payload["geometry"] == {}
+    assert payload["geometry"] == {}, "no sky in this epoch -> nothing to keep"
     assert payload["geometry_divergence"] is None
-    # Every product of the trust layer must be off the wire, not merely hidden:
-    # showing them while the badge reads OFF contradicts the whole beat.
-    assert payload["confidence"] is None
-    assert payload["features"] == {}
-    assert payload["geometry"] == {}
-    assert payload["geometry_divergence"] is None
+
+
+def test_layer_off_keeps_satellite_positions_but_not_trust_flags():
+    """Positions are what the receiver sees; trusted flags are what the layer
+    decides. Beat 2 shows the full constellation with nothing dark."""
+    arb = Arbiter()
+    epoch = json.loads(line(0.05))
+    epoch["geometry"] = {
+        "information_ratio": 0.2, "excluded_sv": ["G07"], "displacement_bound_m": 90.0,
+        "sky": [{"sv": "G07", "az": 10.0, "el": 40.0, "trusted": False},
+                {"sv": "E11", "az": 200.0, "el": 25.0, "trusted": True}],
+    }
+    payload = decide(arb, epoch, layer_on=False)
+    assert set(payload["geometry"]) == {"sky"}, "everything but positions is stripped"
+    assert [s["sv"] for s in payload["geometry"]["sky"]] == ["G07", "E11"]
+    assert all(s["trusted"] for s in payload["geometry"]["sky"])
+    assert payload["geometry"]["sky"][0]["az"] == 10.0
 
 
 def test_layer_on_arbitrates_and_explains():
