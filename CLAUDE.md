@@ -1,4 +1,4 @@
-# Verifiable Position for Autonomous Systems
+# HOLDFAST
 
 Trust layer between a GNSS receiver and an autonomy stack. Detects spoofed
 positioning, scores confidence continuously, and degrades the vehicle's

@@ -5,7 +5,7 @@ You own the thresholds mapping confidence -> state, and what to do with
 `geometry.next_best_observation`.
 
 ## Setup (~10 min, unattended)
-    git clone <repo> && cd dnhacks-pnt
+    git clone https://github.com/maxzfan/HOLDFAST.git && cd HOLDFAST
     bash bootstrap.sh
     source .venv/bin/activate
 

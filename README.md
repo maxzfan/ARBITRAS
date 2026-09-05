@@ -1,8 +1,12 @@
-# Verifiable Position for Autonomous Systems
+# HOLDFAST
 
-A trust layer between a GNSS receiver and an autonomy stack, so a vehicle can
-tell when it is being lied to about where it is and give up authority before
-acting on bad data.
+Spoof detection is solved. What happens in the ninety seconds after detection
+is not.
+
+HOLDFAST sits between a GNSS receiver and an autonomy stack and continuously
+scores positional trust, then degrades the vehicle's authority in stages —
+full autonomy, coast on inertial, finish the leg, hold position — rather than
+making one binary trust decision.
 
 **Signal quality is not provenance.**
 
