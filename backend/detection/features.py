@@ -59,7 +59,13 @@ import pandas as pd
 # smaller than the quantisation-limited value 1.4826 * 0.25 / sqrt(2).
 CN0_SIGMA_FLOOR = 1.4826 * 0.25 / np.sqrt(2)
 
-FEATURE_NAMES = ("cn0_anomaly", "pseudorange_residual", "code_carrier_divergence")
+# The full §6a feature set. The first three are per-satellite statistics
+# computed by FeatureExtractor below; cross_constellation is an epoch-level
+# feature (backend/detection/cross.py) merged in by the replay pipeline.
+FEATURE_NAMES = ("cn0_anomaly", "pseudorange_residual",
+                 "code_carrier_divergence", "cross_constellation")
+PER_SV_FEATURES = ("cn0_anomaly", "pseudorange_residual",
+                   "code_carrier_divergence")
 
 # Minimum tracked satellites for a constellation to be scored on its own.
 MIN_CONSTELLATION_SV = 5
@@ -214,11 +220,11 @@ class FeatureExtractor:
         self._n += 1
 
         per_sv = pd.DataFrame.from_dict(rows, orient="index").reindex(
-            columns=list(FEATURE_NAMES))
+            columns=list(PER_SV_FEATURES))
         per_sv.index.name = "sv"
 
         feats = {}
-        for name in FEATURE_NAMES:
+        for name in PER_SV_FEATURES:
             col = per_sv[name].dropna()
             if col.empty:
                 feats[name] = 0.0
@@ -243,7 +249,7 @@ def fit(clean_epochs, floor, cfg: FeatureConfig | None = None,
     """
     cfg = cfg or FeatureConfig()
     cal = Calibration(
-        z_sat={n: 1.0 for n in FEATURE_NAMES},
+        z_sat={n: 1.0 for n in PER_SV_FEATURES},
         cn0_sigma=_sigma_series(floor.cn0_sigma_by_sv, CN0_SIGMA_FLOOR),
         cmc_sigma=_sigma_series(floor.cmc_sigma_by_sv, 1e-3),
         quantile=quantile,
@@ -251,7 +257,7 @@ def fit(clean_epochs, floor, cfg: FeatureConfig | None = None,
     out = FeatureExtractor(cal, cfg).run(clean_epochs)
     z = pd.concat([o["per_sv"] for o in out])
     per_sv = z.groupby(level=0).quantile(quantile)     # each satellite's own tail
-    cal.z_sat = {n: float(per_sv[n].median()) for n in FEATURE_NAMES}
+    cal.z_sat = {n: float(per_sv[n].median()) for n in PER_SV_FEATURES}
     cal.n_epochs = len(clean_epochs)
     return cal
 

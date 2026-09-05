@@ -85,7 +85,9 @@ def propagator_sanity(epochs, nav, systems="EC") -> pd.DataFrame:
         el_all, cn0_all = [], []
         for ep in epochs:
             svs = [s for s in ep.df.index if s.startswith(sysc)]
-            pos = ephemeris.positions_at(ep.time, svs, nav)
+            tau = {sv: ep.df.at[sv, "code_1"] / C_LIGHT for sv in svs
+                   if np.isfinite(ep.df.at[sv, "code_1"])}
+            pos = ephemeris.positions_at(ep.time, list(tau), nav, tx_delay_s=tau)
             n_trk.append(len(svs)), n_eph.append(len(pos))
             if pos.empty:
                 continue
