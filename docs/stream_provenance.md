@@ -17,8 +17,9 @@ calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_a
 | `features.*` (3) | measured / injected | Track A `FeatureExtractor`, calibrated on the clean day. On attack epochs the observables were modified by the injector before scoring |
 | `confidence` | derived | `1 - anomaly` with equal placeholder weights, beta forced to 1 (no geometry half yet). `score_detail.weights_tuned` is false |
 | `satellites_tracked` | measured | count of SVs with code or C/N0 on band 1 |
-| `position` | **surveyed, not a solution** | `position_source: "surveyed"`. No least-squares solution exists without Track C's line-of-sight vectors. Displacement reads **0 m** on this stream |
-| `_truth` | replay metadata | equals `position` on every epoch, for the same reason |
+| `position` | **solved** (`wls_differential`, 100.0% of demo epochs) | weighted least-squares single-point fix from the receiver's own band-1 pseudoranges as the receiver saw them (injected on attack epochs), G+E, one clock per constellation, Sagnac and SV-clock corrected, no atmosphere model — `backend/geometry/solve.py`. Epochs without a fix fall back to the surveyed point, flagged `position_source: "surveyed"` |
+| `_truth` | replay metadata | the SAME solver on the CLEAN pseudoranges at the same epoch, same satellites, same weights. Atmosphere and ephemeris error are common to both fixes and cancel in the difference, so `position − _truth` is exactly the injector's effect on the fix. On clean epochs it is 0.0000 m |
+| `_solution` | replay metadata | n_sv, k, DOPs, residual RMS, per-constellation clock bias, `displacement_m` — the fix's own quality figures |
 | `geometry.sky[]` | propagated | real az/el from `backend/geometry/skyview.py` (gnss-lib-py, G+E only, 10° mask). **A second, pseudorange-validated propagator with BeiDou exists in `backend/rinex/ephemeris.py` (Track A); convergence is an 18:30 checkpoint item.** |
 | `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `pseudorange_residual` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day 52.7% of epochs have ≥1 excluded SV |
 | `geometry.information_ratio`, `displacement_bound_m`, `next_best_observation` | **null, awaiting Track C** | not fabricated |
@@ -42,11 +43,30 @@ demo.jsonl beats: 60 clean · 90 attack (2026-08-20T12:30:00Z → 2026-08-20T13:
 At 15 epochs/s: VALID tail 8.0 s ·
 PENDING 8.0 s · EXPIRED 8.0 s.
 
-## Injector parameters (design.md §7 carry-off, Track A defaults)
+## Position solution — is the solver right, and what did the attack do to the fix
 
-carry_off: 90 attack epochs {'WALK': 89, 'CAPTURE': 1}, 12 SV at peak, max range offset 2660.0 m, max code-carrier divergence 53.20 m
+Solver check, clean day, 2880 epochs (0 unsolvable):
+clean fix minus surveyed USN8 marker — horizontal p50 **0.73 m**,
+p95 1.67 m, max 2.19 m; vertical p50
++11.6 m (the unmodelled ionosphere + troposphere, as expected for a
+single-frequency fix; it cancels in the differential). GDOP p50 1.63,
+max 2.43.
 
-power_db 2.0 · walk_off_mps 1.0 · target all GPS tracked at capture ·
+Displacement `|position − _truth|` over demo.jsonl: solved 100.0%; lead-in max 0.0000 m; first >1 m at idx 62 (2026-08-20T12:31:00Z); peak 273.5 m at idx 149 (range offset 2660 m); end 273.5 m / 2660 m; median |D|/offset 0.061; post-attack max 0.0000 m.
+
+**Why the subset matters.** A range offset applied to every tracked GPS
+satellite is indistinguishable from a receiver-clock shift and is absorbed
+entirely by the GPS clock column: `--target all_gps` displaces the fix by
+0.0000 m at 2660 m of range offset. It is a timing attack. The demo uses
+`top6` (Track A's `top_n_by_elevation` rule; §7 "walk-off on an SV
+subset"), under which the same walk-off moves the fix by the amount above.
+The direction is set by the geometry of the spoofed subset, not chosen.
+
+## Injector parameters (design.md §7 carry-off, Track A defaults except the subset)
+
+carry_off: 90 attack epochs {'WALK': 89, 'CAPTURE': 1}, 6 SV at peak, max range offset 2660.0 m, max code-carrier divergence 53.20 m
+
+power_db 2.0 · walk_off_mps 1.0 · target `top6` resolved at capture and held ·
 capture_s 10 · duration_s 2700 ·
 **carrier_rate_error 0.02 m/s — the TEST value from
 tests/test_detection.py, not the demo pin.** Eric left the pin deliberately
