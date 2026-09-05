@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .detection import (CrossConstellation, FeatureExtractor, Weights, fit,
-                        fit_cross, record, score, write_jsonl)
+                        fit_cross, flagged_sv, record, score, write_jsonl)
 from .detection.emit import ecef_to_lla
 from .geometry.engine import geometry_for
 from .injector import SCENARIOS, inject, summarise
@@ -31,7 +31,8 @@ ONSET = datetime(2026, 8, 20, 12, 30)
 
 
 def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
-        xc: CrossConstellation | None = None, nav=None):
+        xc: CrossConstellation | None = None, nav=None,
+        exclude_z: float | None = None):
     """Score a replay. Returns the list of §5 records.
 
     `geometry_for(epoch)` and `credential_for(epoch)` are the seams for Track C
@@ -44,6 +45,11 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
     "solution"`) — under attack, the spoofed one, which is the point (§5).
     Without them the feature reads 0.0 and the surveyed position is emitted,
     exactly the degraded fallback §6b requires to be visible.
+
+    `exclude_z` is the per-satellite exclusion multiple behind `excluded_sv`
+    (detection.flagged_sv). It has no default: unset, the list is empty and
+    the geometry block carries whatever Track C put there. See flagged_sv for
+    the measured clean-day cost of each candidate value.
     """
     weights = weights or Weights()
     fx = FeatureExtractor(cal)
@@ -59,6 +65,12 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
                 position = ecef_to_lla(*sols["all"]["pos"])
         geom = geometry_for(ep) if geometry_for else None
         cred = credential_for(ep) if credential_for else "VALID"
+        excluded = flagged_sv(res["per_sv"], cal.z_sat, exclude_z)
+        if excluded:
+            # The detector's own distrust list. Track C owns the rest of the
+            # block; this is the one field only the detector can fill.
+            geom = dict(geom or {})
+            geom["excluded_sv"] = excluded
         out.append(record(ep.time, feats, score(feats, geom, weights),
                           n_sv=ep.n_sv, geometry=geom, credential_status=cred,
                           position=position))
@@ -71,6 +83,10 @@ def main(argv=None) -> None:
     ap.add_argument("--systems", default="GERCS")
     ap.add_argument("--scenario", choices=list(SCENARIOS) + ["all"], default="all")
     ap.add_argument("--onset", default=ONSET.isoformat())
+    ap.add_argument("--exclude-z", type=float, default=None,
+                    help="per-SV exclusion multiple behind excluded_sv. No "
+                         "default; see detection.flagged_sv for the measured "
+                         "clean-day false-exclusion rate of each value.")
     ap.add_argument("--carrier-rate-error", type=float, default=None,
                     help="carry-off code/carrier divergence rate, m/s. The "
                          "demo pin is picked by hand and is pending; carry_off "
@@ -90,7 +106,8 @@ def main(argv=None) -> None:
     print(xc.cal)
 
     xc.reset()
-    recs = run(clean, cal, geometry_for=geometry_for, xc=xc, nav=nav)
+    recs = run(clean, cal, geometry_for=geometry_for, xc=xc, nav=nav,
+               exclude_z=args.exclude_z)
     print(f"clean    {len(recs):5d} epochs -> "
           f"{write_jsonl(recs, Path(args.out) / 'clean.jsonl')}")
 
@@ -107,7 +124,8 @@ def main(argv=None) -> None:
             spoof = SCENARIOS[name](onset=onset)
         injected, truth = inject(clean, spoof, floor)
         xc.reset()
-        recs = run(injected, cal, geometry_for=geometry_for, xc=xc, nav=nav)
+        recs = run(injected, cal, geometry_for=geometry_for, xc=xc, nav=nav,
+                   exclude_z=args.exclude_z)
         truth.to_csv(Path(args.out) / f"{name}_truth.csv")
         print(f"{name:9s}{len(recs):5d} epochs -> "
               f"{write_jsonl(recs, Path(args.out) / f'{name}.jsonl')}")

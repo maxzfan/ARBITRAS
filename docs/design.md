@@ -209,10 +209,18 @@ From Rothmaier et al., ION GNSS+ 2021.
 | Scenario | Power | Behaviour | Purpose |
 |---|---|---|---|
 | Simplistic | 10–20 dB | Abrupt offset, all SVs at once | Pipeline validation |
-| Intermediate carry-off | 1–3 dB | Capture, then gradual walk-off on an SV subset | **Primary demo** |
+| Intermediate carry-off (position) | 1–3 dB | Capture, then walk the believed **position** along a swept horizontal bearing; per-SV offsets are `−e_sv · dp` | **Primary demo** |
+| Intermediate carry-off (clock) | 1–3 dB | Capture, then uniform range drift across the captured set — absorbed by the constellation clock, position unmoved | Separates the clock domain from the position domain; exercises feature 4's clock channels |
 | Meaconing | rebroadcast | Common bias across one constellation | Exercises cross-constellation |
 
-**Walk-off rate:** ~1 m/s equivalent range drift as a starting point. Slow enough to stay inside tracking loop bandwidth, fast enough to displace within the demo window. Tune at the venue and be ready to justify.
+**Walk-off rate:** ~1 m/s. *(Revised 5 Sep — the original wording, "~1 m/s equivalent range drift", was written for a range-domain model and is wrong for the primary demo.)* The rate is now read in whichever domain the scenario attacks:
+
+- **Position domain** (`carry_off`, the primary demo): **1 m/s is the rate of the commanded horizontal position displacement** along a fixed bearing. Per-satellite offsets are the projections `−e_sv · dp`, so every satellite's range rate is `e_sv · v̂ × 1 m/s` and is *at most* 1 m/s — satellites near the horizon perpendicular to the walk barely move. Horizontal only, by ruling: no vertical component, because VDOP is the weak axis and an unconstrained sweep would find "up" and inflate the headline number with a direction no road-bound vehicle can be walked along. Bearing is a swept parameter (8 bearings, 45° apart from local ENU north); the demo pin is cross-corridor east. **The bearing is never derived from detector response or from H** — the injector must not be a function of the thing it attacks.
+- **Clock domain** (`clock_carry_off`, `meaconing`, `simplistic`): 1 m/s of *uniform* range drift across the captured set. Kept as its own scenario because it is a different attack, not a worse version of the same one — see the table note below.
+
+Slow enough to stay inside tracking loop bandwidth, fast enough to displace within the demo window. Tune at the venue and be ready to justify.
+
+> **Measured, and it is why the two domains are separate scenarios:** a range offset applied *uniformly* to every satellite of one constellation is indistinguishable from that constellation's clock. The least-squares absorbs all of it and **the believed position does not move at all** (0.0 m under a 300 m meaconing bias). A clock-domain attack corrupts *time*; only a position-domain walk moves the vehicle's believed position. "The position looks fine" is not the same as "nothing is wrong."
 
 ---
 
