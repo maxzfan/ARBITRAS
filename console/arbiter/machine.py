@@ -186,8 +186,17 @@ class Arbiter:
         self._last_confidence = confidence
         self._last_credential = credential
 
-        target, implied, reason = self._target(confidence, credential)
-        reason = self._transition(target, reason)
+        target, implied, cause = self._target(confidence, credential)
+        kind = self._transition(target, cause)
+        # A credential that is still the binding constraint stays the stated
+        # reason on hold epochs. Video beat 4 holds SURRENDERED for ~25 s at
+        # confidence ~0.93; without this every epoch after the transition read
+        # "confidence is below the trusted range" beside a confidence of 0.92.
+        if kind == "hold" and cause in ("credential_force", "credential_cap") \
+                and self.state == target:
+            reason = cause
+        else:
+            reason = kind
 
         geometry = epoch.get("geometry") or {}
         divergence = None

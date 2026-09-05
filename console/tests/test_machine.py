@@ -125,6 +125,28 @@ def test_credential_cap_does_not_raise_authority():
     assert d.state is TrustState.SURRENDERED
 
 
+def test_credential_force_stays_the_stated_reason_while_it_binds():
+    """Video beat 4: SURRENDERED held ~25 s at confidence ~0.93. Every epoch of
+    that hold must say the authorisation lapsed -- not that confidence is low."""
+    arb = Arbiter()
+    arb.step(epoch(0.93, "EXPIRED"))
+    for _ in range(20):
+        d = arb.step(epoch(0.93, "EXPIRED"))
+        assert d.state is TrustState.SURRENDERED
+        assert d.reason == "credential_force"
+        ex = explain(d)
+        assert "authorisation" in ex["headline"].lower()
+        assert "below the trusted range" not in ex["headline"]
+
+
+def test_credential_cap_stays_the_stated_reason_while_it_binds():
+    arb = Arbiter()
+    arb.step(epoch(0.95, "UNVERIFIED"))
+    d = arb.step(epoch(0.95, "UNVERIFIED"))
+    assert d.state is TrustState.DEGRADED
+    assert d.reason == "credential_cap"
+
+
 # ---------------------------------------------------------------- invariant 4
 
 def test_clock_and_credential_gates_close_below_nominal():
