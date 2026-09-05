@@ -128,3 +128,47 @@ check explicitly and say that you ran it.
 ## Deliverable by 18:30
 `geometry` block flowing in the contract: information_ratio, excluded_sv,
 displacement_bound_m, next_best_observation.
+
+---
+
+# HANDOFF FROM TRACK B — real data is flowing; thresholds and position are yours
+(2026-09-05 ~12:50. Everything below reproduces from the repo; streams are gitignored, regenerate them.)
+
+## Regenerate the real streams (Track A's pipeline over USN8, ~minutes)
+    source .venv/bin/activate
+    python -m backend.demo            # -> out/clean.jsonl, out/carryoff.jsonl,
+    # -> out/clean.jsonl (2880), out/carryoff.jsonl (2880), out/demo.jsonl (240: 12:00–14:00 UTC, onset 12:30)
+    python -m console.replay out/demo.jsonl      # arbiter timeline, headless
+    python -m console.replay out/clean.jsonl     # FSR on the clean day
+Field-by-field provenance: docs/stream_provenance.md.
+
+## 1. THRESHOLDS — §10 steps 1–3 are done; step 4 is the by-hand pick
+Placeholders (0.75 / 0.50 / 0.25) fail on real data: NOMINAL sits on the clean median.
+    clean day (2880)  p1 0.652  p25 0.717  p50 0.744  p75 0.774  p99 0.831
+    attack   (90)     p1 0.365  p25 0.430  p50 0.454  p75 0.481  p99 0.534
+    gap +0.118 — zero overlap, d′ ≈ 6.95
+    FSR with placeholders: 0.829 (2388/2880 below NOMINAL, 28 events, all DEGRADED)
+Any NOMINAL threshold in (0.543, 0.652) gives zero clean false alarms on this day.
+Open design question for the pick: attack floor is 0.36, so SURRENDERED < 0.25 never
+fires on signal alone for a 1–3 dB carry-off — either raise the lower thresholds into
+the attack distribution, or decide that RESTRICTED is the correct ceiling for a subtle
+spoofer and only the credential layer forces surrender (§8 supports this reading).
+The single swap point is console/arbiter/states.py (THRESHOLDS + THRESHOLD_PROVENANCE —
+set provenance off "PLACEHOLDER" to clear the console banner). Hysteresis
+(RECOVERY_EPOCHS=10, MIN_DWELL=5) made the bad threshold sticky; re-check FSR after the pick.
+Confidence is currently equal-weight, β=1 (weights_tuned=false) — the Dirichlet sweep
+(§10, Track A's backend/measurement/sweep.py) should be run at the chosen thresholds.
+Caveat for the README: one station, one day, one injector setting (carrier_rate_error
+0.02 m/s is a test value, unpicked).
+
+## 2. POSITION — beat 2 is a static dot on real data until this exists
+Track A emits position = SURVEYED (position_source:"surveyed"); _truth == position, so
+displacement reads 0 m. Needed: WLS single-point solution from code_1 + satellite
+positions → believed position; _truth = the clean-run solution at the same epoch so
+common-mode atmosphere cancels. This is your H matrix — the same H gives
+information_ratio / displacement_bound_m / next_best_observation, all currently null.
+Eric's propagator API (backend/rinex/ephemeris.py, pseudorange-validated, has BeiDou):
+positions_at(t, svs, nav=None) -> DataFrame ECEF m; elevations_at(t, svs, sta_ecef).
+Ours (backend/geometry/skyview.py, G+E) feeds geometry.sky — converge on his for H.
+
+## 3. Not yet merged into track_b: Eric's 2600c8d on main (BDT-offset fix + E+C solvability check).
