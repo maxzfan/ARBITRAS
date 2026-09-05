@@ -1,5 +1,41 @@
 # TRACK C — Geometry + Measurement
 
+## CONTRACT EXTENSION REQUESTED BY TRACK B — `geometry.sky`
+
+The console renders a 3D constellation view: satellites at their real sky
+positions, going dark as they leave the trusted set. Please emit this from your
+real H-matrix pipeline so the fixture can be dropped.
+
+Shape — one entry per satellite above the elevation mask, inside `geometry`:
+
+    "sky": [{"sv": "G07", "az": 143.2, "el": 41.8, "trusted": false}, ...]
+
+* `az` degrees [0,360), `el` degrees [mask, 90], mask default 10.
+* `trusted` is false for exactly the satellites in `excluded_sv`, true otherwise.
+  The console asserts this; they must not disagree.
+* Rows sorted by descending elevation.
+
+`backend/geometry/skyview.py` already does the propagation and is yours to reuse
+or replace — `sky_at(datetime)` returns the list above minus `trusted`. It shares
+the line-of-sight vectors your information matrix needs, so it may fold straight
+into your H build. Two things it learned the hard way:
+
+* **Galileo dedupe must key on the `gnss_sv_id` STRING, not `sv_id`.** georinex
+  splits Galileo by nav message type (E14, E14_1, E14_2, E14_3) and
+  gnss-lib-py's RinexNav folds that suffix into the numeric sv_id as 14, 141,
+  142, 143. Keying on sv_id gives four satellites at identical az/el — which
+  looks entirely plausible on a skyplot. It inflated Galileo from 12 to 39.
+* **BeiDou does not propagate.** It parses, `sqrtA` is finite, and
+  `glp.find_sv_states` returns all-NaN — BeiDou's broadcast time base is BDT,
+  not GPS. 37 satellites selected, 0 finite positions. Currently excluded on
+  purpose. If you want C in the trusted set, apply the BDT→GPS offset first.
+  GLONASS is excluded too: PZ-90 state vectors, not Keplerian elements.
+
+Scope today is G + E, ~16-22 visible at USN8, which is physically right.
+
+---
+
+
 You own `backend/geometry/` and `backend/measurement/`. You produce the
 `geometry` block of the §5 contract. This is the weight-independent half of
 the confidence score and it is NOT on the cut list.

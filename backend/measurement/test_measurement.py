@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import numpy as np
 
 from backend.measurement.displacement import check_epochs, report as d_report
-from backend.measurement.sweep import FEATURES, dirichlet_sweep, report
+from backend.measurement.weight_sweep import FEATURES, dirichlet_sweep, report
 
 
 def stub_compose(features, geometry_ratio, w4, blend):
