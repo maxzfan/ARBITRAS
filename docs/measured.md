@@ -593,3 +593,32 @@ C's.
 
 The elevation-binned distribution is printed above. **The cutoff is not
 chosen here.**
+
+
+---
+
+# STALENESS WARNING for the README results section
+
+The README (added on `track_b`/`track_c`) publishes §10 numbers computed
+against the **previous** feature 2 — maximum adversarial displacement 3.67 m
+vs a 14.0 m bound, FSR 0.0000, and the derived thresholds NOMINAL 0.643 /
+DEGRADED 0.548 / RESTRICTED 0.518, with clean confidence min 0.6591 and attack
+p95 0.6268.
+
+Feature 2 is now the post-fit residual, which changes the composite it is
+derived from:
+
+- clean composite mean 0.751 → **0.768**, σ 0.061, p1 0.598
+- coherent carry-off composite d′ 5.09 → **8.32**
+- meaconing composite d′ 5.04 → **3.84**
+
+**Every threshold, FSR figure and displacement number in the README was fitted
+to the old distribution and needs regenerating before it is quoted anywhere.**
+The direction of change is favourable for the carry-off demo (better
+separation) and unfavourable for meaconing, so this is not a uniform shift
+that leaves the thresholds valid.
+
+Not edited here: those numbers and that section belong to the tracks that
+produced them, and silently rewriting another track's published results is
+worse than flagging them. Regeneration is a threshold-session task, since
+step 4 of the §10 procedure has to be redone on the new distributions.
