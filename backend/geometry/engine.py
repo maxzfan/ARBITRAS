@@ -109,6 +109,20 @@ def compute_geometry_block(t: datetime, excluded_sv: list[str],
     return _ENGINE.compute(t, excluded_sv, tracked_sv, freeze)
 
 
+def geometry_for(ep, excluded_sv: list[str] | None = None,
+                 freeze: bool = False) -> dict:
+    """Adapter for the `geometry_for(epoch)` seam in backend.replay.run.
+
+    Takes Track A's Epoch (ep.time, ep.df indexed by SV) and returns the
+    contract geometry block. `excluded_sv` stays empty until the 21:00
+    threshold session fixes the per-SV exclusion rule — the block flows
+    end to end either way, which is the 18:30 deliverable.
+    """
+    return compute_geometry_block(ep.time, excluded_sv or [],
+                                  tracked_sv=list(ep.df.index),
+                                  freeze=freeze)
+
+
 def set_sigma_uere(sigma_uere_m: float, alpha: float | None = None) -> None:
     """Called once the clean-day residual RMS is measured (21:00 session)."""
     global _ENGINE

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from .detection import (FeatureExtractor, Weights, fit, record, score,
                         write_jsonl)
+from .geometry.engine import geometry_for
 from .injector import SCENARIOS, inject, summarise
 from .rinex import noise
 from .rinex.loader import load_obs
@@ -67,7 +68,7 @@ def main(argv=None) -> None:
     cal = fit(clean, floor)
     print(cal)
 
-    recs = run(clean, cal)
+    recs = run(clean, cal, geometry_for=geometry_for)
     print(f"clean    {len(recs):5d} epochs -> "
           f"{write_jsonl(recs, Path(args.out) / 'clean.jsonl')}")
 
@@ -83,7 +84,7 @@ def main(argv=None) -> None:
         else:
             spoof = SCENARIOS[name](onset=onset)
         injected, truth = inject(clean, spoof, floor)
-        recs = run(injected, cal)
+        recs = run(injected, cal, geometry_for=geometry_for)
         truth.to_csv(Path(args.out) / f"{name}_truth.csv")
         print(f"{name:9s}{len(recs):5d} epochs -> "
               f"{write_jsonl(recs, Path(args.out) / f'{name}.jsonl')}")
