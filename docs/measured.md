@@ -622,3 +622,111 @@ Not edited here: those numbers and that section belong to the tracks that
 produced them, and silently rewriting another track's published results is
 worse than flagging them. Regeneration is a threshold-session task, since
 step 4 of the §10 procedure has to be redone on the new distributions.
+
+
+---
+
+# Elevation mask: 5 degrees, applied upstream (ruling 2026-09-05)
+
+**5 degrees is the standard aviation/ARAIM mask angle, taken from convention
+and NOT fitted to the exclusion bins it controls** — a cutoff tuned on the data
+it governs is a threshold in disguise. The measured bins (100% of clean-day
+exclusions in 0–15°, median 0.4°) confirm 5° is a safe place to cut; they did
+not choose it.
+
+## Applied as a mask, not an exemption
+
+Satellites below 5° are dropped from the epoch **entirely**, before feature
+scoring, before the position solution, and before the geometry block
+(`rinex.solve.masked_epoch`). After masking they are neither trusted, nor
+excludable, nor usable as cover.
+
+The rejected alternative — exempting low-elevation satellites from exclusion
+eligibility while still solving on them — creates a **safe harbour**:
+satellites that can never be flagged are exactly the ones an attacker would
+choose to capture. `ExclusionRule` now has no elevation term at all, and a
+test asserts `flagged_sv` takes no elevation argument so the path cannot come
+back.
+
+## The denominator, coordinated with Track C
+
+The information ratio's denominator `det(HᵀH_all)` must be taken over the
+masked set too, or the ratio moves for reasons unrelated to any attack.
+
+Track C's engine already masks its own basis — but at **10°**, its default,
+against the ruled 5°. Left alone, the position solution would have stood on a
+5° set while the geometry ratio stood on a 10° one. Resolved by making the mask
+angle a single definition (`rinex.solve.EL_MASK_DEG`) that `backend.replay`
+pushes into the geometry engine via a new `set_el_mask_deg`, added in the same
+style as their existing `set_sigma_uere`. Verified end to end: the minimum
+elevation appearing in the emitted geometry block is exactly 5.00°.
+
+**Validated on three constellations out of five.** The elevation bin table
+needs Keplerian broadcast ephemeris, which covers G/E/C only, so GLONASS and
+SBAS — about a quarter of the tracked sky — were not part of the validation.
+Satellites without usable ephemeris are *kept* rather than masked, deliberately:
+they are absent from H either way, so masking them would silently remove
+GLONASS from the C/N₀ feature while claiming to be a geometry decision.
+
+`satellites_tracked` now counts **usable** satellites (post-mask) rather than
+raw signals present in the file. That is the number that matters for a trust
+layer — how many satellites the solution is standing on.
+
+---
+
+# Limitation: the temporal signature is reproduced ~60x slow
+
+Decision 3 approved as proposed — flat `+power_db` from capture onward, with
+the fade emerging from the detector's rolling-mean memory rather than from any
+injected decay constant.
+
+**The timescale does not survive the data source, and this is a limitation of
+the archive, not a defect of the injector.** §7's stage-2 fade is ~10 s. Our
+epochs are 30 s, and the C/N₀ trailing mean is 20 epochs, so the emergent fade
+sits at **~10 minutes**. We reproduce the *shape* of the four-stage §7
+signature — onset spike, fade to baseline, lift-off, elevated steady state — at
+a timescale roughly **60× longer than the physical one**, because 30 s archived
+observables cannot resolve a 10 s transient. Nothing in the measurement domain
+can; resolving it needs the raw IQ that §12 puts out of scope by construction.
+
+Say the shape is right and the clock is stretched. Do not present the ~10
+minute fade as the receiver's loop dynamics.
+
+---
+
+# Injected transients: demo only, never in measurement
+
+Decision 5 values approved — capture jitter 3σ of measured clean C/N₀ noise,
+lift-off transient 6σ of measured clean code-minus-carrier, one epoch each —
+and split by config per the ruling:
+
+| config | transients |
+|---|---|
+| demo (`Spoof.transients` default) | **ON** |
+| every sweep and measurement run | **OFF** (forced in `run_sweep`, asserted by test) |
+
+Both are recorded per epoch in the injector's truth log (`transients` column)
+and in every sweep record, so no reported number is ambiguous about which
+setting produced it.
+
+Verified: with transients off, the lift-off CMC spike disappears from exactly
+one epoch (1.226 m = 6 × 0.204 m) and the capture C/N₀ jitter from exactly the
+capture epoch (0.91 dB rms ≈ 3 × 0.262 dB); every other epoch is bit-identical
+between the two runs.
+
+A bug this split caught: the capture jitter initially ignored the flag
+entirely. It was invisible in a naive diff because both runs draw from the same
+seed, so the jitter cancelled and the difference read 0.000 dB — which looked
+like "the flag works" rather than "the flag does nothing".
+
+---
+
+# Meaconing 300 m: a lower bound, not decomposed
+
+Decision 4 approved as written. 300 m ≈ 1 μs of excess path, the minimum for
+any repeater with physically separated antennas. It is labelled a **lower
+bound** and deliberately not decomposed into antenna-to-antenna path plus
+amplifier/hardware group delay: an honest decomposition needs a repeater
+geometry and hardware we have not specified, and inventing both to arrive back
+at the same number would dress a guess up as a derivation. A real meaconer adds
+unmodelled hardware delay, so the true bias is ≥ 300 m.

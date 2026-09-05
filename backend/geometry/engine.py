@@ -165,6 +165,23 @@ def geometry_for(ep, excluded_sv: list[str] | None = None,
                                   freeze=freeze)
 
 
+def set_el_mask_deg(el_mask_deg: float) -> None:
+    """Set the shared elevation mask on the singleton engine.
+
+    Added for Track A coordination (ruling of 2026-09-05, item 1). The mask
+    angle is ruled at 5 degrees and defined once, in
+    `backend.rinex.solve.EL_MASK_DEG`; backend.replay pushes it here so the
+    position solution and the information-ratio denominator stand on the same
+    satellite set. The engine's own default (10 degrees) is stricter, and
+    leaving the two unequal would move the ratio for reasons unrelated to any
+    attack.
+    """
+    global _ENGINE
+    if _ENGINE is None:
+        _ENGINE = GeometryEngine()
+    _ENGINE.el_mask_deg = el_mask_deg
+
+
 def set_sigma_uere(sigma_uere_m: float, alpha: float | None = None) -> None:
     """Called once the clean-day residual RMS is measured (21:00 session)."""
     global _ENGINE

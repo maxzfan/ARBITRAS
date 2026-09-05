@@ -19,16 +19,18 @@ from datetime import datetime
 from pathlib import Path
 
 from .detection import (CrossConstellation, ExclusionRule, FeatureExtractor,
-                        FLAT_K5, MASKED_K3, Weights, fit, fit_cross,
+                        FLAT_K5, RULED_K3, Weights, fit, fit_cross,
                         flagged_sv, record, score, write_jsonl)
 from .detection.emit import USN8_ECEF, ecef_to_lla
 # Track C's geometry provider. Imported under an alias: run() takes a
 # parameter called `geometry_for`, and the bare name would shadow it.
 from .geometry.engine import geometry_for as track_c_geometry_for
+from .geometry.engine import set_el_mask_deg as track_c_set_el_mask
 from .injector import DEMO_CARRIER_RATE_ERROR, SCENARIOS, inject, summarise
 from .rinex import ephemeris, noise
 from .rinex.loader import load_obs
-from .rinex.solve import residual_panel, solve_per_constellation
+from .rinex.solve import (EL_MASK_DEG, masked_epoch, residual_panel,
+                          solve_per_constellation)
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
 ONSET = datetime(2026, 8, 20, 12, 30)
@@ -36,7 +38,8 @@ ONSET = datetime(2026, 8, 20, 12, 30)
 
 def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
         xc: CrossConstellation | None = None, nav=None,
-        exclusion: ExclusionRule | None = None):
+        exclusion: ExclusionRule | None = None,
+        el_mask_deg: float | None = EL_MASK_DEG):
     """Score a replay. Returns the list of §5 records.
 
     `geometry_for(epoch, excluded_sv=...)` and `credential_for(epoch)` are the
@@ -62,14 +65,16 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
     exactly the degraded fallback §6b requires to be visible.
 
     `exclusion` is the rule behind `excluded_sv` (detection.ExclusionRule).
-    The ruled default MASKED_K3 is disarmed until its mask cutoff is set, so
-    the list is empty and the geometry block carries whatever Track C put
-    there. See ExclusionRule for the measured clean-day cost.
+    The ruled default is RULED_K3 (k = 3.0); the elevation mask is a separate,
+    upstream mechanism and is not part of the rule. See ExclusionRule for the
+    measured clean-day cost of each k.
     """
     weights = weights or Weights()
     fx = FeatureExtractor(cal)
     out = []
     for ep in epochs:
+        if el_mask_deg is not None and nav is not None:
+            ep = masked_epoch(ep, nav, cutoff_deg=el_mask_deg)
         # One solve per epoch, shared: feature 2 needs the post-fit residuals,
         # feature 4 needs the per-constellation solutions, and §5 needs the
         # believed position. Solving twice would be the same quantity computed
@@ -84,14 +89,7 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
                 position = ecef_to_lla(*sols["all"]["pos"])
         # The detector's own distrust list, computed BEFORE the geometry block
         # because Track C's information ratio is taken over the trusted subset.
-        el = None
-        if (isinstance(exclusion, ExclusionRule)
-                and exclusion.elevation_mask_deg is not None
-                and nav is not None):
-            el = ephemeris.elevations_at(ep.time, list(ep.df.index),
-                                         USN8_ECEF, nav)
-        excluded = flagged_sv(res["per_sv"], cal.z_sat, exclusion,
-                              elevations=el)
+        excluded = flagged_sv(res["per_sv"], cal.z_sat, exclusion)
         geom = geometry_for(ep, excluded_sv=excluded) if geometry_for else None
         cred = credential_for(ep) if credential_for else "VALID"
         out.append(record(ep.time, feats, score(feats, geom, weights),
@@ -106,15 +104,14 @@ def main(argv=None) -> None:
     ap.add_argument("--systems", default="GERCS")
     ap.add_argument("--scenario", choices=list(SCENARIOS) + ["all"], default="all")
     ap.add_argument("--onset", default=ONSET.isoformat())
-    ap.add_argument("--exclusion", choices=("masked_k3", "flat_k5", "off"),
-                    default="masked_k3",
-                    help="exclusion rule behind excluded_sv. masked_k3 is the "
-                         "ruled default and is DISARMED until its mask cutoff "
-                         "is set (emits nothing); flat_k5 is the configured "
-                         "fallback.")
-    ap.add_argument("--elevation-mask-deg", type=float, default=None,
-                    help="mask cutoff for masked_k3. Deliberately unset: "
-                         "picking it is a threshold-session decision.")
+    ap.add_argument("--exclusion", choices=("k3", "flat_k5", "off"),
+                    default="k3",
+                    help="exclusion rule behind excluded_sv. k3 is the ruled "
+                         "value; flat_k5 is the configured fallback.")
+    ap.add_argument("--el-mask-deg", type=float, default=EL_MASK_DEG,
+                    help=f"elevation mask, degrees (ruled {EL_MASK_DEG:g}, the "
+                         "ARAIM convention). Satellites below it are dropped "
+                         "from the epoch entirely.")
     ap.add_argument("--carrier-rate-error", type=float,
                     default=DEMO_CARRIER_RATE_ERROR,
                     help="carry-off code/carrier divergence rate, m/s. "
@@ -143,14 +140,17 @@ def main(argv=None) -> None:
     print(xc.cal)
 
     xc.reset()
-    rule = {"masked_k3": MASKED_K3, "flat_k5": FLAT_K5,
-            "off": None}[args.exclusion]
-    if rule is not None and args.elevation_mask_deg is not None:
-        rule = replace(rule, elevation_mask_deg=args.elevation_mask_deg)
+    rule = {"k3": RULED_K3, "flat_k5": FLAT_K5, "off": None}[args.exclusion]
     print(rule if rule else "exclusion rule: off")
+    # One mask angle for both halves of the score: push Track A's ruled value
+    # into Track C's engine so the information-ratio denominator is taken over
+    # the same masked set the position solution used.
+    track_c_set_el_mask(args.el_mask_deg)
+    print(f"elevation mask {args.el_mask_deg:g} deg, applied upstream of "
+          f"scoring, solving and geometry (both tracks)")
 
     recs = run(clean, cal, geometry_for=track_c_geometry_for, xc=xc, nav=nav,
-               exclusion=rule)
+               exclusion=rule, el_mask_deg=args.el_mask_deg)
     print(f"clean    {len(recs):5d} epochs -> "
           f"{write_jsonl(recs, Path(args.out) / 'clean.jsonl')}")
 
@@ -164,7 +164,8 @@ def main(argv=None) -> None:
         injected, truth = inject(clean, spoof, floor)
         xc.reset()
         recs = run(injected, cal, geometry_for=track_c_geometry_for,
-                   xc=xc, nav=nav, exclusion=rule)
+                   xc=xc, nav=nav, exclusion=rule,
+                   el_mask_deg=args.el_mask_deg)
         truth.to_csv(Path(args.out) / f"{name}_truth.csv")
         print(f"{name:9s}{len(recs):5d} epochs -> "
               f"{write_jsonl(recs, Path(args.out) / f'{name}.jsonl')}")

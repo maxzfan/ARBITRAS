@@ -253,12 +253,10 @@ def test_composite_is_never_emitted_without_its_parts():
 
 # -- excluded_sv ---------------------------------------------------------------
 
-def test_ruled_exclusion_rule_is_disarmed_until_its_mask_is_set(day, cal):
-    """MASKED_K3 emits nothing while the mask cutoff is unset."""
-    from backend.detection import MASKED_K3, flagged_sv
+
+def test_no_rule_means_no_exclusions(day, cal):
+    from backend.detection import flagged_sv
     per_sv = FeatureExtractor(cal).run(day[:60])[-1]["per_sv"]
-    assert MASKED_K3.armed is False
-    assert flagged_sv(per_sv, cal.z_sat, MASKED_K3) == []
     assert flagged_sv(per_sv, cal.z_sat, None) == []
 
 
@@ -280,22 +278,6 @@ def test_exclusion_rule_names_only_saturated_satellites(day, cal):
         assert got == sorted(norm.index[norm >= k])
         assert set(got) <= set(per_sv.index)
 
-
-def test_armed_mask_needs_elevations_and_drops_low_satellites(day, cal):
-    from dataclasses import replace as _replace
-
-    from backend.detection import MASKED_K3, flagged_sv
-    per_sv = FeatureExtractor(cal).run(day[:200])[-1]["per_sv"]
-    rule = _replace(MASKED_K3, k=1.0, elevation_mask_deg=30.0)
-    assert rule.armed is True
-    with pytest.raises(ValueError):
-        flagged_sv(per_sv, cal.z_sat, rule)
-    unmasked = flagged_sv(per_sv, cal.z_sat, 1.0)
-    el = pd.Series({sv: (90.0 if i % 2 else 1.0)
-                    for i, sv in enumerate(per_sv.index)})
-    masked = flagged_sv(per_sv, cal.z_sat, rule, elevations=el)
-    assert set(masked) <= set(unmasked)
-    assert all(el[sv] >= 30.0 for sv in masked)
 
 
 def test_replay_emits_detector_derived_excluded_sv(day, cal, nav):
@@ -355,3 +337,40 @@ def test_contract_doc_and_fixture_match_the_emitted_record():
     assert geom(paths(spec)) == geom(paths(fixture))
     assert set(spec["features"]) == set(FEATURE_NAMES)
     assert set(fixture["features"]) == set(FEATURE_NAMES)
+
+
+# -- the elevation mask is upstream, not an exclusion exemption --------------
+
+def test_mask_drops_low_satellites_from_the_epoch_entirely(day, nav):
+    """Ruled: masked satellites are neither trusted, nor excludable, nor
+    available as cover. So they must be gone before anything scores."""
+    from backend.rinex import ephemeris
+    from backend.rinex.solve import EL_MASK_DEG, masked_epoch
+    from backend.detection.emit import USN8_ECEF
+
+    ep = day[0]
+    m = masked_epoch(ep, nav, cutoff_deg=EL_MASK_DEG)
+    el = ephemeris.elevations_at(ep.time, list(ep.df.index), USN8_ECEF, nav)
+    for sv in el.index:
+        if el[sv] < EL_MASK_DEG:
+            assert sv not in m.df.index
+        else:
+            assert sv in m.df.index
+    # satellites with no Kepler ephemeris (GLONASS, SBAS) are kept, not
+    # silently dropped -- they are not in H either way
+    assert all(sv in m.df.index for sv in ep.df.index if sv not in el.index)
+
+
+def test_exclusion_rule_has_no_elevation_term(day, cal):
+    """The safe-harbour path is gone: no satellite is exempt from flagging."""
+    from backend.detection import ExclusionRule, flagged_sv
+    import inspect
+
+    assert not hasattr(ExclusionRule(k=3.0), "elevation_mask_deg")
+    assert "elev" not in inspect.signature(flagged_sv).parameters
+
+
+def test_ruled_exclusion_k_is_three(day, cal):
+    from backend.detection import RULED_K3
+    assert RULED_K3.k == 3.0
+    assert RULED_K3.armed is True

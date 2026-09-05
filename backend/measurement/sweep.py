@@ -233,8 +233,11 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
         for domain, n, rate, bearing in cfg.cells():
             maker = CARRY_OFF if domain == "position" else CLOCK_CARRY_OFF
             kw = {"bearing_deg": bearing} if domain == "position" else {}
+            # Ruled: transients OFF in every sweep and measurement run, so a
+            # reported displacement is never partly our own injected spike.
             spoof = maker(onset=cfg.onset, carrier_rate_error=rate,
-                          target_svs=top_n_by_elevation(n), **kw)
+                          target_svs=top_n_by_elevation(n),
+                          transients=False, **kw)
             injected, truth = inject(clean, spoof, floor, nav=nav,
                                      sta_ecef=sta)
             inactive = rate == 0.0
@@ -278,6 +281,7 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
                 fh.write(json.dumps({
                     "type": "epoch", "domain": domain, "subset_size": n,
                     "carrier_rate_error": rate, "bearing_deg": bearing,
+                    "transients": False,
                     "cmc_features_inactive": inactive,
                     "time": ep.time.isoformat() + "Z", "stage": tr.stage,
                     "n_spoofed": tr.n_spoofed, "excluded_sv": sorted(excluded),
@@ -302,6 +306,7 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
             fh.write(json.dumps({
                 "type": "summary", "domain": domain, "subset_size": n,
                 "carrier_rate_error": rate, "bearing_deg": bearing,
+                "transients": False,
                 "cmc_features_inactive": inactive,
                 "inactive_note": ("carrier_rate_error = 0: spoofer is fully "
                                   "carrier-coherent; pseudorange_residual and "

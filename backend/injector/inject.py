@@ -108,7 +108,7 @@ def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2),
             per_sv_offset = per_sv_offset.reindex(svs).fillna(offset)
 
         if n:
-            if (stage == WALK and not liftoff_done
+            if (stage == WALK and not liftoff_done and spoof.transients
                     and spoof.carrier_rate_error > 0):
                 # §7 stage 3: distortion spikes briefly again at lift-off. A
                 # fully coherent spoofer (rate 0) produces no code/carrier
@@ -116,8 +116,10 @@ def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2),
                 divergence += spoof.liftoff_transient_sigma * floor.cmc_sigma
                 liftoff_done = True
 
-            jitter = (rng.normal(0.0, spoof.capture_jitter_sigma * floor.cn0_sigma, n)
-                      if stage == CAPTURE else 0.0)
+            jitter = (rng.normal(0.0,
+                                 spoof.capture_jitter_sigma * floor.cn0_sigma,
+                                 n)
+                      if stage == CAPTURE and spoof.transients else 0.0)
 
             off = offset if per_sv_offset is None else per_sv_offset.to_numpy()
             for b in bands:
@@ -131,7 +133,8 @@ def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2),
         out.append(Epoch(time=ep.time, df=df))
         rows.append({
             "time": ep.time, "stage": stage, "scenario": spoof.name,
-            "walk_mode": spoof.walk_mode, "n_spoofed": n,
+            "walk_mode": spoof.walk_mode, "transients": spoof.transients,
+            "n_spoofed": n,
             "range_offset_m": offset if n else 0.0,
             # Commanded displacement. What the attack ASKED for; the achieved
             # figure comes from the solved position and is measured, never
@@ -159,7 +162,9 @@ def summarise(truth: pd.DataFrame) -> str:
             f"on bearing {active['bearing_deg'].iloc[-1]:.0f} deg"
             if mode == "position" else
             f"max uniform range offset {active['range_offset_m'].max():.1f} m")
-    return (f"{active['scenario'].iloc[0]} ({mode} domain): {len(active)} "
-            f"attack epochs {stages}, {active['n_spoofed'].max()} SV at peak, "
-            f"{walk}, max code-carrier divergence "
+    return (f"{active['scenario'].iloc[0]} ({mode} domain, transients "
+            f"{'ON' if active['transients'].iloc[0] else 'OFF'}): "
+            f"{len(active)} attack epochs {stages}, "
+            f"{active['n_spoofed'].max()} SV at peak, {walk}, "
+            f"max code-carrier divergence "
             f"{active['cmc_divergence_m'].max():.2f} m")
