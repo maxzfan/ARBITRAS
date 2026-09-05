@@ -166,14 +166,27 @@
            font-family:var(--sans);font-weight:500;color:var(--faint);font-size:11px;
            letter-spacing:.16em;text-transform:uppercase;pointer-events:none}
 
-  /* ---- explanation, full width so it is never clipped ----------------- */
+  /* ---- explanation ----------------------------------------------------- */
+  /* Always rendered, at a FIXED height, so the flex .stage above it -- and the
+     WebGL canvas inside it -- never change size as the text re-wraps from epoch
+     to epoch (a canvas resize clears the drawing buffer and paints one black
+     frame, and the scene jumps when the pane's aspect changes). The height is
+     the tallest layout observed: every §5 record in out/{demo,carryoff,clean,
+     live}.jsonl replayed through the arbiter (641 distinct explanations) and
+     rendered at viewport widths 1100-1920 needs at most 3 headline lines and
+     4 detail lines; 4 detail lines (13px x 1.62) is the taller column, plus the
+     15px vertical padding and the 1px top border (border-box). Longer text is
+     clamped with an ellipsis rather than allowed to grow the bar. */
   .expbar{flex:0 0 auto;border-top:1px solid var(--keyline);background:#0A0C0E;
           padding:15px 24px;display:grid;grid-template-columns:minmax(260px,26%) 1fr;
-          gap:30px;align-items:start}
+          gap:30px;align-items:start;overflow:hidden;
+          height:calc(4 * 13px * 1.62 + 30px + 1px)}
   .expbar .h{font-family:var(--sans);font-weight:700;font-size:19px;line-height:1.28;
-           letter-spacing:-.005em}
+           letter-spacing:-.005em;display:-webkit-box;-webkit-box-orient:vertical;
+           -webkit-line-clamp:3;overflow:hidden}
   .expbar .d{font-family:var(--sans);font-weight:400;font-size:13px;color:var(--dim);
-           line-height:1.62;max-width:132ch}
+           line-height:1.62;max-width:132ch;display:-webkit-box;-webkit-box-orient:vertical;
+           -webkit-line-clamp:4;overflow:hidden}
 
   /* ---- 3D environment ------------------------------------------------- */
   .skl.env{text-shadow:0 1px 2px #000,0 0 6px #000c}
@@ -265,6 +278,22 @@ const QS = new URLSearchParams(window.location.search);
 const VIEW = ['map', 'sky', 'split'].includes(QS.get('view')) ? QS.get('view') : 'env';
 const ORBIT = QS.get('orbit') === '1';
 const LOCK = QS.get('lock') === '1';     // ?lock=1: no user camera input (video capture)
+// ?hz=N: refresh cadence of the numeric/text readouts -- strip digits and bars,
+// displacement readout, HUD counts, timestamps, route metres. 0 = every epoch.
+// The stream and the 3D scene are NOT affected: they take every epoch at the
+// stream rate (design.md §5, 10-20/s) because SatLayer lerps satellite motion
+// over the measured inter-epoch interval. Trust-state and credential changes
+// bypass the cadence and land on the epoch they happen (see useThrottled).
+// Why 3 Hz: a 2-decimal value has to hold still long enough to be read, and
+// reading a 3-5 glyph token is one fixation plus a saccade, roughly 250-350 ms;
+// a 333 ms hold is therefore the fastest cadence at which each value is legible
+// before it is replaced (bench instruments settle on 2-4 readings/s for the
+// same reason). At --rate 15 this is every 5th epoch. Measured (headless
+// Chromium, --rate 15): unthrottled, the confidence digits changed 12-13x/s and
+// the strip saw ~63 text mutations/s; at 3 Hz, ~3x/s and ~18/s, with the scene
+// still taking all ~14/s and state changes still landing on their own epoch.
+const DISPLAY_HZ_DEFAULT = 3;
+const DISPLAY_HZ = QS.has('hz') && Number.isFinite(+QS.get('hz')) ? +QS.get('hz') : DISPLAY_HZ_DEFAULT;
 const R = window.Route;                   // console/web/route.js -- mirrors console/mission.py
 
 const COLOR = {NOMINAL:'var(--nominal)', DEGRADED:'var(--degraded)',
@@ -598,9 +627,15 @@ function SkyDome({sky, orbit}) {
       controls.addEventListener('start', () => { st.userCam = true; });
     }
     const ro = new ResizeObserver(([e]) => {
-      st.w = Math.round(e.contentRect.width); st.h = Math.round(e.contentRect.height);
+      const w = Math.round(e.contentRect.width), h = Math.round(e.contentRect.height);
+      if (w === st.w && h === st.h) return;          // zero-delta: leave the drawing buffer alone
+      st.w = w; st.h = h;
       renderer.setSize(st.w, st.h, false);
       if (st.userCam) { cam.aspect = st.w/st.h; cam.updateProjectionMatrix(); } else place();
+      // setSize re-allocates (clears) the drawing buffer. ResizeObserver callbacks
+      // run after this frame's rAF and before paint, so repaint here or the
+      // compositor presents the cleared canvas for one frame.
+      renderer.render(scene, cam);
     });
     ro.observe(el);
 
@@ -1083,11 +1118,20 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       controls.maxPolarAngle = 1.52; controls.minDistance = 4; controls.maxDistance = 350;
       controls.addEventListener('start', () => { st.userCam = true; });
     }
+    // One draw of the current state, no time step. Used by the loop and by place().
+    const draw = () => { if (composer) composer.render(); else renderer.render(scene, cam); };
     const place = () => { if (!st.w || !st.h) return;
       cam.aspect = st.w / st.h; cam.updateProjectionMatrix();
-      renderer.setSize(st.w, st.h, false); if (composer) composer.setSize(st.w, st.h); };
+      renderer.setSize(st.w, st.h, false); if (composer) composer.setSize(st.w, st.h);
+      // setSize re-allocates (clears) the drawing buffer. ResizeObserver callbacks
+      // run after this frame's rAF and before paint, so without a draw here the
+      // compositor presents the cleared canvas -- a black frame -- until the
+      // next rAF. Guarded on st.frames so the very first paint stays the loop's.
+      if (st.frames) draw(); };
     const ro = new ResizeObserver(([e]) => {
-      st.w = Math.round(e.contentRect.width); st.h = Math.round(e.contentRect.height); place(); });
+      const w = Math.round(e.contentRect.width), h = Math.round(e.contentRect.height);
+      if (w === st.w && h === st.h) return;          // zero-delta: leave the drawing buffer alone
+      st.w = w; st.h = h; place(); });
     ro.observe(el);
 
     const v = new T.Vector3(), tv = new T.Vector3(), fwd = new T.Vector3(), look = new T.Vector3(),
@@ -1188,7 +1232,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
           st.lblGhost.el.textContent = (dx < 0 && Math.abs(dx) > Math.abs(dy) ? arrow : '') + st.lblGhost.base + ' · OFF FRAME' + (dx < 0 && Math.abs(dx) > Math.abs(dy) ? '' : arrow);
         }
       }
-      if (composer) composer.render(); else renderer.render(scene, cam);
+      draw(); st.frames = (st.frames || 0) + 1;
       raf = requestAnimationFrame(loop);
     };
     // faint dome graticule, grouped so it can follow the vehicle
@@ -1326,6 +1370,32 @@ function Dropped({geometry}) {
     </div>`;
 }
 
+// Hold `value` and republish it at most every 1/hz s. The latest value is always
+// the one that lands (trailing flush), so the display trails the stream by at
+// most one interval and never sticks on a stale epoch when the stream ends.
+// A change in `flushKey` publishes immediately and restarts the interval: that
+// is how a trust-state or credential transition is never delayed for the sake
+// of the cadence. hz <= 0 passes every value through.
+function useThrottled(value, hz, flushKey) {
+  const [shown, setShown] = useState(value);
+  const latest = useRef(value); latest.current = value;
+  const last = useRef(-Infinity), timer = useRef(null), lastKey = useRef(flushKey);
+  useEffect(() => {
+    const force = flushKey !== lastKey.current; lastKey.current = flushKey;
+    const wait = hz > 0 && !force ? last.current + 1000 / hz - performance.now() : 0;
+    if (wait <= 0) {
+      clearTimeout(timer.current); timer.current = null;
+      last.current = performance.now(); setShown(value); return;
+    }
+    if (timer.current) return;                 // a trailing flush is already scheduled
+    timer.current = setTimeout(() => {
+      timer.current = null; last.current = performance.now(); setShown(latest.current);
+    }, wait);
+  }, [value, hz, flushKey]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return shown;
+}
+
 function App() {
   const [d, setD] = useState(null);
   const [trail, setTrail] = useState([]);
@@ -1361,23 +1431,39 @@ function App() {
     return () => window.removeEventListener('keydown', k);
   }, []);
 
+  // Two views of the stream. `d` is the latest epoch and drives everything that
+  // must move on the epoch it happens: trust state, credential, layer badge,
+  // banners, explanation, and the 3D scene (which lerps between epochs and
+  // needs every one). `s` is the same object sampled at DISPLAY_HZ for the
+  // digits, so the composite confidence, the four sub-scores, the geometry
+  // block, the dropped set and the HUD counts are always read from ONE epoch
+  // (never mixed) and hold still long enough to be read. `s` trails `d` by at
+  // most one display interval, except on a state/credential/layer change,
+  // where it is republished on that very epoch.
   const state = d ? d.state : 'NOMINAL';
-  const conf = d && d.confidence != null ? d.confidence : null;
   const layerOn = !d || d.layer_on;
+  const s = useThrottled(d, DISPLAY_HZ, d ? `${d.state}|${d.credential_status}|${d.layer_on}` : '');
   const sky = d && d.geometry && d.geometry.sky;
-  const nTrusted = sky ? sky.filter(s => s.trusted).length : 0;
-  const nExcl = sky ? sky.length - nTrusted : 0;
-  // ONE displacement value drives the readout, the alert test, the ghost and its
-  // label (the 3D ghost only lerps its position toward it).
-  const D = dispOf(mission, d);
-  const sep = D.mag;
-  const breached = mission && sep > mission.alert_limit_m;
   // layer=off is about the signal side; the credential channel is drawn static VALID.
   const credShown = layerOn ? (d && d.credential_status) || 'VALID' : 'VALID';
+  // Scene displacement, full rate: the ghost lerps its position toward it and
+  // EnvScene writes its own 'BELIEVED · N M' label from it on every epoch.
+  const D = dispOf(mission, d);
+
+  // Display snapshot. The readout number and its 'beyond alert limit' caption
+  // come from the same sampled epoch so the digits never contradict the caption.
+  // The in-scene ghost label can lead the readout by up to one display interval
+  // (it rides with the ghost, which must move every epoch); accepted.
+  const conf = s && s.confidence != null ? s.confidence : null;
+  const sSky = s && s.geometry && s.geometry.sky;
+  const nTrusted = sSky ? sSky.filter(x => x.trusted).length : 0;
+  const nExcl = sSky ? sSky.length - nTrusted : 0;
+  const sep = dispOf(mission, s).mag;
+  const breached = mission && sep > mission.alert_limit_m;
+  const ts = s && s.timestamp ? s.timestamp.slice(11,19) + ' UTC' : '—';
+  const routeM = mission && s ? Math.min(mission.route_length_m, s.epoch_index * mission.speed_m_per_epoch) : 0;
   const showMap = VIEW === 'map' || VIEW === 'split', showSky = VIEW === 'sky' || VIEW === 'split';
   const showEnv = VIEW === 'env';
-  const ts = d && d.timestamp ? d.timestamp.slice(11,19) + ' UTC' : '—';
-  const routeM = mission && d ? Math.min(mission.route_length_m, d.epoch_index * mission.speed_m_per_epoch) : 0;
   const orbitHint = (showEnv || showSky) && !LOCK ? 'drag to orbit · ' : '';
 
   return html`
@@ -1398,12 +1484,15 @@ function App() {
 
     <div className="strip">
       <${Authority} state=${state}/>
+      ${/* state and credential are immediate (d); every number is from the one
+           sampled epoch (s). Bar and digit colour follow the state the instant
+           it changes; the snapshot is republished on that same epoch. */ null}
       <${Confidence} conf=${conf} credential=${d && d.credential_status}
-                     thresholds=${d && d.thresholds} state=${state}/>
-      <${Features} features=${d && d.features}/>
-      <${Geometry} geometry=${d && d.geometry} divergence=${d && d.geometry_divergence}
-                   tracked=${d && d.satellites_tracked}/>
-      <${Dropped} geometry=${d && d.geometry}/>
+                     thresholds=${s && s.thresholds} state=${state}/>
+      <${Features} features=${s && s.features}/>
+      <${Geometry} geometry=${s && s.geometry} divergence=${s && s.geometry_divergence}
+                   tracked=${s && s.satellites_tracked}/>
+      <${Dropped} geometry=${s && s.geometry}/>
     </div>
 
     <div className=${'stage' + (showEnv ? ' env' : '')}>
@@ -1444,7 +1533,7 @@ function App() {
           <div className="skycap" style=${{top: showMap ? '18px' : '120px'}}>
             Sky from USN8 · GPS + Galileo
             <div className="n2"><b>${nTrusted}</b> trusted · <b>${nExcl}</b> excluded
-              · real ephemeris, ${d && d.timestamp ? d.timestamp.slice(11,19) + ' UTC' : '—'}</div>
+              · real ephemeris, ${ts}</div>
           </div>
           <div className="skyleg">
             <div><i style=${{background:'#A9CCEA'}}></i>trusted · line of sight kept</div>
@@ -1463,11 +1552,10 @@ function App() {
       </div>
     </div>
 
-    ${d && d.explanation && html`
-      <div className="expbar">
-        <div className="h">${d.explanation.headline}</div>
-        <div className="d">${d.explanation.detail}</div>
-      </div>`}`;
+    <div className="expbar">
+      <div className="h">${d && d.explanation ? d.explanation.headline : ''}</div>
+      <div className="d">${d && d.explanation ? d.explanation.detail : ''}</div>
+    </div>`;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
