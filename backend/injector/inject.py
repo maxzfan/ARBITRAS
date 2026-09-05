@@ -52,10 +52,18 @@ def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2)):
     diverge_mps = spoof.carrier_mismatch_sigma * floor.cmc_sigma / dt_s
 
     out, rows, liftoff_done = [], [], False
+    frozen = None                    # target set, resolved once at capture
     for ep in epochs:
         stage, since = spoof.stage(ep.time)
         df = ep.df.copy(deep=True)
-        mask = spoof.select(df) & (stage != CLEAN)
+        if stage == CLEAN:
+            mask = np.zeros(len(df), dtype=bool)
+        elif spoof.target is not None:
+            if frozen is None:
+                frozen = spoof.resolve_target(ep)
+            mask = df.index.isin(frozen)
+        else:
+            mask = spoof.select(df)
         n = int(mask.sum())
 
         offset = spoof.range_offset_m(ep.time)

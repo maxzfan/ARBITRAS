@@ -55,6 +55,13 @@ class Spoof:
     walk_off_mps: float              # §7 equivalent range drift, m/s
     onset: datetime                  # first epoch of the attack
     svs: object = "all"              # "all", a constellation letter, or a list
+    # Target selection, resolved ONCE at the capture epoch and held fixed for
+    # the run -- a real spoofer commits to a channel set; it does not re-plan
+    # per epoch. None falls back to `svs` (live per-epoch selection, kept for
+    # simplistic's "all SVs at once" and meaconing's "whatever the repeater
+    # hears", where live selection is the physically right reading).
+    # Accepts an explicit SV list, "all_gps", or a rule callable(epoch)->list.
+    target: object = None
     capture_s: float = 10.0          # §7 stage 2: ~10 s to loop lock
     liftoff_delay_s: float = 0.0     # §7 stage 3 begins after lock
     duration_s: float | None = None  # None = runs to the end of the replay
@@ -66,6 +73,15 @@ class Spoof:
     liftoff_transient_sigma: float = 6.0  # x clean cmc sigma, at lift-off
 
     seed: int = 20260820
+
+    def resolve_target(self, epoch) -> list:
+        """Evaluate the target selection at the capture epoch. inject() calls
+        this exactly once per run and freezes the result."""
+        if callable(self.target):
+            return list(self.target(epoch))
+        if self.target == "all_gps":
+            return all_gps(epoch)
+        return list(self.target)
 
     def select(self, df: pd.DataFrame) -> np.ndarray:
         """Boolean mask over a per-epoch frame: which satellites are spoofed."""
@@ -95,6 +111,32 @@ class Spoof:
         return self.common_bias_m + self.walk_off_mps * walked
 
 
+# --- target selection rules ---------------------------------------------------
+
+def all_gps(epoch) -> list:
+    """Every GPS satellite tracked at the capture epoch."""
+    return [sv for sv in epoch.df.index if sv.startswith("G")]
+
+
+def top_n_by_elevation(n: int, sta_ecef=None):
+    """The n tracked GPS satellites highest in the sky at the capture epoch.
+
+    Elevation is computed from broadcast ephemeris at the capture epoch and the
+    resulting set is held fixed for the run (inject() freezes it). The high
+    half of the sky is what a real single-transmitter spoofer takes first:
+    strongest signals, longest passes, most leverage on the solution.
+    """
+    def rule(epoch) -> list:
+        from ..detection.emit import USN8_ECEF
+        from ..rinex import ephemeris
+        gps = [sv for sv in epoch.df.index if sv.startswith("G")]
+        el = ephemeris.elevations_at(epoch.time, gps,
+                                     sta_ecef or USN8_ECEF)
+        return list(el.sort_values(ascending=False).index[:n])
+    rule.__name__ = f"top_{n}_by_elevation"
+    return rule
+
+
 # --- the three §7 scenarios -------------------------------------------------
 # Power figures are the midpoints of the §7 ranges; the ranges themselves are
 # what the §10 sweep varies. Nothing outside a §7 range is a default here.
@@ -112,15 +154,21 @@ def SIMPLISTIC(onset: datetime, **kw) -> Spoof:
                          common_bias_m=250.0), **kw)
 
 
-def CARRY_OFF(onset: datetime, **kw) -> Spoof:
+def CARRY_OFF(onset: datetime, target_svs="all_gps", **kw) -> Spoof:
     """§7 row 2 — sophisticated. Capture, then gradual walk-off on an SV subset.
 
     The primary demo (TRACK_A.md §2). 2 dB is the midpoint of the §7 1-3 dB
     range; against the measured C/N0 floor that is a few sigma, which is the
     whole design point of a low-power spoofer.
+
+    `target_svs` names the captured subset: an explicit SV list, "all_gps"
+    (the demo default), or `top_n_by_elevation(n)`. Whatever the rule, it is
+    evaluated once at the capture epoch and held fixed. The walk-off rate is
+    specified at ~1 m/s (§7) and is not a target parameter.
     """
     return replace(Spoof(name="carry_off", power_db=2.0, walk_off_mps=1.0,
-                         onset=onset, svs="G", liftoff_delay_s=0.0), **kw)
+                         onset=onset, svs="G", target=target_svs,
+                         liftoff_delay_s=0.0), **kw)
 
 
 def MEACONING(onset: datetime, **kw) -> Spoof:

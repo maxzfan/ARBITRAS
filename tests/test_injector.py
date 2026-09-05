@@ -139,3 +139,87 @@ def test_phase_stays_consistent_with_phase_in_metres(window, floor):
     inj, _ = inject(window, CARRY_OFF(onset=ONSET), floor)
     df = inj[-1].df
     assert np.allclose(df["phase_m_1"], df["phase_1"] * df["lam_1"], equal_nan=True)
+
+
+# -- target selection: resolved at capture, held fixed -------------------------
+
+def test_carry_off_target_freezes_at_capture(day, floor):
+    """A GPS satellite that rises after onset is never spoofed: the spoofer
+    committed to its channel set at capture."""
+    sp = CARRY_OFF(onset=ONSET)                    # default target: all_gps
+    inj, truth = inject(day, sp, floor)
+    capture_ep = next(e for e in day if e.time >= ONSET)
+    frozen = {sv for sv in capture_ep.df.index if sv.startswith("G")}
+    spoofed_ever = set()
+    for row in truth[truth["stage"] != CLEAN]["spoofed_sv"]:
+        spoofed_ever |= set(row.split(",")) if row else set()
+    assert spoofed_ever == frozen
+    # and satellites tracked later but not at capture stayed clean
+    later = day[-1]
+    risen = [sv for sv in later.df.index
+             if sv.startswith("G") and sv not in frozen]
+    if risen:                                       # 11 h later: expect several
+        a, b = day[-1], inj[-1]
+        for sv in risen:
+            assert b.df.at[sv, "code_1"] == a.df.at[sv, "code_1"]
+
+
+def test_top_n_by_elevation_selects_n_gps_and_holds_them(window, floor):
+    from backend.injector import top_n_by_elevation
+    sp = CARRY_OFF(onset=ONSET, target_svs=top_n_by_elevation(4))
+    inj, truth = inject(window, sp, floor)
+    sets = {frozenset(r.split(",")) for r in
+            truth[truth["stage"] != CLEAN]["spoofed_sv"] if r}
+    assert len(sets) == 1                           # one committed channel set
+    chosen = next(iter(sets))
+    assert len(chosen) == 4 and all(sv.startswith("G") for sv in chosen)
+    # and they are the top of the sky at capture, checked independently
+    from backend.detection.emit import USN8_ECEF
+    from backend.rinex import ephemeris
+    cap = next(e for e in window if e.time >= ONSET)
+    gps = [sv for sv in cap.df.index if sv.startswith("G")]
+    el = ephemeris.elevations_at(cap.time, gps, USN8_ECEF)
+    assert set(chosen) == set(el.sort_values(ascending=False).index[:4])
+
+
+def test_explicit_target_list_is_used_verbatim(window, floor):
+    sp = CARRY_OFF(onset=ONSET, target_svs=["G05", "G21"])
+    inj, truth = inject(window, sp, floor)
+    active = truth[truth["stage"] != CLEAN]
+    assert set(active["spoofed_sv"].iloc[-1].split(",")) == {"G05", "G21"}
+
+
+def test_walk_off_rate_unchanged_by_target_selection(window, floor):
+    """Decision 1 constraint: subset choice never touches the ~1 m/s rate."""
+    from backend.injector import top_n_by_elevation
+    dt = epoch_interval_s(window)
+    for target in ("all_gps", ["G05", "G21"], top_n_by_elevation(4)):
+        sp = CARRY_OFF(onset=ONSET, target_svs=target)
+        assert sp.walk_off_mps == 1.0
+        _, truth = inject(window, sp, floor)
+        walk = truth[truth["stage"] == WALK]["range_offset_m"].to_numpy()
+        assert np.allclose(np.diff(walk), sp.walk_off_mps * dt)
+
+
+def test_tracked_satellites_compute_above_the_horizon(day):
+    """Ephemeris sanity: whatever the receiver tracks must be in the sky."""
+    from backend.detection.emit import USN8_ECEF
+    from backend.rinex import ephemeris
+    ep = next(e for e in day if e.time == ONSET)
+    gps = [sv for sv in ep.df.index if sv.startswith("G")]
+    el = ephemeris.elevations_at(ep.time, gps, USN8_ECEF)
+    assert len(el) == len(gps)
+    assert el.min() > 0.0
+
+
+def test_ephemeris_ranges_are_consistent_with_pseudoranges(day):
+    """Computed geometric range agrees with the observed pseudorange to within
+    receiver-clock scale. Catches any sign/rotation/week error at a glance."""
+    from backend.detection.emit import USN8_ECEF
+    from backend.rinex import ephemeris
+    ep = next(e for e in day if e.time == ONSET)
+    gps = [sv for sv in ep.df.index if sv.startswith("G")]
+    pos = ephemeris.positions_at(ep.time, gps)
+    rng = np.linalg.norm(pos.to_numpy() - np.array(USN8_ECEF), axis=1)
+    diff = np.abs(ep.df.loc[pos.index, "code_1"].to_numpy() - rng)
+    assert diff.max() < 1_000e3
