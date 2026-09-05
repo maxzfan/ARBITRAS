@@ -112,6 +112,18 @@ def test_layer_off_suppresses_arbitration_for_video_beat_2():
     assert payload["state"] == "NOMINAL", "beat 2 must show no alarm"
     assert payload["explanation"] is None
     assert payload["layer_on"] is False
+    # Every product of the trust layer leaves the wire. Showing confidence or the
+    # feature bars under a badge reading OFF contradicts the whole beat.
+    assert payload["confidence"] is None
+    assert payload["features"] == {}
+    assert payload["geometry"] == {}
+    assert payload["geometry_divergence"] is None
+    # Every product of the trust layer must be off the wire, not merely hidden:
+    # showing them while the badge reads OFF contradicts the whole beat.
+    assert payload["confidence"] is None
+    assert payload["features"] == {}
+    assert payload["geometry"] == {}
+    assert payload["geometry_divergence"] is None
 
 
 def test_layer_on_arbitrates_and_explains():

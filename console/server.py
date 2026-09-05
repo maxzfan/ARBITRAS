@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 from console.arbiter.explain import explain, verify
 from console.arbiter.machine import Arbiter
 from console.arbiter.states import THRESHOLD_PROVENANCE, THRESHOLDS, TrustState
+from console import mission
 
 WEB = Path(__file__).parent / "web"
 DEFAULT_SOURCE = Path("out/fixture_stream.jsonl")
@@ -105,12 +106,24 @@ def decide(arb: Arbiter, epoch, layer_on: bool) -> dict:
         payload["explanation_verified"] = ok
         payload["explanation_failures"] = failures
     else:
-        # Video beat 2: the trust layer is OFF. The vehicle reports a confident,
-        # plausible position and nothing alarms. No arbitration is shown.
+        # Video beat 2: the trust layer is OFF. An unprotected vehicle reports a
+        # confident, plausible position and nothing alarms.
+        #
+        # Everything the trust layer PRODUCES must come off the wire, not just be
+        # hidden: confidence, the four features, the geometry block and the
+        # explanation are all its output. Leaving them visible while the badge
+        # reads OFF is a contradiction a judge will spot immediately -- and the
+        # empty panel is the argument anyway. This is what an operator sees today.
         payload["state"] = TrustState.NOMINAL.name
         payload["previous_state"] = TrustState.NOMINAL.name
         payload["changed"] = False
         payload["explanation"] = None
+        payload["confidence"] = None
+        payload["features"] = {}
+        payload["geometry"] = {}
+        payload["geometry_divergence"] = None
+        payload["implied_state"] = None
+        payload["reason"] = "layer_off"
 
     payload["layer_on"] = layer_on
     payload["thresholds"] = {s.name: v for s, v in THRESHOLDS.items()}
@@ -137,11 +150,20 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
             return self._file(WEB / "index.html", "text/html; charset=utf-8")
+        if u.path == "/mission":
+            body = json.dumps(mission.as_dict()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return self.wfile.write(body)
         if u.path == "/events":
             return self._events(parse_qs(u.query))
         if u.path.startswith("/vendor/"):
             name = Path(u.path).name          # no traversal: basename only
             ctype = ("application/javascript" if name.endswith(".js")
+                     else "font/woff2" if name.endswith(".woff2")
                      else "application/octet-stream")
             return self._file(WEB / "vendor" / name, ctype)
         self.send_error(404)
@@ -164,7 +186,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        # An SSE body has no Content-Length and we are not chunk-encoding, so
+        # under HTTP/1.1 the ONLY legal framing is delimit-by-close. Advertising
+        # keep-alive here leaves the body length undefined: curl tolerates it and
+        # reads to EOF, browsers do not and render nothing. The client closes the
+        # EventSource on our `end` event so this does not become a reconnect loop.
+        self.send_header("Connection", "close")
+        self.close_connection = True
         self.end_headers()
 
         arb = Arbiter()      # fresh per connection: reload == hard reset
