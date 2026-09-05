@@ -1,22 +1,28 @@
 """Empirical swept displacement vs the analytic bound (Claim 2a closure).
 
-Per injected-run epoch Track A's manifest gives the believed and true
-positions; the empirical displacement is their distance. The analytic
-bound is displacement_bound_m over the same epoch's trusted geometry.
-Claim 2a holds iff empirical <= bound at every epoch — checked
-explicitly and printed, not eyeballed off a plot.
+Per injected-run epoch the stream gives the believed and clean-truth
+positions (`_solution.displacement_m`, the differential-WLS distance) and
+the analytic `geometry.displacement_bound_m` over the same epoch's
+trusted geometry. The bound is a bound on UNDETECTED displacement: it
+claims nothing once the arbiter has left NOMINAL. Claim 2a therefore
+holds iff empirical <= bound at every epoch whose ARBITRATED state is
+NOMINAL — checked explicitly and printed, not eyeballed off a plot.
+design.md §10: "If the empirical number ever exceeds the bound, the
+bound is wrong — that check is worth running explicitly."
 
-Epoch format (agreed with Track A at 21:00, plumbed overnight):
+Epoch format:
   (t: datetime, empirical_m: float, bound_m: float | None)
 None bounds (not overdetermined) are excluded from the check and
 reported separately — no residual test exists there, so the bound
 makes no claim.
 
-Run (once the injected-run manifest exists):
-  python -m backend.measurement.displacement <manifest.json>
+Run over the injected replay stream:
+  python -m backend.measurement.displacement out/carryoff.jsonl
 """
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from pathlib import Path
 
 OUT = Path("docs/plots/displacement_empirical_vs_bound.png")
@@ -69,3 +75,51 @@ def plot(epochs: list[tuple], out: Path = OUT) -> None:
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
+
+
+def main(argv=None) -> None:
+    import argparse
+
+    from console.replay import arbitrate
+    from console.arbiter.states import TrustState
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("stream", help="injected replay JSONL (out/carryoff.jsonl)")
+    ap.add_argument("--plot", default=str(OUT))
+    args = ap.parse_args(argv)
+
+    with open(args.stream) as fh:
+        recs = [json.loads(l) for l in fh if l.strip()]
+    decisions = arbitrate(recs)
+
+    def _ep(r):
+        t = datetime.fromisoformat(r["timestamp"].replace("Z", ""))
+        emp = r.get("_solution", {}).get("displacement_m")
+        return (t, emp, r["geometry"].get("displacement_bound_m"))
+
+    every = [_ep(r) for r in recs if "_solution" in r]
+    # The bound only claims epochs the arbiter still trusts (NOMINAL).
+    nominal = [_ep(r) for r, d in zip(recs, decisions)
+               if "_solution" in r and d.state is TrustState.NOMINAL]
+    result = check_epochs(nominal)
+    print(f"Claim 2a over ARBITRATED-NOMINAL epochs "
+          f"({len(nominal)} of {len(every)} solved epochs):")
+    print(report(result))
+
+    # §10 headline: displacement at the epoch immediately preceding the
+    # first transition out of NOMINAL after the attack begins.
+    first = next((i for i, d in enumerate(decisions)
+                  if d.state is not TrustState.NOMINAL), None)
+    if first is not None and first > 0:
+        t, emp, bnd = _ep(recs[first - 1])
+        print(f"max adversarial displacement (epoch before first "
+              f"transition, {t}): empirical {emp:.2f} m, analytic bound "
+              f"{bnd if bnd is None else round(bnd, 1)} m")
+
+    plot(every, Path(args.plot))
+    print(f"wrote {args.plot} (full run, both lines; the bound makes no "
+          f"claim after the arbiter leaves NOMINAL)")
+
+
+if __name__ == "__main__":
+    main()

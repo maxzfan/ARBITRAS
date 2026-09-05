@@ -211,8 +211,11 @@ def arbitrated_fsr(records: list[dict], n_draws: int = 1000,
     }
 
 
-def load_epochs(path) -> list[tuple[datetime, dict, dict]]:
-    """Read §5 JSONL stream records -> (timestamp, features, geometry)."""
+def load_epochs(path) -> list[tuple[datetime, dict, dict, str | None]]:
+    """Read §5 JSONL records -> (timestamp, features, geometry, stage).
+
+    `stage` is the injector's own truth log (`_attack.stage`) when the
+    stream carries it, else None."""
     epochs = []
     with Path(path).open() as fh:
         for line in fh:
@@ -222,7 +225,8 @@ def load_epochs(path) -> list[tuple[datetime, dict, dict]]:
             rec = json.loads(line)
             t = datetime.fromisoformat(
                 rec["timestamp"].replace("Z", "+00:00"))
-            epochs.append((t, rec["features"], rec.get("geometry")))
+            epochs.append((t, rec["features"], rec.get("geometry"),
+                           rec.get("_attack", {}).get("stage")))
     return epochs
 
 
@@ -235,23 +239,59 @@ def main(argv=None) -> None:
                     help="NOMINAL confidence floor (from the threshold "
                          "session; never a guess)")
     ap.add_argument("--n-draws", type=int, default=1000)
+    ap.add_argument("--plot", default=None, metavar="PATH",
+                    help="write FSR / detection distribution histograms")
     ap.add_argument("--arbitrate", action="store_true",
                     help="also replay the console arbiter per draw on the "
                          "clean stream — §10's FSR definition verbatim "
                          "(hysteresis included)")
     args = ap.parse_args(argv)
 
-    clean = [(f, g) for _, f, g in load_epochs(args.clean)]
+    clean = [(f, g) for _, f, g, _ in load_epochs(args.clean)]
     attack_all = load_epochs(args.attack)
-    attack = [(f, g) for t, f, g in attack_all if t >= ATTACK_ONSET]
-    dropped = len(attack_all) - len(attack)
-    if dropped:
-        print(f"note: dropped {dropped} pre-onset epochs from the attack "
-              f"file (onset {ATTACK_ONSET.isoformat()})")
+    if any(s is not None for *_, s in attack_all):
+        # Injector truth log present: the attack window is exactly the
+        # epochs the injector says it touched.
+        attack = [(f, g) for _, f, g, s in attack_all
+                  if s is not None and s != "CLEAN"]
+        note = "injector truth log (_attack.stage != CLEAN)"
+    else:
+        attack = [(f, g) for t, f, g, _ in attack_all if t >= ATTACK_ONSET]
+        note = f"epochs >= onset {ATTACK_ONSET.isoformat()} (no truth log)"
+    print(f"attack window: {len(attack)} of {len(attack_all)} epochs — {note}")
 
     result = dirichlet_sweep(compose_from_track_a, clean, attack,
                              n_draws=args.n_draws, nominal=args.nominal)
     print(report(result))
+
+    if args.plot:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+        ax1.hist(result["fsr"], bins=50, color="tab:blue")
+        ax1.set_title(f"FSR over {result['n_draws']} weight/blend draws\n"
+                      f"min/median/max {result['fsr_min']:.3f} / "
+                      f"{result['fsr_median']:.3f} / {result['fsr_max']:.3f}")
+        ax1.set_xlabel(f"fraction of {result['n_clean']} clean epochs below "
+                       f"NOMINAL {result['nominal']:.3f}")
+        ax2.hist(result["detection"], bins=50, color="tab:red")
+        ax2.set_title(f"attack-window detection fraction\nmin/median/max "
+                      f"{result['detection_min']:.3f} / "
+                      f"{result['detection_median']:.3f} / "
+                      f"{result['detection_max']:.3f}")
+        ax2.set_xlabel(f"fraction of {result['n_attack']} attack epochs "
+                       f"below NOMINAL")
+        for ax in (ax1, ax2):
+            ax.set_ylabel("draws")
+            ax.grid(alpha=0.3)
+        fig.suptitle("design.md §10 Dirichlet sweep — distributions, not points",
+                     y=1.0)
+        fig.tight_layout()
+        p = Path(args.plot)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(p, dpi=150)
+        print(f"wrote {p}")
 
     if args.arbitrate:
         with Path(args.clean).open() as fh:
