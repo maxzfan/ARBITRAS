@@ -214,3 +214,29 @@ coordination hazard at once:
 
 6. `position_source` is in the epoch but not copied onto the SSE payload —
    trivial, `console/server.py decide()`, if the console ever needs to show it.
+
+# CHECKPOINT RESOLUTION (written ~21:30, after the threshold session)
+
+Every numbered item above is settled; refs are commits on track-c.
+
+1. **Demo attack decided:** carry-off on `top_n_by_elevation(6)` is the
+   default in `backend/demo.py` (`--target all_gps` keeps the timing-attack
+   variant). Peak displacement 273.5 m — after surrender.
+2. **Solver layering stated, not collapsed:** Eric's absolute solver feeds
+   the cross-constellation feature; the differential solver feeds the
+   displayed displacement. Documented in docs/stream_provenance.md (2aba33b).
+3. **geometry.sky now comes from the GeometryEngine** on the frozen basis
+   (3ba7976), i.e. the oracle-verified propagator. `skyview.py` remains only
+   as a tested standalone; it no longer feeds the stream.
+4. **Cross-constellation is IN the demo stream** (3a25b00), wired before the
+   threshold session, so the thresholds below already include it.
+5. **Thresholds measured and shipped** (eea1c47): NOMINAL 0.643 (mid
+   zero-overlap band), DEGRADED 0.548 / RESTRICTED 0.518 (attack p75/p25),
+   d' 7.18. Provenance string travels with the contract.
+6. **position_source is on the SSE payload** (`console/server.py`).
+
+Track C deliverables complete through task 12: sigma_UERE 1.934 m measured,
+displacement bound live, Dirichlet sweep run (arbitrated FSR median 0.0000,
+detection median 0.944, weight-sensitive 44.6%), empirical-vs-bound PASS
+2709/2709 arbitrated-NOMINAL epochs (3.67 m vs 14.0 m). README §15 carries
+the numbers and plots (9a83772).
