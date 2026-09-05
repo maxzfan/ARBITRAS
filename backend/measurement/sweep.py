@@ -60,6 +60,7 @@ import numpy as np
 import pandas as pd
 
 from ..detection import FeatureExtractor, Weights, fit, score
+from ..geometry.information import norm_info
 from ..detection.emit import USN8_ECEF
 from ..injector import CLEAN, CARRY_OFF, inject, top_n_by_elevation
 from ..rinex import ephemeris, noise
@@ -82,12 +83,14 @@ class SweepConfig:
     out: str = "out/sweep_subset.jsonl"
 
 
-# --- stand-in information ratio (see module docstring: superseded by Track C) --
+# --- information ratio: score math delegated to backend/geometry (Track C) ---
 
 def build_h(los: pd.DataFrame) -> np.ndarray:
-    """H, n x (3+k): unit line-of-sight rows and one clock column per
-    constellation present in the set. Constellations with zero satellites
-    contribute no column, so H is never rank-deficient by construction."""
+    """DataFrame adapter over precomputed unit LOS rows: H, n x (3+k), one
+    clock column per constellation present. Constellations with zero
+    satellites contribute no column, so H is never rank-deficient by
+    construction. Column signs differ from geometry.hmatrix.build_H by a
+    diagonal sign matrix, which leaves det(H'H) unchanged."""
     systems = sorted({sv[0] for sv in los.index})
     h = np.zeros((len(los), 3 + len(systems)))
     h[:, :3] = -los[["ex", "ey", "ez"]].to_numpy()
@@ -98,17 +101,20 @@ def build_h(los: pd.DataFrame) -> np.ndarray:
 
 def information_ratio(trusted: pd.DataFrame, full: pd.DataFrame) -> dict:
     """Raw and normalised determinant ratio of the trusted-subset information
-    matrix against the full-set solution. Normalisation exponent is 1/(3+k)
-    with k = constellations in the trusted set (the D-optimality form)."""
+    matrix against the full-set solution. The normalised score is Track C's
+    `norm_info` per-state geometric-mean form (each matrix at its own
+    dimensionality) — single-sourced from backend.geometry.information so the
+    sweep and the live engine cannot diverge."""
     k = len({sv[0] for sv in trusted.index})
     ht, hf = build_h(trusted), build_h(full)
+    nf = norm_info(hf)
+    norm = float(np.clip(norm_info(ht) / nf, 0.0, 1.0)) if nf > 0.0 else 0.0
     if ht.shape[0] < ht.shape[1]:           # underdetermined: no solution left
         return {"raw": 0.0, "norm": 0.0, "k_trusted": k}
     dt = float(np.linalg.det(ht.T @ ht))
     df_ = float(np.linalg.det(hf.T @ hf))
-    raw = max(0.0, dt / df_) if df_ > 0 else 0.0
-    return {"raw": raw, "norm": raw ** (1.0 / (3 + k)) if raw > 0 else 0.0,
-            "k_trusted": k}
+    raw = max(0.0, dt / df_) if df_ > 0 else 0.0   # kept as a diagnostic
+    return {"raw": raw, "norm": norm, "k_trusted": k}
 
 
 def los_frame(t: datetime, svs, nav, sta=USN8_ECEF) -> pd.DataFrame:
