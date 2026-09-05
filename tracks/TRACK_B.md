@@ -115,3 +115,21 @@ Epoch 445 is video beat 4: clean sky, confidence 0.93, stands down anyway.
 - [ ] Replay rate reads at 15 epochs/sec in a terminal; §11b says confirm it is
       intelligible on video and slow beats 2 and 3 if not. `--rate 8`.
 - [ ] `EMIT_LATERAL_ADVISORY` in machine.py is the cut-order item 3 switch.
+
+## FIXED — tail-mode staleness was tick-based (2026-09-05 11:1x)
+`follow()` yielded None on every 0.2 s poll timeout. The arbiter treats each
+None as a missing epoch and steps authority down after STALE_GRACE_TICKS of
+them, so **a healthy producer emitting slower than the poll interval was driven
+to SURRENDERED on clean data.** Appending 3 epochs produced 29 events, 17 of
+them spurious SURRENDERED.
+
+Staleness is now wall-clock against the expected epoch cadence: one None per
+`--stale-after` window (default 2.0 s), and tail mode is paced by the producer
+rather than by `--rate`. Same test now yields 4 events, all justified.
+
+**The wall clock lives in `follow()`, not in `Arbiter`.** The arbiter stays pure
+and deterministic so Track C's Dirichlet sweep replays it identically on every
+draw. Putting a timeout inside the arbiter would have made FSR non-reproducible.
+
+**At the 18:30 checkpoint: set `--stale-after` to ~3x Track A's actual emit
+interval.** The 2.0 s default is a guess about a producer that does not exist yet.

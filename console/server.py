@@ -45,23 +45,47 @@ def read_epochs(path: Path):
     return out
 
 
-def follow(path: Path):
-    """Tail a growing file. Yields None on timeout so silence reaches the arbiter."""
+def follow(path: Path, stale_after: float = 2.0, poll: float = 0.05):
+    """Tail a growing file, yielding an epoch per line.
+
+    Yields None ONLY after `stale_after` seconds of genuine silence, and at most
+    once per such window -- not once per poll.
+
+    This distinction is the whole bug it fixes. The arbiter treats every None as
+    a missing epoch and steps authority down after STALE_GRACE_TICKS of them
+    (design.md §5, "silence is not consent"). If the tail yields None on every
+    poll timeout, a perfectly healthy producer that emits slower than the poll
+    interval gets driven to SURRENDERED on clean data. Staleness is a property
+    of wall-clock time against the expected epoch cadence, not of how often we
+    happen to check.
+
+    Set --stale-after to roughly 3x Track A's actual emit interval at the 18:30
+    integration checkpoint.
+
+    The wall clock lives here and not in Arbiter on purpose: the arbiter stays
+    pure and deterministic so Track C's Dirichlet sweep replays it identically
+    every draw (design.md §10).
+    """
     with open(path) as fh:
         fh.seek(0, os.SEEK_END)
+        last_seen = time.monotonic()
         while True:
             line = fh.readline()
-            if not line:
-                yield None
-                time.sleep(0.2)
+            if line:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                last_seen = time.monotonic()
+                try:
+                    yield json.loads(stripped)
+                except json.JSONDecodeError:
+                    yield None      # malformed is evidence, not a skip (§5)
                 continue
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError:
+            if time.monotonic() - last_seen >= stale_after:
+                last_seen = time.monotonic()   # rearm: one None per window
                 yield None
+                continue
+            time.sleep(poll)
 
 
 def decide(arb: Arbiter, epoch, layer_on: bool) -> dict:
@@ -146,12 +170,15 @@ class Handler(BaseHTTPRequestHandler):
         arb = Arbiter()      # fresh per connection: reload == hard reset
         delay = 1.0 / max(rate, 0.1)
         try:
-            source = follow(Path(a.source)) if a.tail else iter(read_epochs(Path(a.source)))
+            tailing = bool(a.tail)
+            source = (follow(Path(a.source), a.stale_after) if tailing
+                      else iter(read_epochs(Path(a.source))))
             for epoch in source:
                 payload = decide(arb, epoch, layer_on)
                 self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())
                 self.wfile.flush()
-                time.sleep(delay)
+                if not tailing:
+                    time.sleep(delay)   # tail mode is paced by the producer
             self.wfile.write(b"event: end\ndata: {}\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -163,6 +190,9 @@ def main():
     p.add_argument("--source", default=str(DEFAULT_SOURCE))
     p.add_argument("--rate", type=float, default=15.0, help="epochs/sec (design.md §5: 10-20)")
     p.add_argument("--tail", action="store_true", help="follow a growing file")
+    p.add_argument("--stale-after", type=float, default=2.0, dest="stale_after",
+                   help="seconds of silence before an epoch counts as missing "
+                        "(tail mode only; set to ~3x the producer's interval)")
     p.add_argument("--port", type=int, default=8420)
     a = p.parse_args()
 
