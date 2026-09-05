@@ -133,3 +133,74 @@ draw. Putting a timeout inside the arbiter would have made FSR non-reproducible.
 
 **At the 18:30 checkpoint: set `--stale-after` to ~3x Track A's actual emit
 interval.** The 2.0 s default is a guess about a producer that does not exist yet.
+
+---
+
+# ROUTE FRAME — the vehicle drives; divergence is measured (2026-09-05 ~14:00)
+
+## The construction (do not dilute it)
+The receiver at USN8 is a static IGS station. It never moved. The console shows a
+vehicle driving an ~820 m route because the operator's question is about a moving
+UGV and the arbitration does not care whether the antenna moved. So:
+
+    TRUE     = route_point(s),  s = epoch_index × speed        scripted presentation frame
+    BELIEVED = TRUE + D,        D = ENU(position) − ENU(_truth) measured, from the stream
+
+D is the only thing that separates the tracks, and D is data. On out/demo.jsonl it
+is now Track C's WLS fix (0 on the lead-in, >15 m at idx 71, 273 m peak at 149, 0
+after); on the fixture it reaches 64 m under the SYNTHETIC banner. Nothing invents D.
+The on-screen caption states the frame every time the scene is visible.
+
+Files: console/mission.py (ROUTE_ENU, ROUTE_SPEED_M_PER_EPOCH=2.25 for the 510-epoch
+demo, CORRIDOR_HALF_WIDTH_M = alert limit, GROUND_STATION_ENU, route_point,
+lateral_offset, enu↔latlon), console/web/route.js (JS mirror, parity <1e-6 m —
+`node console/tests/route_parity.mjs`), console/tests/test_mission.py, server.py
+(/route.js), index.html (Plot, EnvScene, App).
+
+## Views and URL parameters
+    ?view=env (default) | split | map | sky
+    ?lock=1      no user camera input — use for video capture (§11b comparable frames)
+    ?orbit=1     slow camera drift (chase cam only)
+    ?exposure=N  tone-mapping exposure (default 1.5; tune on the demo GPU, see below)
+    ?post=0      bypass the composer;  ?shadow=0 / ?env=0  lighting diagnostics
+    drag         hands the camera to OrbitControls (env: target = true rover, sky: receiver)
+    R            reload = hard reset
+Camera: damped chase rig RIDES WITH the true rover (offset damped, never position — so
+it cannot lag at any frame rate); widening capped at 92 m so the rover stays readable;
+beyond that the ghost gets an edge marker "← BELIEVED · N M · OFF FRAME". 2D map follows
+the true rover, north-up, corridor band ± alert limit, both trails, receiver cross at
+the origin, ground station + uplink.
+
+Ground uplink (design.md §9, from the GROUND station, never a satellite): VALID solid
+--truth · PENDING dashed, marching · UNVERIFIED dashed --degraded · EXPIRED/REVOKED
+broken at 45 % in --accent. layer=off draws it static VALID (beat 2 is the signal side).
+
+Earth backdrop applied per console/web/EARTH_BACKDROP.md: kloofendal HDRI for
+lighting only, procedural sky ~2 stops darker so the constellation stays legible, sun
+az 124.4 / el 47.3 (HDR brightest pixel measured at 124.2 / 47.7 — agrees), fog #8F94A1,
+grass_path_2 ground (3.5 m tiles), rocks keep the rocky_terrain maps.
+
+## Verified (Playwright, SwiftShader)
+- Fixture: |D| 11→64 m, ghost separates and crosses the corridor edge; readout and
+  ghost label agree by construction (both written on the epoch event).
+- Real stream: rover moves (s 261.7 vs 263.3 expected at epoch 117 — within one epoch);
+  headings 93.6° / 97.1° match route legs 2 and 4 exactly; |D| = 121 and 133 m frames
+  with the off-frame marker; map at 161 m: believed trail leaves the corridor NW.
+- Drag → camMode chase→orbit; ?lock=1 respected. Badge rect identical ON/OFF at 1280
+  ([1112.34, 242, 147.66, 36.5]); body overflow 0; six chips fit. 76 tests + node parity.
+- Perf: 1.62 M tris / 1,630 draw calls per frame with the composer (×3 passes).
+  60 fps on the demo machine is UNVERIFIED — if it stutters, ?post=0 halves the cost.
+
+## Headless caveats — read before trusting a screenshot
+- The composer's first frame after the GLB loads takes >8 s under SwiftShader; use
+  ≥ 20–26 s per env capture or the canvas is black with a correct HUD and no error.
+- Canvas pixels can lag the DOM by seconds; the effective epoch at capture differs from
+  ?rate × seconds by a few seconds of page-load. Read __envInfo().epoch, not the clock.
+- Headless CANNOT judge absolute brightness (a frame may predate the env map). Tune
+  ?exposure on the real GPU; 1.5 is a bright-erring default for a ~0.1-albedo ground.
+
+## Open
+- Brightness/exposure on the demo machine; 60 fps check.
+- Uplink dash animation verified by material probe, not pixels.
+- Ground-station location, route geometry and speed are presentation choices — agree
+  them as a team before recording; they are in console/mission.py, one place.

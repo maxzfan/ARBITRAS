@@ -22,6 +22,9 @@ from .detection import (CrossConstellation, ExclusionRule, FeatureExtractor,
                         FLAT_K5, MASKED_K3, Weights, fit, fit_cross,
                         flagged_sv, record, score, write_jsonl)
 from .detection.emit import USN8_ECEF, ecef_to_lla
+# Track C's geometry provider. Imported under an alias: run() takes a
+# parameter called `geometry_for`, and the bare name would shadow it.
+from .geometry.engine import geometry_for as track_c_geometry_for
 from .injector import DEMO_CARRIER_RATE_ERROR, SCENARIOS, inject, summarise
 from .rinex import ephemeris, noise
 from .rinex.loader import load_obs
@@ -36,9 +39,20 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
         exclusion: ExclusionRule | None = None):
     """Score a replay. Returns the list of §5 records.
 
-    `geometry_for(epoch)` and `credential_for(epoch)` are the seams for Track C
-    and the credential layer. Absent, the geometry block is null and the blend
-    collapses to the feature half (see confidence.score).
+    `geometry_for(epoch, excluded_sv=...)` and `credential_for(epoch)` are the
+    seams for Track C and the credential layer. Absent, the geometry block is
+    null and the blend collapses to the feature half (see confidence.score).
+
+    **The exclusion list is an INPUT to the geometry block, not an annotation
+    on it.** Track C computes the information ratio over the trusted subset,
+    so the list has to be known before the block is built; writing it onto a
+    block that was computed with no exclusions would leave the ratio and the
+    list describing different satellite sets. The detector's list is therefore
+    computed first and passed in.
+
+    `freeze` is deliberately never set here. Freezing geometry at the last
+    NOMINAL epoch is a function of arbitrated state, and the backend does not
+    know state names (§5 boundary) -- the console owns that call.
 
     With `xc` and `nav` given, each epoch also gets per-constellation position
     solutions: the cross_constellation feature is scored from them and the
@@ -68,8 +82,8 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
             feats["cross_constellation"] = xc.score(ep, sols)["value"]
             if "all" in sols:
                 position = ecef_to_lla(*sols["all"]["pos"])
-        geom = geometry_for(ep) if geometry_for else None
-        cred = credential_for(ep) if credential_for else "VALID"
+        # The detector's own distrust list, computed BEFORE the geometry block
+        # because Track C's information ratio is taken over the trusted subset.
         el = None
         if (isinstance(exclusion, ExclusionRule)
                 and exclusion.elevation_mask_deg is not None
@@ -78,11 +92,8 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
                                          USN8_ECEF, nav)
         excluded = flagged_sv(res["per_sv"], cal.z_sat, exclusion,
                               elevations=el)
-        if excluded:
-            # The detector's own distrust list. Track C owns the rest of the
-            # block; this is the one field only the detector can fill.
-            geom = dict(geom or {})
-            geom["excluded_sv"] = excluded
+        geom = geometry_for(ep, excluded_sv=excluded) if geometry_for else None
+        cred = credential_for(ep) if credential_for else "VALID"
         out.append(record(ep.time, feats, score(feats, geom, weights),
                           n_sv=ep.n_sv, geometry=geom, credential_status=cred,
                           position=position))
@@ -138,7 +149,8 @@ def main(argv=None) -> None:
         rule = replace(rule, elevation_mask_deg=args.elevation_mask_deg)
     print(rule if rule else "exclusion rule: off")
 
-    recs = run(clean, cal, xc=xc, nav=nav, exclusion=rule)
+    recs = run(clean, cal, geometry_for=track_c_geometry_for, xc=xc, nav=nav,
+               exclusion=rule)
     print(f"clean    {len(recs):5d} epochs -> "
           f"{write_jsonl(recs, Path(args.out) / 'clean.jsonl')}")
 
@@ -151,7 +163,8 @@ def main(argv=None) -> None:
             spoof = SCENARIOS[name](onset=onset)
         injected, truth = inject(clean, spoof, floor)
         xc.reset()
-        recs = run(injected, cal, xc=xc, nav=nav, exclusion=rule)
+        recs = run(injected, cal, geometry_for=track_c_geometry_for,
+                   xc=xc, nav=nav, exclusion=rule)
         truth.to_csv(Path(args.out) / f"{name}_truth.csv")
         print(f"{name:9s}{len(recs):5d} epochs -> "
               f"{write_jsonl(recs, Path(args.out) / f'{name}.jsonl')}")

@@ -4,7 +4,11 @@ import { createRequire } from "node:module";
 import assert from "node:assert/strict";
 const require = createRequire(import.meta.url);
 const Route = require("../web/route.js");
-const py = (code) => JSON.parse(execFileSync("python3", ["-c", code], { cwd: process.cwd() + "/../..", encoding: "utf8" }));
+// Repo root is two levels up from this file; prefer the project venv so `console` imports.
+import { fileURLToPath } from "node:url"; import { dirname, join } from "node:path"; import { existsSync } from "node:fs";
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const PY = existsSync(join(ROOT, ".venv/bin/python")) ? join(ROOT, ".venv/bin/python") : "python3";
+const py = (code) => JSON.parse(execFileSync(PY, ["-c", code], { cwd: ROOT, encoding: "utf8" }));
 const m = py("import json; from console import mission; print(json.dumps(mission.as_dict()))");
 const S = [0, 37.5, 100, 143.2, 250, 400.5, 619, 700, 819.463, 900, -5];
 const ref = py(`import json; from console import mission

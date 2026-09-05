@@ -298,13 +298,27 @@ def test_armed_mask_needs_elevations_and_drops_low_satellites(day, cal):
     assert all(el[sv] >= 30.0 for sv in masked)
 
 
-def test_replay_emits_detector_derived_excluded_sv(day, cal):
-    """The list must come from per-SV scores, not from what the injector did."""
+def test_replay_emits_detector_derived_excluded_sv(day, cal, nav):
+    """The list must come from per-SV scores, not from what the injector did --
+    and it must be an INPUT to Track C's geometry block, so the information
+    ratio and the exclusion list describe the same satellite set."""
+    from backend.geometry.engine import geometry_for as track_c
     from backend.replay import run
-    recs = run(day[:120], cal, exclusion=1.0)
-    seen = {sv for r in recs if r["geometry"] for sv in r["geometry"]["excluded_sv"]}
-    assert seen                                  # k=1.0 fires often on clean sky
-    off = run(day[:120], cal)
+
+    seen_lists = []
+
+    def spy(ep, excluded_sv=None):
+        seen_lists.append(list(excluded_sv or []))
+        return track_c(ep, excluded_sv=excluded_sv)
+
+    recs = run(day[:150], cal, geometry_for=spy, nav=nav, exclusion=1.0)
+    # the rule fires on clean sky at k=1.0, and whatever it named was handed
+    # to the geometry provider rather than written on top of its output
+    assert any(seen_lists)
+    for r, handed in zip(recs, seen_lists):
+        assert r["geometry"]["excluded_sv"] == handed
+
+    off = run(day[:150], cal)
     assert all(r["geometry"] is None for r in off)
 
 

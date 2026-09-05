@@ -172,3 +172,71 @@ positions_at(t, svs, nav=None) -> DataFrame ECEF m; elevations_at(t, svs, sta_ec
 Ours (backend/geometry/skyview.py, G+E) feeds geometry.sky — converge on his for H.
 
 ## 3. Not yet merged into track_b: Eric's 2600c8d on main (BDT-offset fix + E+C solvability check).
+
+---
+
+# 18:30 CHECKPOINT — converge these, all three tracks (written ~13:35)
+
+Two people found the same physics independently today, which is good news and a
+coordination hazard at once:
+
+1. **Uniform range offset on one constellation = that constellation's clock.**
+   Position moves 0.0 m. Eric (262f220) and Track B's WLS agent (2ee0239) both
+   measured it. Consequences: Track A's default all-GPS carry-off is a TIMING
+   attack; the demo stream uses Eric's `top_n_by_elevation(6)` subset rule so
+   the fix actually moves (273 m peak). **Decide the demo attack together** —
+   Eric flagged "walk direction is a physics decision"; it is also the thing
+   the 21:00 thresholds are fitted to.
+
+2. **Two position solvers.** `backend/rinex/solve.py` (Eric: absolute
+   all-in-view, iono-free dual-freq, tropo, 5° mask, 3.9–12.3 m from surveyed)
+   and `backend/geometry/solve.py` (Track B: single-band, differential
+   clean-vs-injected so atmosphere cancels, 0.73 m median from surveyed).
+   Different jobs — his feeds the cross-constellation feature, ours feeds the
+   displayed displacement — but they are two definitions of "believed position".
+   `backend/demo.py` bypasses `replay.run()` and uses ours; `replay.run()` with
+   `xc`+`nav` emits his (`position_source: solution`). Pick one for the stream,
+   or state the layering in docs/stream_provenance.md.
+
+3. **Two propagators.** `backend/rinex/ephemeris.py` (Eric, pseudorange-
+   validated, G+E+C, transmit-time) and `backend/geometry/skyview.py` (Track B,
+   gnss-lib-py, G+E) — the latter still feeds `geometry.sky`. Converge on Eric's.
+
+4. **Cross-constellation feature exists (§6a.4) but is NOT in the demo stream.**
+   Console shows `—` for it. Wiring it into `backend/demo.py` changes confidence
+   and therefore the threshold distributions — do it BEFORE 21:00 or not until
+   after. Eric's numbers: meaconing composite d′ 0.18 → 5.04 with it.
+
+5. **Thresholds** (§10 step 4, by hand): attack percentiles in the handoff above
+   are stale (all-GPS); current top-6 stream: attack p50 0.564, clean p1 0.652,
+   gap +0.034. Post-fit residual RMS (267 m attack vs 2.1 m clean, 127×) is
+   the strongest unused signal — `Fix.residuals_m` in `backend/geometry/solve.py`.
+
+6. `position_source` is in the epoch but not copied onto the SSE payload —
+   trivial, `console/server.py decide()`, if the console ever needs to show it.
+
+# CHECKPOINT RESOLUTION (written ~21:30, after the threshold session)
+
+Every numbered item above is settled; refs are commits on track-c.
+
+1. **Demo attack decided:** carry-off on `top_n_by_elevation(6)` is the
+   default in `backend/demo.py` (`--target all_gps` keeps the timing-attack
+   variant). Peak displacement 273.5 m — after surrender.
+2. **Solver layering stated, not collapsed:** Eric's absolute solver feeds
+   the cross-constellation feature; the differential solver feeds the
+   displayed displacement. Documented in docs/stream_provenance.md (2aba33b).
+3. **geometry.sky now comes from the GeometryEngine** on the frozen basis
+   (3ba7976), i.e. the oracle-verified propagator. `skyview.py` remains only
+   as a tested standalone; it no longer feeds the stream.
+4. **Cross-constellation is IN the demo stream** (3a25b00), wired before the
+   threshold session, so the thresholds below already include it.
+5. **Thresholds measured and shipped** (eea1c47): NOMINAL 0.643 (mid
+   zero-overlap band), DEGRADED 0.548 / RESTRICTED 0.518 (attack p75/p25),
+   d' 7.18. Provenance string travels with the contract.
+6. **position_source is on the SSE payload** (`console/server.py`).
+
+Track C deliverables complete through task 12: sigma_UERE 1.934 m measured,
+displacement bound live, Dirichlet sweep run (arbitrated FSR median 0.0000,
+detection median 0.944, weight-sensitive 44.6%), empirical-vs-bound PASS
+2709/2709 arbitrated-NOMINAL epochs (3.67 m vs 14.0 m). README §15 carries
+the numbers and plots (9a83772).

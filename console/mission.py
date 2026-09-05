@@ -76,12 +76,12 @@ ROUTE_ENU = [
     (790.0, 130.0),
 ]
 
-# Presentation speed, metres of route per epoch. Chosen so the 240-epoch demo
-# window (12:00-14:00) traverses most of the ~820 m route. This is NOT
-# 30 s x a real vehicle speed -- at 30 s epochs a real UGV at 3 m/s would cover
-# 90 m per epoch and finish the route in nine epochs. The number is a framing
-# choice and is labelled as such on screen.
-ROUTE_SPEED_M_PER_EPOCH = 3.3
+# Presentation speed, metres of route per epoch. Chosen so the 360-epoch demo
+# window (12:00-15:00 UTC, out/demo.jsonl) traverses the ~820 m route almost
+# exactly once. This is NOT 30 s x a real vehicle speed -- at 30 s epochs a real
+# UGV at 3 m/s would cover 90 m per epoch and finish the route in nine epochs.
+# The number is a framing choice and is labelled as such on screen.
+ROUTE_SPEED_M_PER_EPOCH = 2.25
 
 # Corridor half-width = the alert limit (design.md §10: "road width"). In the
 # moving views the alert ring becomes a band along the route. "Beyond alert

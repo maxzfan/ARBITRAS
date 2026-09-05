@@ -7,9 +7,13 @@ Drives Track A's pipeline (loader -> noise floor -> calibration -> injector ->
 features -> confidence -> §5 record) over the real USN8 day and fills the two
 seams `backend.replay.run` leaves open:
 
-  geometry      {"sky": real G+E az/el from broadcast ephemeris with a trusted
-                 flag, "excluded_sv": satellites the detector distrusts} — the
-                 Fisher-information fields stay null; they are Track C's.
+  geometry      Track C's engine (backend/geometry/engine.py): information
+                 ratio, analytic displacement bound and next-best observation
+                 from the real H matrix, plus the sky with a trusted flag.
+                 `excluded_sv` (the detector's distrust set) is ours; the
+                 bound is non-null because sigma_UERE is MEASURED from clean
+                 post-fit residuals (backend/measurement/sigma_uere.py) and
+                 fed to set_sigma_uere() before any stream is scored.
   credential    a SCRIPTED schedule on the demo tail (VALID -> PENDING ->
                  EXPIRED) standing in for the TESLA layer until T1 lands.
                  T_int and d are venue-tuned (§9) so each state is legible
@@ -50,15 +54,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from backend.detection import (FEATURE_NAMES, FeatureExtractor, Weights, fit,
+from backend.detection import (FEATURE_NAMES, CrossConstellation,
+                               FeatureExtractor, Weights, fit, fit_cross,
                                record, score, write_jsonl)
-from backend.geometry.skyview import sky_at
+from backend.geometry.engine import compute_geometry_block, set_sigma_uere
 from backend.geometry.solve import (NavTables, displacement, error_from_surveyed,
                                     solve_epoch)
 from backend.injector import (CARRY_OFF, CLEAN, inject, summarise,
                               top_n_by_elevation)
-from backend.rinex import noise
+from backend.measurement.sigma_uere import load_or_measure
+from backend.rinex import ephemeris, noise
 from backend.rinex.loader import load_obs
+from backend.rinex.solve import solve_per_constellation
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
 SYSTEMS = "GERCS"
@@ -151,16 +158,12 @@ def distrusted(per_sv: pd.DataFrame, cal) -> list[str]:
     return sorted(col.index[(col / cal.z_sat[DISTRUST_FEATURE]) >= 1.0])
 
 
-def geometry_block(sky: list, excluded: list[str]) -> dict:
-    ex = set(excluded)
-    return {
-        "sky": [dict(s, trusted=s["sv"] not in ex) for s in sky],
-        "excluded_sv": excluded,
-        # Track C's. Null, not fabricated. The console renders dashes.
-        "information_ratio": None,
-        "displacement_bound_m": None,
-        "next_best_observation": None,
-    }
+def geometry_block(t: datetime, excluded: list[str], tracked: list[str]) -> dict:
+    """Track C's engine block from the real H matrix: information ratio, sky
+    (with trusted flags consistent with `excluded`), next-best observation,
+    and the analytic displacement bound — non-null once main() has called
+    set_sigma_uere() with the MEASURED clean-day residual RMS."""
+    return compute_geometry_block(t, excluded, tracked_sv=tracked)
 
 
 def credential_schedule(j_in_slice: int) -> str:
@@ -215,17 +218,26 @@ def solve_positions(clean, injected, nav: NavTables) -> tuple[dict, dict]:
     return out, sanity
 
 
-def score_stream(epochs, cal, sky_cache, truth: pd.DataFrame | None = None,
-                 label: str = "", positions: dict | None = None) -> list[dict]:
+def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
+                 label: str = "", positions: dict | None = None,
+                 xc: CrossConstellation | None = None, nav_xc=None) -> list[dict]:
     fx, w, out = FeatureExtractor(cal), Weights(), []
     n = len(epochs)
     for i, ep in enumerate(epochs):
         res = fx.step(ep)
+        feats = res["features"]
+        if xc is not None and nav_xc is not None:
+            # §6a.4, wired exactly as backend.replay.run does it: Eric's
+            # absolute per-constellation WLS (backend/rinex/solve.py) feeds
+            # the streaming cross-constellation scorer. The caller must
+            # xc.reset() before each replay so no state leaks across runs.
+            feats["cross_constellation"] = xc.score(
+                ep, solve_per_constellation(ep, nav_xc))["value"]
         excluded = distrusted(res["per_sv"], cal)
-        geom = geometry_block(sky_cache[ep.time], excluded)
+        geom = geometry_block(ep.time, excluded, list(ep.df.index))
         sol = positions.get(ep.time) if positions else None
         solved = sol is not None and sol["believed"] is not None
-        rec = record(ep.time, res["features"], score(res["features"], geom, w),
+        rec = record(ep.time, feats, score(feats, geom, w),
                      n_sv=ep.n_sv, geometry=geom, credential_status="VALID",
                      position=dict(sol["believed"].lla) if solved else None)
         # Replay ground truth for the console (underscore = out of contract):
@@ -253,15 +265,6 @@ def score_stream(epochs, cal, sky_cache, truth: pd.DataFrame | None = None,
     return out
 
 
-def build_sky_cache(epochs) -> dict:
-    cache, n = {}, len(epochs)
-    for i, ep in enumerate(epochs):
-        cache[ep.time] = sky_at(ep.time)
-        if i % 500 == 0:
-            print(f"  sky {i:5d}/{n}", flush=True)
-    return cache
-
-
 # --------------------------------------------------------------------------- main
 
 def main(argv=None) -> None:
@@ -281,8 +284,18 @@ def main(argv=None) -> None:
     cal = fit(clean, floor)
     print(" ", cal)
 
-    print("sky (real ephemeris, G+E)", flush=True)
-    sky = build_sky_cache(clean)
+    print("cross-constellation calibration (§6a.4, per-constellation WLS)", flush=True)
+    nav_xc = ephemeris.load_nav()
+    xc = CrossConstellation(fit_cross(clean, nav_xc), nav_xc)
+    print(" ", xc.cal)
+
+    print("sigma_UERE (measured clean-day post-fit residual RMS)", flush=True)
+    nav = NavTables.load()
+    su = load_or_measure(cache=out / "sigma_uere.json", epochs=clean, nav=nav)
+    set_sigma_uere(su["sigma_uere_m"])
+    print(f"  sigma_UERE {su['sigma_uere_m']:.3f} m "
+          f"({su['n_residuals']} residuals, {su['n_epochs_solved']} clean epochs, "
+          f"every {su['every_n']}th) -> geometry displacement bound is live")
 
     print("carry-off injection", flush=True)
     # Spoof.stage() treats dt == duration_s as still under attack, so a duration
@@ -296,7 +309,6 @@ def main(argv=None) -> None:
     print(" ", summarise(truth))
 
     print("position solutions (WLS, G+E, differential clean vs injected)", flush=True)
-    nav = NavTables.load()
     positions, sanity = solve_positions(clean, injected, nav)
     print(f"  clean fix vs survey: horizontal p50 {sanity['horizontal_p50']:.2f} m "
           f"p95 {sanity['horizontal_p95']:.2f} m; up p50 {sanity['up_p50']:+.1f} m; "
@@ -307,12 +319,15 @@ def main(argv=None) -> None:
                  for t, s in positions.items()}
 
     print("clean replay", flush=True)
-    clean_recs = score_stream(clean, cal, sky, label="clean", positions=clean_pos)
+    xc.reset()
+    clean_recs = score_stream(clean, cal, label="clean", positions=clean_pos,
+                              xc=xc, nav_xc=nav_xc)
     write_atomic(clean_recs, out / "clean.jsonl")
 
     print("carry-off replay", flush=True)
-    inj_recs = score_stream(injected, cal, sky, truth=truth, label="carry",
-                            positions=positions)
+    xc.reset()
+    inj_recs = score_stream(injected, cal, truth=truth, label="carry",
+                            positions=positions, xc=xc, nav_xc=nav_xc)
     write_atomic(inj_recs, out / "carryoff.jsonl")
 
     # Four-beat stitch: one contiguous slice of the SAME causal injected run,
@@ -328,7 +343,7 @@ def main(argv=None) -> None:
     dprof = _displacement_profile(demo, truth)
     print("  displacement over the attack window:", dprof["summary"])
     _write_provenance(clean, floor, cal, truth, demo, onset_i, lo, hi, clean_recs,
-                      sanity, dprof, args.target)
+                      sanity, dprof, args.target, su)
     print(f"\nwrote {out/'clean.jsonl'} ({len(clean_recs)}), "
           f"{out/'carryoff.jsonl'} ({len(inj_recs)}), "
           f"{out/'demo.jsonl'} ({len(demo)}), {PROVENANCE}")
@@ -366,7 +381,7 @@ def _displacement_profile(demo, truth) -> dict:
 
 
 def _write_provenance(clean, floor, cal, truth, demo, onset_i, lo, hi, clean_recs,
-                      sanity, dprof, target_name):
+                      sanity, dprof, target_name, su):
     active = truth[truth["stage"] != CLEAN]
     ex_clean = np.mean([len(r["geometry"]["excluded_sv"]) > 0 for r in clean_recs])
     creds = [r["credential_status"] for r in demo]
@@ -403,20 +418,58 @@ systems {SYSTEMS}. {floor}
 | Field | Class | Source |
 |---|---|---|
 | `timestamp` | measured | RINEX epoch, GPS time, never rewritten |
-| `features.*` (3) | measured / injected | Track A `FeatureExtractor`, calibrated on the clean day. On attack epochs the observables were modified by the injector before scoring |
-| `confidence` | derived | `1 - anomaly` with equal placeholder weights, beta forced to 1 (no geometry half yet). `score_detail.weights_tuned` is false |
+| `features.*` (3 of 4) | measured / injected | Track A `FeatureExtractor` (C/N0, pseudorange residual, code-minus-carrier), calibrated on the clean day. On attack epochs the observables were modified by the injector before scoring |
+| `features.cross_constellation` | derived | §6a.4 streaming scorer (`backend/detection/cross.py`) fed by **Eric's absolute per-constellation WLS** (`backend/rinex/solve.py`): per-constellation position disagreement + inter-system clock channels, calibrated on the clean day, `xc.reset()` before each replay |
+| `confidence` | derived | `1 - (beta*anomaly + (1-beta)*(1-information_ratio))` with equal placeholder weights and placeholder beta 0.5. `score_detail.weights_tuned` is false |
 | `satellites_tracked` | measured | count of SVs with code or C/N0 on band 1 |
 | `position` | **solved** (`wls_differential`, {dprof['solved_fraction']:.1%} of demo epochs) | weighted least-squares single-point fix from the receiver's own band-1 pseudoranges as the receiver saw them (injected on attack epochs), G+E, one clock per constellation, Sagnac and SV-clock corrected, no atmosphere model — `backend/geometry/solve.py`. Epochs without a fix fall back to the surveyed point, flagged `position_source: "surveyed"` |
 | `_truth` | replay metadata | the SAME solver on the CLEAN pseudoranges at the same epoch, same satellites, same weights. Atmosphere and ephemeris error are common to both fixes and cancel in the difference, so `position − _truth` is exactly the injector's effect on the fix. On clean epochs it is {dprof['clean_lead_in_max_m']:.4f} m |
 | `_solution` | replay metadata | n_sv, k, DOPs, residual RMS, per-constellation clock bias, `displacement_m` — the fix's own quality figures |
-| `geometry.sky[]` | propagated | real az/el from `backend/geometry/skyview.py` (gnss-lib-py, G+E only, 10° mask). **A second, pseudorange-validated propagator with BeiDou exists in `backend/rinex/ephemeris.py` (Track A); convergence is an 18:30 checkpoint item.** |
+| `geometry.sky[]` | propagated | real az/el from Track C's engine (`backend/geometry/engine.py`, own Keplerian propagator, 10° mask); trusted flags consistent with `excluded_sv` by construction |
 | `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `{DISTRUST_FEATURE}` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day {ex_clean:.1%} of epochs have ≥1 excluded SV |
-| `geometry.information_ratio`, `displacement_bound_m`, `next_best_observation` | **null, awaiting Track C** | not fabricated |
+| `geometry.information_ratio` | derived | Track C's normalised D-optimality ratio `det(H'H)^(1/(3+k))` on trusted vs full H (`backend/geometry/information.py`). No free parameter |
+| `geometry.displacement_bound_m` | derived from a **measured** input | analytic chi-square bound `sigma_UERE * sqrt(T * lambda_max)`; sigma_UERE = **{su['sigma_uere_m']:.3f} m**, the MEASURED clean-day post-fit residual RMS ({su['n_residuals']} residuals, every {su['every_n']}th epoch — `backend/measurement/sigma_uere.py`, cached with provenance in `out/sigma_uere.json`) |
+| `geometry.next_best_observation` | derived | rank-one determinant update over visible-but-untrusted groups (CONVERGE identity) |
 | `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last {20 / DEMO_RATE_EPS:.1f} s at the {DEMO_RATE_EPS:.0f} epochs/s demo rate; tuned to {T_INT_EPOCHS} × {DISCLOSURE_LAG_INTERVALS} so every credential state holds ≥ {LEGIBLE_EPOCHS / DEMO_RATE_EPS:.0f} s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. {pre_lapse} |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 
 No record carries `_synthetic`.
+
+## Solver layering — which number comes from which solver
+
+Two position solvers and one geometry engine coexist on purpose (18:30
+checkpoint item 2); they answer different questions and none is redundant:
+
+1. **Absolute per-constellation WLS** — `backend/rinex/solve.py` (Eric).
+   Iono-free dual-frequency code, Saastamoinen troposphere, 5° mask; solves
+   all-in-view plus each constellation alone (3.9–12.3 m from the surveyed
+   marker). **Feeds:** `features.cross_constellation` — the per-constellation
+   position-disagreement and inter-system clock channels are differences of
+   ITS solutions. (In `backend.replay` streams it also supplies the believed
+   `position`, `position_source: "solution"`; in these demo streams it does
+   not — see 2.)
+2. **Differential WLS** — `backend/geometry/solve.py` (Track B). Single-band,
+   G+E, no atmosphere model, {sanity['horizontal_p50']:.2f} m median horizontal
+   vs the surveyed marker; the clean and injected fixes share one satellite
+   set and one weight vector so everything unmodelled cancels in the
+   difference. **Feeds:** the stream's `position`
+   (`position_source: "wls_differential"`), `_truth`,
+   `_solution.displacement_m` (the EMPIRICAL displacement on screen), and the
+   **sigma_UERE measurement** ({su['sigma_uere_m']:.3f} m clean post-fit
+   residual RMS, `backend/measurement/sigma_uere.py`).
+3. **Geometry engine** — `backend/geometry/` (Track C). Fisher information
+   over the line-of-sight matrix H. **Feeds:** `geometry.information_ratio`
+   (normalised D-optimality ratio), `geometry.displacement_bound_m` (the
+   ANALYTIC bound, taking sigma_UERE measured from solver 2 as its only
+   empirical input), `geometry.next_best_observation`, and `geometry.sky`.
+
+So: the cross-constellation feature comes from solver 1; the believed
+position and the measured displacement come from solver 2; the information
+ratio and the displacement *bound* come from the geometry engine, calibrated
+by solver 2's residuals. The empirical displacement (2) and the analytic
+bound (3) are independent derivations that the §10 empirical-vs-bound check
+plots on one axis.
 
 ## Windows
 
