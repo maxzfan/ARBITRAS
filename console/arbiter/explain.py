@@ -12,7 +12,7 @@ Two rules from the design document govern every string here:
 from typing import Any, Optional
 
 from .machine import Decision
-from .states import TrustState
+from .states import RECOVERY_EPOCHS, TrustState
 
 BEHAVIOUR = {
     TrustState.NOMINAL: "Full autonomy. Navigating on GNSS and accepting new waypoints.",
@@ -77,6 +77,16 @@ def explain(d: Decision) -> dict:
             )
         elif d.state is TrustState.NOMINAL:
             headline = "All monitored signals are within their normal range."
+        elif d.implied_state is not None and d.implied_state > d.state:
+            # Recovering: confidence already implies more authority than is held.
+            # Invariant 2 holds it down deliberately; say so, rather than the
+            # false "confidence is low" line that used to appear at 0.95.
+            headline = ("Signals are back within their normal range. "
+                        "Authority is restored one step at a time.")
+            parts.append(
+                f"Confidence must hold above the next threshold for "
+                f"{RECOVERY_EPOCHS} consecutive epochs before each step up."
+            )
         else:
             headline = "Position confidence is below the trusted range."
         if d.confidence is not None:

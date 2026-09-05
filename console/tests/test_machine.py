@@ -147,6 +147,18 @@ def test_credential_cap_stays_the_stated_reason_while_it_binds():
     assert d.reason == "credential_cap"
 
 
+def test_recovery_explanation_does_not_claim_low_confidence():
+    """Seen on screen: DEGRADED at confidence 0.95 with 'confidence is below the
+    trusted range'. The state is right (invariant 2); the sentence was false."""
+    arb = Arbiter(initial=TrustState.RESTRICTED)
+    d = arb.step(epoch(0.95))
+    assert d.state is TrustState.RESTRICTED and d.reason == "recovery_gated"
+    ex = explain(d)
+    assert "below the trusted range" not in ex["headline"]
+    assert "restored" in ex["headline"].lower()
+    assert str(RECOVERY_EPOCHS) in ex["detail"]
+
+
 # ---------------------------------------------------------------- invariant 4
 
 def test_clock_and_credential_gates_close_below_nominal():
