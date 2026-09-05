@@ -2,75 +2,171 @@
 <meta charset="utf-8">
 <title>HOLDFAST</title>
 <style>
+  /* Vendored so the console runs offline (design.md §14: venue wifi is a risk).
+     font-display:block avoids a flash of fallback metrics mid-capture. */
+  @font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:block;
+             src:url('/vendor/inter-400.woff2') format('woff2')}
+  @font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:block;
+             src:url('/vendor/inter-500.woff2') format('woff2')}
+  @font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:block;
+             src:url('/vendor/inter-600.woff2') format('woff2')}
+  @font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:block;
+             src:url('/vendor/inter-700.woff2') format('woff2')}
   :root{
-    --bg:#0a0c0e; --panel:#11151a; --line:#1e252d;
-    --fg:#dfe5ea; --dim:#8b97a3; --faint:#5d6875;
-    --nominal:#4a9d6e; --degraded:#c9993f; --restricted:#c4703a; --surrendered:#b8443f;
-    --believed:#5b8fc7; --truth:#b8443f;
+    --bg:#0B0D0F; --panel:#0E1114; --line:#1C222A; --keyline:#2B333D;
+    --fg:#EEF2F6; --dim:#8794A2; --faint:#4E5A67;
+    --accent:#E4551F;
+    --nominal:#D8E2EC; --degraded:#E8A21C; --restricted:#E4551F; --surrendered:#D62119;
+    --believed:#E4551F; --truth:#7FA8CC;
+    /* Three tiers, deliberately: condensed-black for display numbers, Inter
+       for prose and labels, mono for aligned instrument data. */
+    --display:"Helvetica Neue","Arial Narrow",Impact,system-ui,sans-serif;
+    --sans:'Inter',system-ui,-apple-system,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
-  body{
-    background:var(--bg); color:var(--fg);
-    font:15px/1.5 ui-monospace,'SF Mono',Menlo,Consolas,monospace;
-    -webkit-font-smoothing:antialiased; overflow:hidden;
-  }
+  body{background:var(--bg);color:var(--fg);font:13px/1.5 var(--sans);
+       -webkit-font-smoothing:antialiased;overflow:hidden}
   #root{height:100vh;display:flex;flex-direction:column}
   .banners{flex:0 0 auto}
-  .banner{padding:7px 18px;font-size:13px;letter-spacing:.04em;text-align:center}
-  .banner.synthetic{background:#3d1f1f;color:#f0b3b0;border-bottom:1px solid #5e2f2e}
-  .banner.provenance{background:#332a12;color:#e6cd8f;border-bottom:1px solid #4d4020}
-  .banner.unverified{background:#3d1f1f;color:#f0b3b0}
-  main{flex:1;display:grid;grid-template-columns:1fr 420px;min-height:0}
-  .left{position:relative;border-right:1px solid var(--line);display:flex;flex-direction:column}
-  .right{display:flex;flex-direction:column;min-height:0;overflow:hidden}
-  .layer{
-    position:absolute;top:18px;right:18px;z-index:5;
-    font-size:13px;letter-spacing:.08em;padding:6px 12px;
-    border:1px solid var(--line);background:#0d1114cc;color:var(--dim);
-  }
-  .layer b{color:var(--fg);font-weight:600}
-  .plotwrap{flex:1;min-height:0;padding:18px}
-  svg{width:100%;height:100%;display:block}
-  .legend{position:absolute;bottom:18px;left:22px;font-size:12px;color:var(--dim)}
-  .legend i{display:inline-block;width:22px;height:2px;vertical-align:middle;margin-right:7px}
-  .sec{padding:16px 20px;border-bottom:1px solid var(--line)}
-  .sec:last-child{border-bottom:0}
-  .lbl{font-size:11px;letter-spacing:.14em;color:var(--faint);margin-bottom:9px}
-  .state{font-size:30px;letter-spacing:.02em;line-height:1.1;font-weight:600}
-  .sub{font-size:12px;color:var(--dim);margin-top:5px}
-  .bigrow{display:flex;align-items:baseline;gap:10px}
-  .conf{font-size:30px;font-variant-numeric:tabular-nums;font-weight:600}
-  .bar{height:6px;background:#1a2028;position:relative;margin-top:11px}
-  .bar>span{position:absolute;left:0;top:0;bottom:0;transition:width .12s linear}
-  .tick{position:absolute;top:-4px;bottom:-4px;width:1px;background:var(--faint)}
-  .frow{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px}
-  .frow .n{width:150px;color:var(--dim);flex:0 0 auto}
-  .frow .fb{flex:1;height:5px;background:#1a2028;position:relative}
-  .frow .fb>span{position:absolute;inset:0 auto 0 0;background:var(--dim)}
-  .frow .v{width:42px;text-align:right;font-variant-numeric:tabular-nums;color:var(--fg)}
-  .bound{font-size:38px;font-variant-numeric:tabular-nums;font-weight:600;line-height:1}
-  .bound small{font-size:15px;color:var(--dim);font-weight:400;margin-left:5px}
-  .kv{display:flex;justify-content:space-between;font-size:13px;margin:5px 0;color:var(--dim)}
+  .banner{padding:8px 20px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+          text-align:center;font-weight:600;font-family:var(--sans)}
+  .banner.synthetic{background:var(--surrendered);color:#fff}
+  .banner.provenance{background:#2A2410;color:var(--degraded);
+                     border-bottom:1px solid #453A18}
+  .banner.unverified{background:var(--surrendered);color:#fff}
+
+  /* ---- horizontal instrument strip -------------------------------------
+     Fixed height on purpose: the stage below must start at the same y in
+     every configuration, so the Trust layer badge is pixel-identical
+     between layer=on and layer=off (design.md §11b). */
+  .strip{flex:0 0 auto;height:156px;display:flex;
+         border-bottom:1px solid var(--keyline);background:var(--panel)}
+  .cell{padding:13px 17px;border-right:1px solid var(--line);min-width:0;
+        display:flex;flex-direction:column;overflow:hidden}
+  .cell:last-child{border-right:0}
+  /* flex-basis sets the comfortable width, min-width the hard floor. Floors sum
+     to ~1275px so nothing clips down to a 1280 viewport. */
+  .c-auth{flex:0 1 330px;min-width:268px}
+  .c-conf{flex:1 1 250px;min-width:186px}
+  .c-feat{flex:1 1 380px;min-width:226px}
+  .c-geom{flex:1 1 430px;min-width:398px}
+  .c-drop{flex:0 0 196px;min-width:196px}
+  .lbl{font-family:var(--sans);font-weight:600;font-size:10px;letter-spacing:.16em;
+     color:var(--faint);text-transform:uppercase;margin-bottom:9px;white-space:nowrap}
+  .state{font-family:var(--display);font-weight:900;font-size:40px;line-height:.94;
+         letter-spacing:-.02em;font-stretch:condensed;text-transform:uppercase}
+  .sub{font-family:var(--sans);font-size:12.5px;color:var(--dim);margin-top:8px;
+     line-height:1.4}
+  .conf{font-family:var(--display);font-weight:900;font-size:40px;line-height:1;
+        letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .bigrow{display:flex;align-items:baseline;gap:11px;flex-wrap:wrap}
+  .cred{font-family:var(--sans);font-weight:500;font-size:10px;letter-spacing:.12em;
+      text-transform:uppercase;color:var(--dim)}
+  .bar{height:8px;background:#171C22;position:relative;margin-top:13px;
+       border:1px solid var(--line)}
+  .bar>span{position:absolute;left:0;top:0;bottom:0}
+  .tick{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--faint)}
+  .frows{display:flex;flex-direction:column;gap:6px}
+  .frow{display:flex;align-items:center;gap:10px;font-size:11px}
+  .frow .n{font-family:var(--sans);font-weight:500;flex:0 1 112px;min-width:92px;
+           color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.07em;
+           white-space:nowrap}
+  .frow .fb{flex:1 1 auto;height:7px;background:#171C22;position:relative;
+            border:1px solid var(--line);min-width:24px}
+  .frow .fb>span{position:absolute;inset:0 auto 0 0}
+  .frow .v{font-family:var(--mono);width:36px;text-align:right;
+         font-variant-numeric:tabular-nums;font-size:11px;flex:0 0 auto}
+  .geo{display:flex;gap:22px;align-items:flex-start;min-width:0}
+  .boundwrap{flex:0 0 auto}
+  .bound{font-family:var(--display);font-weight:900;font-size:44px;line-height:1;
+         letter-spacing:-.03em;font-variant-numeric:tabular-nums;color:var(--accent);
+         white-space:nowrap}
+  .bound.none{color:var(--faint)}
+  .boundlbl{font-family:var(--sans);font-weight:600;font-size:10px;color:var(--dim);
+            letter-spacing:.11em;text-transform:uppercase;margin-top:6px;max-width:120px;
+            line-height:1.3}
+  .geokv{flex:1 1 auto;min-width:0}
+  .kv{font-family:var(--mono);display:flex;justify-content:space-between;gap:16px;
+    font-size:11px;margin:4px 0;color:var(--dim);letter-spacing:.02em;
+    white-space:nowrap;font-variant-numeric:tabular-nums}
   .kv b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
-  .sv{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
-  .sv span{font-size:11px;padding:2px 6px;border:1px solid #4a2f2e;color:#d99a96;background:#2a1a19}
-  .exp{padding:18px 20px;background:var(--panel);border-top:1px solid var(--line);flex:0 0 auto}
-  .exp .h{font-size:17px;line-height:1.35;margin-bottom:8px}
-  .exp .d{font-size:13px;color:var(--dim);line-height:1.6}
-  .hint{position:absolute;bottom:18px;right:22px;font-size:11px;color:var(--faint)}
-  .idle{display:flex;height:100%;align-items:center;justify-content:center;color:var(--faint);font-size:14px}
+  .sv{display:flex;flex-wrap:wrap;gap:5px}
+  .sv span{font-family:var(--mono);font-size:10px;padding:3px 7px;
+         border:1px solid var(--accent);color:var(--accent);letter-spacing:.06em}
+  .sv span.none{border-color:var(--line);color:var(--faint)}
+  .c-drop .lbl{white-space:normal;line-height:1.35}
+
+  /* ---- stage: the plot gets everything left over ---------------------- */
+  .stage{flex:1;position:relative;min-height:0;overflow:hidden}
+  svg{width:100%;height:100%;display:block}
+  .kbox{border:1px solid var(--keyline);background:#0B0D0Fcc;padding:9px 12px}
+  .layer{position:absolute;top:20px;right:20px;z-index:5;font-size:11px;
+         letter-spacing:.16em;text-transform:uppercase}
+  .layer b{color:var(--fg);font-weight:700;display:inline-block;width:30px;
+         text-align:left}
+  .layer.off b{color:var(--surrendered)}
+  .readout{position:absolute;top:18px;left:20px;z-index:5}
+  .readout .n{font-family:var(--display);font-weight:900;font-size:58px;line-height:.9;
+              letter-spacing:-.03em;font-stretch:condensed;color:var(--accent)}
+  .readout .n.safe{color:var(--dim)}
+  .readout .u{font-family:var(--sans);font-weight:600;font-size:11px;letter-spacing:.13em;
+            color:var(--dim);text-transform:uppercase;margin-top:6px}
+  .legend{position:absolute;top:120px;left:20px;z-index:5;font-family:var(--sans);
+        font-weight:500;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+        color:var(--dim)}
+  .legend div{display:flex;align-items:center;gap:9px;margin-top:6px}
+  .legend i{width:26px;height:0;border-top:2px solid}
+  .hint{position:absolute;bottom:18px;right:20px;z-index:5;font-family:var(--sans);
+      font-weight:500;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--faint)}
+  .idle{display:flex;height:100%;align-items:center;justify-content:center;
+      font-family:var(--sans);font-weight:500;color:var(--faint);font-size:11px;
+      letter-spacing:.16em;text-transform:uppercase}
+
+  /* ---- explanation, full width so it is never clipped ----------------- */
+  .expbar{flex:0 0 auto;border-top:1px solid var(--keyline);background:#0A0C0E;
+          padding:15px 24px;display:grid;grid-template-columns:minmax(260px,26%) 1fr;
+          gap:30px;align-items:start}
+  .expbar .h{font-family:var(--sans);font-weight:700;font-size:19px;line-height:1.28;
+           letter-spacing:-.005em}
+  .expbar .d{font-family:var(--sans);font-weight:400;font-size:13px;color:var(--dim);
+           line-height:1.62;max-width:132ch}
 </style>
 <div id="root"></div>
+<script>
+window.__fatal = function (msg) {
+  var r = document.getElementById('root');
+  if (!r) return;
+  r.innerHTML = '<pre style="margin:0;min-height:100vh;padding:26px;background:#3d1f1f;'
+    + 'color:#f0b3b0;white-space:pre-wrap;font:13px/1.6 ui-monospace,Menlo,monospace">'
+    + 'CONSOLE FAILED TO START\n\n' + String(msg).replace(/</g, '&lt;') + '</pre>';
+};
+window.addEventListener('error', function (e) {
+  window.__fatal((e.message || 'error') + '\n  at ' + (e.filename || '?') + ':' + (e.lineno || '?'));
+});
+window.addEventListener('unhandledrejection', function (e) {
+  window.__fatal('unhandled rejection: ' + ((e.reason && e.reason.message) || e.reason));
+});
+setTimeout(function () {
+  var r = document.getElementById('root');
+  if (r && r.children.length === 0) {
+    window.__fatal('React did not mount within 4s.\n\ntypeof React    = ' + (typeof React)
+      + '\ntypeof ReactDOM = ' + (typeof ReactDOM)
+      + '\ncreateRoot      = ' + (typeof (window.ReactDOM || {}).createRoot));
+  }
+}, 4000);
+</script>
 <script src="/vendor/react.js"></script>
 <script src="/vendor/react-dom.js"></script>
 <script type="module">
 import htmMod from '/vendor/htm.js';
-const {useState,useEffect,useRef} = React;
+const {useState, useEffect} = React;
 const html = htmMod.bind(React.createElement);
 
-const COLOR = {NOMINAL:'var(--nominal)',DEGRADED:'var(--degraded)',
-               RESTRICTED:'var(--restricted)',SURRENDERED:'var(--surrendered)'};
+const COLOR = {NOMINAL:'var(--nominal)', DEGRADED:'var(--degraded)',
+               RESTRICTED:'var(--restricted)', SURRENDERED:'var(--surrendered)'};
 const BEHAVIOUR = {
   NOMINAL:'Full autonomy · accepting waypoints',
   DEGRADED:'Coasting on inertial · discrepancy flagged',
@@ -78,176 +174,261 @@ const BEHAVIOUR = {
   SURRENDERED:'Holding position · operator has control',
 };
 const FEATURE_LABEL = {
-  cn0_anomaly:'C/N₀ anomaly', pseudorange_residual:'range residual',
-  code_carrier_divergence:'code−carrier', cross_constellation:'cross-constellation',
+  cn0_anomaly:'C/N0 anomaly', pseudorange_residual:'range residual',
+  code_carrier_divergence:'code−carrier', cross_constellation:'cross-constel',
+};
+const niceStep = s => {
+  const p = Math.pow(10, Math.floor(Math.log10(s))), n = s / p;
+  return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * p;
 };
 
-function TrackPlot({trail}) {
-  if (!trail.length) return html`<div className="idle">waiting for epochs</div>`;
-  const pts = trail.flatMap(p => [p.b, p.t].filter(Boolean));
-  const lats = pts.map(p=>p.lat), lons = pts.map(p=>p.lon);
-  const pad = 0.00035;
-  const y0 = Math.min(...lats)-pad, y1 = Math.max(...lats)+pad;
-  const x0 = Math.min(...lons)-pad, x1 = Math.max(...lons)+pad;
-  const W=1000, H=620;
-  const sx = p => ((p.lon-x0)/((x1-x0)||1))*W;
-  const sy = p => H-((p.lat-y0)/((y1-y0)||1))*H;
-  const path = key => trail.filter(p=>p[key])
-    .map((p,i)=>`${i?'L':'M'}${sx(p[key]).toFixed(1)},${sy(p[key]).toFixed(1)}`).join(' ');
-  const last = trail[trail.length-1];
-  // metres between believed and true, for the separation readout in beat 2
-  let sep = null;
-  if (last.b && last.t) {
-    const dLat = (last.t.lat-last.b.lat)*111320;
-    const dLon = (last.t.lon-last.b.lon)*111320*Math.cos(last.b.lat*Math.PI/180);
-    sep = Math.hypot(dLat,dLon);
-  }
+function Plot({trail, mission, sep}) {
+  if (!mission) return html`<div className="idle">loading mission</div>`;
+  // Wide, short viewBox to match the full-width stage under the strip.
+  const W = 1400, H = 560, cx = W/2, cy = H/2;
+  const AL = mission.alert_limit_m;
+  // Frame on the surveyed point; expand as displacement grows so the alert ring
+  // is always legible and the plot never sits in a void.
+  const span = Math.max(AL * 2.6, (sep || 0) * 1.45, 12);   // metres, half-height
+  const ppm = (H/2 - 40) / span;
+  const toXY = p => {
+    const dN = (p.lat - mission.surveyed.lat) * mission.m_per_deg_lat;
+    const dE = (p.lon - mission.surveyed.lon) * mission.m_per_deg_lon;
+    return [cx + dE*ppm, cy - dN*ppm];
+  };
+  // Ring spacing keyed to the horizontal extent; the cap keeps the outermost
+  // label inside the viewBox instead of clipping it at the right edge.
+  const step = niceStep(span*0.7), rings = [];
+  for (let r = step; r <= span*2.6; r += step) rings.push(r);
+  const path = trail.filter(p=>p.b).map((p,i)=>{
+    const [x,y] = toXY(p.b); return `${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const last = trail.length ? trail[trail.length-1] : null;
+  const bxy = last && last.b ? toXY(last.b) : null;
+  const barM = niceStep(span*0.6), barPx = barM*ppm;
+
   return html`
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
-      <path d=${path('t')} fill="none" stroke="var(--truth)" stroke-width="2.5"
-            stroke-dasharray="7 5" opacity=".9"/>
-      <path d=${path('b')} fill="none" stroke="var(--believed)" stroke-width="2.5"/>
-      ${last.t && html`<circle cx=${sx(last.t)} cy=${sy(last.t)} r="6"
-                               fill="var(--truth)"/>`}
-      ${last.b && html`<circle cx=${sx(last.b)} cy=${sy(last.b)} r="6"
-                               fill="var(--believed)"/>`}
-      ${sep !== null && sep > 1 && html`
-        <text x=${W-14} y="30" text-anchor="end" fill="var(--dim)"
-              font-size="22" font-family="ui-monospace,monospace">
-          ${sep.toFixed(0)} m off route
-        </text>`}
+      <defs>
+        <pattern id="grat" width="50" height="50" patternUnits="userSpaceOnUse">
+          <path d="M50 0 L0 0 0 50" fill="none" stroke="#161B21" strokeWidth="1"/>
+        </pattern>
+      </defs>
+      <rect width=${W} height=${H} fill="url(#grat)"/>
+      <line x1="0" y1=${cy} x2=${W} y2=${cy} stroke="#1C222A"/>
+      <line x1=${cx} y1="0" x2=${cx} y2=${H} stroke="#1C222A"/>
+      ${rings.map(r => html`<g key=${r}>
+        <circle cx=${cx} cy=${cy} r=${r*ppm} fill="none" stroke="#1C222A"
+                strokeDasharray="2 5"/>
+        <text x=${cx + r*ppm + 5} y=${cy - 5} fill="#4E5A67" fontSize="11"
+              fontFamily="ui-monospace,monospace">${r} m</text>
+      </g>`)}
+      <circle cx=${cx} cy=${cy} r=${AL*ppm} fill="none" stroke="var(--degraded)"
+              strokeWidth="1.5" strokeDasharray="9 6" opacity=".75"/>
+      <text x=${cx + AL*ppm*0.74} y=${cy - AL*ppm*0.74} fill="var(--degraded)"
+            fontSize="12" letterSpacing="1.6" fontFamily="ui-monospace,monospace">
+        ALERT LIMIT ${AL} M
+      </text>
+      ${bxy && html`<line x1=${cx} y1=${cy} x2=${bxy[0]} y2=${bxy[1]}
+                          stroke="var(--accent)" strokeWidth="1" strokeDasharray="3 4"
+                          opacity=".65"/>`}
+      <path d=${path} fill="none" stroke="var(--accent)" strokeWidth="2.5"/>
+      <g stroke="var(--truth)" strokeWidth="2">
+        <line x1=${cx-11} y1=${cy} x2=${cx+11} y2=${cy}/>
+        <line x1=${cx} y1=${cy-11} x2=${cx} y2=${cy+11}/>
+      </g>
+      <text x=${cx-20} y=${cy-19} fill="var(--truth)" fontSize="11" letterSpacing="1.4"
+            textAnchor="end" fontFamily="ui-monospace,monospace">USN8 SURVEYED</text>
+      ${bxy && html`<circle cx=${bxy[0]} cy=${bxy[1]} r="7" fill="var(--accent)"/>`}
+      <g transform=${`translate(24,${H-24})`}>
+        <line x1="0" y1="0" x2=${barPx} y2="0" stroke="#8794A2" strokeWidth="2"/>
+        <line x1="0" y1="-5" x2="0" y2="5" stroke="#8794A2" strokeWidth="2"/>
+        <line x1=${barPx} y1="-5" x2=${barPx} y2="5" stroke="#8794A2" strokeWidth="2"/>
+        <text x=${barPx/2} y="-11" fill="#8794A2" fontSize="11" textAnchor="middle"
+              letterSpacing="1.4" fontFamily="ui-monospace,monospace">${barM} M</text>
+      </g>
     </svg>`;
 }
 
-function Features({features}) {
-  const keys = Object.keys(FEATURE_LABEL).filter(k => features && k in features);
-  if (!keys.length) return null;
+function Authority({state}) {
   return html`
-    <div className="sec">
-      <div className="lbl">WHICH SIGNAL DIVERGED</div>
-      ${keys.map(k => html`
-        <div className="frow" key=${k}>
-          <div className="n">${FEATURE_LABEL[k]}</div>
-          <div className="fb"><span style=${{width:(features[k]*100).toFixed(1)+'%',
-            background: features[k] > .5 ? 'var(--restricted)' : 'var(--dim)'}}></span></div>
-          <div className="v">${features[k].toFixed(2)}</div>
-        </div>`)}
+    <div className="cell c-auth">
+      <div className="lbl">Positional authority</div>
+      <div className="state" style=${{color:COLOR[state]}}>${state}</div>
+      <div className="sub">${BEHAVIOUR[state]}</div>
     </div>`;
 }
 
-function Geometry({geometry, divergence}) {
-  const g = geometry || {};
-  if (g.displacement_bound_m == null && g.information_ratio == null) return null;
-  const ex = g.excluded_sv || [];
+function Confidence({conf, credential, thresholds, state}) {
   return html`
-    <div className="sec">
-      <div className="lbl">TRUSTED GEOMETRY</div>
-      ${g.displacement_bound_m != null && html`
-        <div className="bound">${g.displacement_bound_m.toFixed(0)}<small>m displacement bound</small></div>`}
-      ${g.information_ratio != null && html`
-        <div className="kv" style="margin-top:12px">
-          <span>information ratio</span><b>${g.information_ratio.toFixed(3)}</b></div>`}
-      <div className="kv"><span>satellites trusted</span>
-        <b>${g.satellites_tracked ?? '—'}</b></div>
-      ${g.next_best_observation && html`
-        <div className="kv"><span>next best observation</span>
-          <b>${g.next_best_observation}</b></div>`}
-      ${ex.length > 0 && html`
-        <div><div className="lbl" style="margin-top:13px">DROPPED FROM TRUSTED SET</div>
-          <div className="sv">${ex.map(s => html`<span key=${s}>${s}</span>`)}</div></div>`}
-      ${divergence && divergence.frozen_information_ratio != null && html`
-        <div className="kv" style="margin-top:13px">
-          <span>drift from last trusted epoch</span>
-          <b>${divergence.ratio_delta != null ? divergence.ratio_delta.toFixed(3) : '—'}</b></div>`}
+    <div className="cell c-conf">
+      <div className="lbl">Position confidence</div>
+      <div className="bigrow">
+        <div className="conf" style=${{color: conf != null ? COLOR[state] : 'var(--faint)'}}>
+          ${conf != null ? conf.toFixed(2) : '—'}</div>
+        ${credential && html`<div className="cred">credential ${credential}</div>`}
+      </div>
+      <div className="bar">
+        <span style=${{width:((conf||0)*100)+'%', background:COLOR[state]}}></span>
+        ${Object.entries(thresholds || {}).map(([k,v]) =>
+          html`<i className="tick" key=${k} style=${{left:(v*100)+'%'}}></i>`)}
+      </div>
+    </div>`;
+}
+
+function Features({features}) {
+  // Rows are always rendered so the strip height never depends on content.
+  // CLAUDE.md: the composite is never shown without these four alongside it.
+  return html`
+    <div className="cell c-feat">
+      <div className="lbl">Which signal diverged</div>
+      <div className="frows">
+        ${Object.keys(FEATURE_LABEL).map(k => {
+          const v = features && typeof features[k] === 'number' ? features[k] : null;
+          return html`
+            <div className="frow" key=${k}>
+              <div className="n">${FEATURE_LABEL[k]}</div>
+              <div className="fb"><span style=${{
+                width: v == null ? '0%' : (v*100).toFixed(1)+'%',
+                background: v != null && v > .45 ? 'var(--accent)' : 'var(--faint)'}}></span></div>
+              <div className="v">${v == null ? '—' : v.toFixed(2)}</div>
+            </div>`;
+        })}
+      </div>
+    </div>`;
+}
+
+function Geometry({geometry, divergence, tracked}) {
+  const g = geometry || {};
+  const drift = divergence && divergence.ratio_delta != null ? divergence.ratio_delta : null;
+  return html`
+    <div className="cell c-geom">
+      <div className="lbl">Trusted geometry</div>
+      <div className="geo">
+        <div className="boundwrap">
+          <div className=${'bound' + (g.displacement_bound_m != null ? '' : ' none')}>
+            ${g.displacement_bound_m != null ? g.displacement_bound_m.toFixed(0) : '—'}</div>
+          <div className="boundlbl">m displacement bound</div>
+        </div>
+        <div className="geokv">
+          <div className="kv"><span>information ratio</span>
+            <b>${g.information_ratio != null ? g.information_ratio.toFixed(3) : '—'}</b></div>
+          <div className="kv"><span>satellites tracked</span><b>${tracked ?? '—'}</b></div>
+          <div className="kv"><span>next best observation</span>
+            <b>${g.next_best_observation || '—'}</b></div>
+          <div className="kv"><span>drift from last trusted</span>
+            <b>${drift != null ? drift.toFixed(3) : '—'}</b></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function Dropped({geometry}) {
+  // Its own cell with a hard floor wide enough for three chips per row, so the
+  // six-satellite attack case wraps to two rows instead of clipping.
+  const ex = (geometry || {}).excluded_sv || [];
+  return html`
+    <div className="cell c-drop">
+      <div className="lbl">Dropped from trusted set</div>
+      <div className="sv">
+        ${ex.length
+          ? ex.map(s => html`<span key=${s}>${s}</span>`)
+          : html`<span className="none">none</span>`}
+      </div>
     </div>`;
 }
 
 function App() {
-  const [d,setD] = useState(null);
-  const [trail,setTrail] = useState([]);
-  const [ended,setEnded] = useState(false);
-  const es = useRef(null);
+  const [d, setD] = useState(null);
+  const [trail, setTrail] = useState([]);
+  const [conn, setConn] = useState('connecting');
+  const [mission, setMission] = useState(null);
 
   useEffect(() => {
-    const q = window.location.search;
-    const src = new EventSource('/events' + q);
-    es.current = src;
+    fetch('/mission').then(r => r.json()).then(setMission).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const src = new EventSource('/events' + window.location.search);
+    src.onopen = () => setConn('live');
     src.onmessage = e => {
       const m = JSON.parse(e.data);
       setD(m);
-      if (m.position) setTrail(t => [...t.slice(-2400), {
-        b:{lat:m.position.lat, lon:m.position.lon},
-        t:m._truth ? {lat:m._truth.lat, lon:m._truth.lon} : null,
-      }]);
+      if (m.position) setTrail(t => [...t.slice(-2400),
+        {b:{lat:m.position.lat, lon:m.position.lon}}]);
     };
-    src.addEventListener('end', () => setEnded(true));
+    src.addEventListener('end', () => { setConn('ended'); src.close(); });
+    src.onerror = () => setConn(src.readyState === 2 ? 'lost' : 'connecting');
     return () => src.close();
   }, []);
 
   useEffect(() => {
-    const onKey = e => { if (e.key === 'r' || e.key === 'R') window.location.reload(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const k = e => { if (e.key === 'r' || e.key === 'R') window.location.reload(); };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
   }, []);
 
   const state = d ? d.state : 'NOMINAL';
   const conf = d && d.confidence != null ? d.confidence : null;
-  const th = (d && d.thresholds) || {};
   const layerOn = !d || d.layer_on;
+
+  let sep = 0;
+  if (d && d.position && mission) {
+    const dN = (d.position.lat - mission.surveyed.lat) * mission.m_per_deg_lat;
+    const dE = (d.position.lon - mission.surveyed.lon) * mission.m_per_deg_lon;
+    sep = Math.hypot(dN, dE);
+  }
+  const breached = mission && sep > mission.alert_limit_m;
 
   return html`
     <div className="banners">
       ${d && d.synthetic && html`<div className="banner synthetic">
-        SYNTHETIC STREAM — not measured data. Must be replaced with Track A output before recording.
+        Synthetic stream — not measured data — replace with Track A output before recording
       </div>`}
       ${d && d.threshold_provenance === 'PLACEHOLDER' && html`<div className="banner provenance">
-        THRESHOLDS ARE PLACEHOLDERS — replace with measured separation points (design.md §10)
+        Thresholds are placeholders — replace with measured separation points (design.md §10)
+      </div>`}
+      ${conn === 'lost' && html`<div className="banner unverified">
+        Stream disconnected — this display is stale — press R to reconnect
       </div>`}
       ${d && d.explanation_verified === false && html`<div className="banner unverified">
-        EXPLANATION CLAIM FAILED VERIFICATION — numeric detail withheld
+        Explanation claim failed verification — numeric detail withheld
       </div>`}
     </div>
-    <main>
-      <div className="left">
-        <div className="layer">Trust layer: <b>${layerOn ? 'ON' : 'OFF'}</b></div>
-        <div className="plotwrap"><${TrackPlot} trail=${trail}/></div>
-        <div className="legend">
-          <div><i style="background:var(--believed)"></i>believed position</div>
-          <div style="margin-top:5px"><i style="background:var(--truth)"></i>true position</div>
-        </div>
-        <div className="hint">${ended ? 'replay complete · ' : ''}press r to reset</div>
+
+    <div className="strip">
+      <${Authority} state=${state}/>
+      <${Confidence} conf=${conf} credential=${d && d.credential_status}
+                     thresholds=${d && d.thresholds} state=${state}/>
+      <${Features} features=${d && d.features}/>
+      <${Geometry} geometry=${d && d.geometry} divergence=${d && d.geometry_divergence}
+                   tracked=${d && d.satellites_tracked}/>
+      <${Dropped} geometry=${d && d.geometry}/>
+    </div>
+
+    <div className="stage">
+      <div className="readout">
+        <div className=${'n' + (breached ? '' : ' safe')}>${sep.toFixed(0)}<span
+          style=${{fontSize:'22px',marginLeft:'6px'}}>m</span></div>
+        <div className="u">${breached ? 'beyond alert limit' : 'from surveyed position'}</div>
       </div>
-      <div className="right">
-        <div className="sec">
-          <div className="lbl">POSITIONAL AUTHORITY</div>
-          <div className="state" style=${{color:COLOR[state]}}>${state}</div>
-          <div className="sub">${BEHAVIOUR[state]}</div>
-        </div>
-        <div className="sec">
-          <div className="lbl">POSITION CONFIDENCE</div>
-          <div className="bigrow">
-            <div className="conf">${conf != null ? conf.toFixed(2) : '—'}</div>
-            ${d && d.credential_status && html`
-              <div className="sub">credential ${d.credential_status}</div>`}
-          </div>
-          <div className="bar">
-            <span style=${{width:((conf||0)*100)+'%', background:COLOR[state]}}></span>
-            ${Object.entries(th).map(([k,v]) =>
-              html`<i className="tick" key=${k} style=${{left:(v*100)+'%'}}></i>`)}
-          </div>
-        </div>
-        <${Features} features=${d && d.features}/>
-        <${Geometry} geometry=${d && {...(d.geometry||{}),
-                                      satellites_tracked:d.satellites_tracked}}
-                     divergence=${d && d.geometry_divergence}/>
-        <div style="flex:1"></div>
-        ${d && d.explanation && html`
-          <div className="exp">
-            <div className="h">${d.explanation.headline}</div>
-            <div className="d">${d.explanation.detail}</div>
-          </div>`}
+      <div className=${'layer kbox' + (layerOn ? '' : ' off')}>
+        Trust layer <b>${layerOn ? 'ON' : 'OFF'}</b></div>
+      <${Plot} trail=${trail} mission=${mission} sep=${sep}/>
+      <div className="legend">
+        <div><i style=${{borderColor:'var(--accent)'}}></i>believed position</div>
+        <div><i style=${{borderColor:'var(--truth)'}}></i>surveyed truth</div>
       </div>
-    </main>`;
+      <div className="hint">
+        ${conn === 'ended' ? 'replay complete · ' : ''}${conn === 'connecting' ? 'connecting · ' : ''}press R to reset
+      </div>
+    </div>
+
+    ${d && d.explanation && html`
+      <div className="expbar">
+        <div className="h">${d.explanation.headline}</div>
+        <div className="d">${d.explanation.detail}</div>
+      </div>`}`;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
