@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from backend.demo import ATTACK_EPOCHS, PRE_EPOCHS
+
 DEMO = Path("out/demo.jsonl")
 CLEAN = Path("out/clean.jsonl")
 REQUIRED = {"timestamp", "confidence", "credential_status", "position",
@@ -84,5 +86,6 @@ def test_attack_window_is_marked_and_bounded(demo):
     stages = [r.get("_attack", {}).get("stage") for r in demo]
     attack = [i for i, s in enumerate(stages) if s and s != "CLEAN"]
     assert attack, "no attack epochs in demo"
-    assert attack[0] == 200 and len(attack) == 120
-    assert all(s == "CLEAN" for s in stages[:200]) and all(s == "CLEAN" for s in stages[320:])
+    assert attack[0] == PRE_EPOCHS and len(attack) == ATTACK_EPOCHS
+    end = PRE_EPOCHS + ATTACK_EPOCHS
+    assert all(s == "CLEAN" for s in stages[:PRE_EPOCHS]) and all(s == "CLEAN" for s in stages[end:])

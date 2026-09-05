@@ -19,7 +19,7 @@ calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_a
 | `satellites_tracked` | measured | count of SVs with code or C/N0 on band 1 |
 | `position` | **surveyed, not a solution** | `position_source: "surveyed"`. No least-squares solution exists without Track C's line-of-sight vectors. Displacement reads **0 m** on this stream |
 | `_truth` | replay metadata | equals `position` on every epoch, for the same reason |
-| `geometry.sky[]` | propagated | real az/el from broadcast ephemeris (G+E only — GLONASS PZ-90 and BeiDou BDT not propagated), 10° mask |
+| `geometry.sky[]` | propagated | real az/el from `backend/geometry/skyview.py` (gnss-lib-py, G+E only, 10° mask). **A second, pseudorange-validated propagator with BeiDou exists in `backend/rinex/ephemeris.py` (Track A); convergence is an 18:30 checkpoint item.** |
 | `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `pseudorange_residual` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day 52.7% of epochs have ≥1 excluded SV |
 | `geometry.information_ratio`, `displacement_bound_m`, `next_best_observation` | **null, awaiting Track C** | not fabricated |
 | `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (20 epochs = T_int 10 × d 2, §9) → EXPIRED. Stands in for TESLA T1 |
@@ -33,19 +33,19 @@ No record carries `_synthetic`.
 | Stream | Epochs | Content |
 |---|---|---|
 | clean.jsonl | 2880 | whole day, no injection, credential VALID |
-| carryoff.jsonl | 2880 | whole day, carry-off 2026-08-20T12:30:00Z → 2026-08-20T13:29:30Z then clean |
-| demo.jsonl | 440 | slice [1300, 1740) of carryoff: 2026-08-20T10:50:00Z → 2026-08-20T14:29:30Z |
+| carryoff.jsonl | 2880 | whole day, carry-off 2026-08-20T12:30:00Z → 2026-08-20T13:14:30Z then clean |
+| demo.jsonl | 240 | slice [1440, 1680) of carryoff: 2026-08-20T12:00:00Z → 2026-08-20T13:59:30Z |
 
-demo.jsonl beats: 200 clean · 120 attack (2026-08-20T12:30:00Z → 2026-08-20T13:29:30Z) ·
-120 post-attack clean with credential 40 VALID /
-20 PENDING / 60 EXPIRED.
+demo.jsonl beats: 60 clean · 90 attack (2026-08-20T12:30:00Z → 2026-08-20T13:14:30Z) ·
+90 post-attack clean with credential 40 VALID /
+20 PENDING / 30 EXPIRED.
 
 ## Injector parameters (design.md §7 carry-off, Track A defaults)
 
-carry_off: 120 attack epochs {'WALK': 119, 'CAPTURE': 1}, 12 SV at peak, max range offset 3560.0 m, max code-carrier divergence 71.20 m
+carry_off: 90 attack epochs {'WALK': 89, 'CAPTURE': 1}, 12 SV at peak, max range offset 2660.0 m, max code-carrier divergence 53.20 m
 
 power_db 2.0 · walk_off_mps 1.0 · target all GPS tracked at capture ·
-capture_s 10 · duration_s 3600 ·
+capture_s 10 · duration_s 2700 ·
 **carrier_rate_error 0.02 m/s — the TEST value from
 tests/test_detection.py, not the demo pin.** Eric left the pin deliberately
 unset ("picked by hand from the printed arithmetic"); replace it when given.

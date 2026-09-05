@@ -51,14 +51,17 @@ ONSET = datetime(2026, 8, 20, 12, 30)
 CARRIER_RATE_ERROR_MPS = 0.02
 
 EPOCH_S = 30
-PRE_EPOCHS = 200         # beat 1: clean lead-in
-ATTACK_EPOCHS = 120      # beats 2/3: one hour of carry-off
-POST_EPOCHS = 120        # beat 4: clean sky, credential lapses
+# Team demo window 12:00-14:00 UTC (coordinator, 2026-09-05), built around Track
+# A's code-default onset of 12:30 so every file on the team attacks at the same
+# epoch. 240 epochs: 60 clean lead-in, 90 carry-off, 90 clean tail.
+PRE_EPOCHS = 60          # beat 1: 12:00:00 -> 12:29:30
+ATTACK_EPOCHS = 90       # beats 2/3: 12:30:00 -> 13:14:30
+POST_EPOCHS = 90         # beat 4: 13:15:00 -> 13:59:30, credential lapses
 
 # design.md §9: T_int = 10 epochs, d = 2 intervals -> PENDING lasts exactly 20.
 T_INT_EPOCHS, DISCLOSURE_LAG_INTERVALS = 10, 2
 PENDING_EPOCHS = T_INT_EPOCHS * DISCLOSURE_LAG_INTERVALS
-POST_VALID_EPOCHS = 40   # tail = 40 VALID, 20 PENDING, 60 EXPIRED
+POST_VALID_EPOCHS = 40   # tail = 40 VALID, 20 PENDING, 30 EXPIRED
 
 # Distrust rule. A satellite is excluded on an epoch when its own pseudorange-
 # residual |z| reaches the calibrated saturation scale — i.e. it is beyond the
@@ -222,7 +225,7 @@ systems {SYSTEMS}. {floor}
 | `satellites_tracked` | measured | count of SVs with code or C/N0 on band 1 |
 | `position` | **surveyed, not a solution** | `position_source: "surveyed"`. No least-squares solution exists without Track C's line-of-sight vectors. Displacement reads **0 m** on this stream |
 | `_truth` | replay metadata | equals `position` on every epoch, for the same reason |
-| `geometry.sky[]` | propagated | real az/el from broadcast ephemeris (G+E only — GLONASS PZ-90 and BeiDou BDT not propagated), 10° mask |
+| `geometry.sky[]` | propagated | real az/el from `backend/geometry/skyview.py` (gnss-lib-py, G+E only, 10° mask). **A second, pseudorange-validated propagator with BeiDou exists in `backend/rinex/ephemeris.py` (Track A); convergence is an 18:30 checkpoint item.** |
 | `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `{DISTRUST_FEATURE}` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day {ex_clean:.1%} of epochs have ≥1 excluded SV |
 | `geometry.information_ratio`, `displacement_bound_m`, `next_best_observation` | **null, awaiting Track C** | not fabricated |
 | `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}, §9) → EXPIRED. Stands in for TESLA T1 |
