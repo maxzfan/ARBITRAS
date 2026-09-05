@@ -29,6 +29,46 @@ calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_a
 
 No record carries `_synthetic`.
 
+## Solver layering — which number comes from which solver
+
+Two position solvers and one geometry engine coexist on purpose (18:30
+checkpoint item 2); they answer different questions and none is redundant:
+
+1. **Absolute per-constellation WLS** — `backend/rinex/solve.py` (Eric).
+   Iono-free dual-frequency code, Saastamoinen troposphere, 5° mask; solves
+   all-in-view plus each constellation alone (3.9–12.3 m from the surveyed
+   marker). **Feeds:** `features.cross_constellation` — the per-constellation
+   position-disagreement and inter-system clock channels are differences of
+   ITS solutions. (In `backend.replay` streams it also supplies the believed
+   `position`, `position_source: "solution"`; in these demo streams it does
+   not — see 2.)
+2. **Differential WLS** — `backend/geometry/solve.py` (Track B). Single-band,
+   G+E, no atmosphere model, 0.73 m median horizontal vs the surveyed marker;
+   the clean and injected fixes share one satellite set and one weight vector
+   so everything unmodelled cancels in the difference. **Feeds:** the stream's
+   `position` (`position_source: "wls_differential"`), `_truth`,
+   `_solution.displacement_m` (the EMPIRICAL displacement on screen), and the
+   **sigma_UERE measurement** (1.934 m clean post-fit residual RMS,
+   `backend/measurement/sigma_uere.py`, cached with provenance in
+   `out/sigma_uere.json`).
+3. **Geometry engine** — `backend/geometry/` (Track C). Fisher information
+   over the line-of-sight matrix H. **Feeds:** `geometry.information_ratio`
+   (normalised D-optimality ratio), `geometry.displacement_bound_m` (the
+   ANALYTIC bound, taking sigma_UERE measured from solver 2 as its only
+   empirical input), `geometry.next_best_observation`, and `geometry.sky`.
+
+So: the cross-constellation feature comes from solver 1; the believed
+position and the measured displacement come from solver 2; the information
+ratio and the displacement *bound* come from the geometry engine, calibrated
+by solver 2's residuals. The empirical displacement (2) and the analytic
+bound (3) are independent derivations that the §10 empirical-vs-bound check
+plots on one axis.
+
+(The field table above reflects the last generated streams and refreshes on
+the next `python -m backend.demo` run, which now also wires
+`features.cross_constellation` and the live geometry block into all three
+streams.)
+
 ## Windows
 
 | Stream | Epochs | Content |

@@ -142,6 +142,11 @@ def decide(arb: Arbiter, epoch, layer_on: bool) -> dict:
     payload["threshold_provenance"] = THRESHOLD_PROVENANCE
     if isinstance(epoch, dict):
         payload["position"] = epoch.get("position")
+        # §5 provenance flag ("solution" | "surveyed" | "wls_differential"):
+        # copied through so the console can say which solver stood behind the
+        # dot it draws. Absent from older streams; omitted rather than faked.
+        if "position_source" in epoch:
+            payload["position_source"] = epoch["position_source"]
         payload["satellites_tracked"] = epoch.get("satellites_tracked")
         payload["synthetic"] = bool(epoch.get("_synthetic"))
         # Replay ground truth. Out of the §5 contract on purpose -- a real
