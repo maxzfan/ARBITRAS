@@ -300,8 +300,9 @@ def test_engine_emits_contract_shape_from_fixture():
         fx["timestamp"].replace("Z", "")) + timedelta(seconds=18)
     eng = GeometryEngine(sigma_uere_m=1.0)
     block = eng.compute(t_gpst, excluded_sv=fx["geometry"]["excluded_sv"])
-    assert set(block) == {"information_ratio", "excluded_sv",
-                          "displacement_bound_m", "next_best_observation"}
+    # Core §5 keys are a subset — extensions (sky, correction) may ride along.
+    assert {"information_ratio", "excluded_sv",
+            "displacement_bound_m", "next_best_observation"} <= set(block)
     assert 0.0 <= block["information_ratio"] <= 1.0
     assert block["excluded_sv"] == sorted(fx["geometry"]["excluded_sv"])
     assert isinstance(block["displacement_bound_m"], float)
@@ -312,6 +313,30 @@ def test_engine_emits_contract_shape_from_fixture():
                                  excluded_sv=fx["geometry"]["excluded_sv"])
     assert block2["displacement_bound_m"] is None
     assert block2["information_ratio"] == block["information_ratio"]
+
+
+@needs_data
+def test_engine_sky_block_on_real_data():
+    # Track B contract extension: geometry.sky lists every visible SV at
+    # az/el, sorted by descending elevation, trusted=False iff excluded.
+    from backend.geometry.engine import GeometryEngine
+    excluded = ["G07", "G13"]
+    eng = GeometryEngine()
+    block = eng.compute(datetime(2026, 8, 20, 12, 0, 0),
+                        excluded_sv=excluded)
+    sky = block["sky"]
+    assert len(sky) >= 6
+    els = [e["el"] for e in sky]
+    assert els == sorted(els, reverse=True)
+    for e in sky:
+        assert set(e) == {"sv", "az", "el", "trusted"}
+        assert e["trusted"] == (e["sv"] not in excluded)
+        assert 0.0 <= e["az"] < 360.0
+        assert 0.0 < e["el"] <= 90.0
+    sky_svs = {e["sv"] for e in sky}
+    for sv in excluded:
+        if sv in sky_svs:
+            assert not next(e for e in sky if e["sv"] == sv)["trusted"]
 
 
 @needs_data

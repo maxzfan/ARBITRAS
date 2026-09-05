@@ -22,7 +22,7 @@ from datetime import datetime
 import numpy as np
 
 from backend.geometry.ephemeris import load_records, sv_positions_at
-from backend.geometry.hmatrix import build_H, elevation_deg
+from backend.geometry.hmatrix import azimuth_deg, build_H, elevation_deg
 from backend.geometry.information import (displacement_bound_m,
                                           information_ratio,
                                           next_best_observation)
@@ -87,12 +87,24 @@ class GeometryEngine:
             bound = displacement_bound_m(h_trusted, self.sigma_uere_m,
                                          self.alpha)
 
+        # Sky view (Track B contract extension): every SV in the epoch's
+        # basis — the frozen set below NOMINAL, consistent with the ratio —
+        # at its az/el, dark exactly where excluded_sv says so.
+        sky = sorted(
+            ({"sv": sv,
+              "az": round(azimuth_deg(p, self.rx_ecef), 1),
+              "el": round(elevation_deg(p, self.rx_ecef), 1),
+              "trusted": sv not in excluded}
+             for sv, p in basis.items()),
+            key=lambda e: -e["el"])
+
         return {
             "information_ratio": round(ratio, 4),
             "excluded_sv": sorted(excluded),
             "displacement_bound_m": None if bound is None else round(bound, 1),
             "next_best_observation": next_best_observation(
                 basis, sorted(trusted), self.rx_ecef),
+            "sky": sky,
         }
 
 

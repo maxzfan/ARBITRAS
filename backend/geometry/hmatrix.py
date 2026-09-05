@@ -28,6 +28,20 @@ def elevation_deg(sat_ecef: np.ndarray, rx_ecef: np.ndarray) -> float:
                                               -1.0, 1.0))))
 
 
+def azimuth_deg(sat_ecef: np.ndarray, rx_ecef: np.ndarray) -> float:
+    """Azimuth clockwise from north, degrees in [0, 360).
+
+    Standard ENU azimuth atan2(E, N) with the same geocentric up-vector
+    as elevation_deg, so the pair is a consistent local frame.
+    """
+    up = rx_ecef / np.linalg.norm(rx_ecef)
+    east = np.cross([0.0, 0.0, 1.0], up)
+    east = east / np.linalg.norm(east)
+    north = np.cross(up, east)
+    u = unit_los(sat_ecef, rx_ecef)
+    return float(np.degrees(np.arctan2(u @ east, u @ north)) % 360.0)
+
+
 def build_H(sat_pos: dict[str, np.ndarray],
             rx_ecef: np.ndarray) -> tuple[np.ndarray, list[str], list[str]]:
     """Build H from {sv_id: ecef_position}.

@@ -21,7 +21,27 @@
       "G13"
     ],
     "displacement_bound_m": 41.2,
-    "next_best_observation": "E"
+    "next_best_observation": "E",
+    "sky": [
+      {
+        "sv": "E12",
+        "az": 213.4,
+        "el": 71.6,
+        "trusted": true
+      },
+      {
+        "sv": "G07",
+        "az": 143.2,
+        "el": 41.8,
+        "trusted": false
+      },
+      {
+        "sv": "G13",
+        "az": 312.7,
+        "el": 18.9,
+        "trusted": false
+      }
+    ]
   },
   "satellites_tracked": 11,
   "score_detail": {
