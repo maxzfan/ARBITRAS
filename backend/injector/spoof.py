@@ -103,7 +103,9 @@ class Spoof:
     def stage(self, t: datetime) -> tuple[str, float]:
         """(stage, seconds since onset) for an epoch time."""
         dt = (t - self.onset).total_seconds()
-        if dt < 0 or (self.duration_s is not None and dt > self.duration_s):
+        # Half-open [onset, onset+duration): dt == duration_s is the first
+        # CLEAN epoch after the attack, not its last attack epoch.
+        if dt < 0 or (self.duration_s is not None and dt >= self.duration_s):
             return CLEAN, dt
         if dt < self.capture_s:
             return CAPTURE, dt

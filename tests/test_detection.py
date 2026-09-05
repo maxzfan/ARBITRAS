@@ -216,3 +216,32 @@ def test_composite_is_never_emitted_without_its_parts():
     assert set(r["features"]) == set(FEATURE_NAMES)
     assert "geometry" in r and "score_detail" in r
     assert r["score_detail"]["weights_tuned"] is False
+
+
+# -- excluded_sv ---------------------------------------------------------------
+
+def test_exclusion_rule_is_unset_by_default(day, cal):
+    from backend.detection import flagged_sv
+    per_sv = FeatureExtractor(cal).run(day[:60])[-1]["per_sv"]
+    assert flagged_sv(per_sv, cal.z_sat, None) == []
+
+
+def test_exclusion_rule_names_only_saturated_satellites(day, cal):
+    from backend.detection import flagged_sv
+    res = FeatureExtractor(cal).run(day[:200])[-1]
+    per_sv, z = res["per_sv"], cal.z_sat
+    for k in (1.0, 2.0, 3.0):
+        got = flagged_sv(per_sv, z, k)
+        norm = (per_sv / pd.Series(z)).max(axis=1)
+        assert got == sorted(norm.index[norm >= k])
+        assert set(got) <= set(per_sv.index)
+
+
+def test_replay_emits_detector_derived_excluded_sv(day, cal):
+    """The list must come from per-SV scores, not from what the injector did."""
+    from backend.replay import run
+    recs = run(day[:120], cal, exclude_z=1.0)
+    seen = {sv for r in recs if r["geometry"] for sv in r["geometry"]["excluded_sv"]}
+    assert seen                                  # k=1.0 fires often on clean sky
+    off = run(day[:120], cal)
+    assert all(r["geometry"] is None for r in off)

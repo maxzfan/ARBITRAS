@@ -96,6 +96,32 @@ def aggregate(scores: pd.Series) -> float:
     return float(big.max() if len(big) else scores.mean())
 
 
+def flagged_sv(per_sv: pd.DataFrame, z_sat: dict, k: float | None) -> list:
+    """Satellites whose worst per-SV score reaches k * its saturation.
+
+    This is the only honest source for the §5 `excluded_sv` list: it names the
+    satellites the detector actually stopped trusting, per satellite, rather
+    than restating what the injector did.
+
+    `k` has NO default and None returns []. Choosing it is a threshold-class
+    decision (design.md §10) and the clean-day cost is steep, because the
+    per-SV tail is heavy on low-elevation satellites (docs/measured.md):
+
+        k = 1.0 -> 78.9% of CLEAN epochs flag at least one satellite
+        k = 1.5 -> 34.6%      k = 2.0 -> 12.7%
+        k = 3.0 ->  2.7%      k = 5.0 ->  0.5%
+
+    Those are false exclusions on a clean sky: each one is a satellite the
+    console would paint as distrusted during demo beat 1, and each one removes
+    a row from Track C's H. Numbers printed, choice not made here.
+    """
+    if k is None or per_sv.empty:
+        return []
+    norm = per_sv / pd.Series(z_sat)
+    worst = norm.max(axis=1)
+    return sorted(worst.index[worst >= k])
+
+
 @dataclass
 class FeatureConfig:
     """Window lengths, in epochs. At 30 s sampling: 20 epochs = 10 minutes."""

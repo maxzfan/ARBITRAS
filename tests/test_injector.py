@@ -244,3 +244,16 @@ def test_ephemeris_ranges_are_consistent_with_pseudoranges(day):
     rng = np.linalg.norm(pos.to_numpy() - np.array(USN8_ECEF), axis=1)
     diff = np.abs(ep.df.loc[pos.index, "code_1"].to_numpy() - rng)
     assert diff.max() < 1_000e3
+
+
+def test_attack_window_is_half_open(window, floor):
+    """dt == duration_s is the first CLEAN epoch after the attack, not its
+    last attack epoch."""
+    dt = epoch_interval_s(window)
+    sp = CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE,
+                   duration_s=10 * dt)
+    _, truth = inject(window, sp, floor)
+    active = truth[truth["stage"] != CLEAN]
+    assert len(active) == 10
+    last = active.index[-1]
+    assert (last - ONSET).total_seconds() == (10 - 1) * dt

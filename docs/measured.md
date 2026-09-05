@@ -238,3 +238,64 @@ composite d′ 4.52.
 
 Carry-off is not in this table: the demo pin for `carrier_rate_error` is
 pending and `backend.replay` skips it by design until the pin is given.
+
+
+---
+
+# Feature 2's residual is not a solution residual — stated before the sweep
+
+Asked and answered before the position-walk injector was written, because it
+changes what the sweep output means.
+
+**Neither all-in-view nor per-constellation. There is no position solution in
+feature 2 at all.** `backend/detection/features.py` computes
+`pseudorange_residual` as the deviation of **code-minus-carrier** from its own
+per-satellite trailing baseline: `(C1 - lambda*L1)` against a 40-epoch median,
+one satellite at a time, no receiver position and no H matrix anywhere in it.
+Feature 3 is the epoch-to-epoch rate of the same quantity. This is documented
+in that module already ("two statistics of one observable, not two independent
+observables") and it is the honest reason feature 2 has never needed the nav
+file.
+
+The consequence for a coordinated position walk is therefore **worse than the
+per-constellation case you named, and in a different way**:
+
+- A per-constellation solution residual would go to zero for a coordinated
+  GPS-only walk because the walk lies in the position columns of H.
+- Code-minus-carrier goes quiet for a *different* reason: a spoofer that moves
+  code and carrier together produces no divergence at all, whatever the
+  geometry. That is exactly what `carrier_rate_error = 0` models, and it is
+  already asserted by test as invisible to features 2 and 3.
+
+So for the directional position walk, **features 2 and 3 see only
+`carrier_rate_error`, never the displacement.** A coherent walk (rate 0) is
+invisible to both no matter how far it moves the vehicle. Detection of the
+walk itself rests on:
+
+1. **cross_constellation** — authentic E and C disagree with spoofed G;
+2. **cn0_anomaly** — the capture step, which fades within `cn0_window`;
+3. the geometry half (§6b), once Track C lands.
+
+This is why §10 must record residuals on the spoofed and authentic subsets
+separately: the residual that appears under a coordinated walk is
+cross-constellation disagreement, not GPS-internal inconsistency.
+
+# `excluded_sv`: the rule is built, unset, and its clean-day cost measured
+
+`detection.flagged_sv` names the satellites whose worst per-SV score reaches
+`k x` its calibrated saturation. `k` has **no default**; unset, the list is
+empty. Measured on the clean day, the cost of each candidate:
+
+| rule | clean epochs flagging >= 1 SV | mean SV flagged |
+|---|---|---|
+| k = 1.0 | **78.9%** | 1.77 |
+| k = 1.5 | 34.6% | 0.43 |
+| k = 2.0 | 12.7% | 0.14 |
+| k = 3.0 | 2.7% | 0.03 |
+| k = 5.0 | 0.5% | 0.00 |
+
+Every one of those is a false exclusion on a clean sky: a satellite the console
+paints as distrusted during demo beat 1, and a row removed from Track C's H.
+The heavy tail is the same low-elevation multipath structure the C/N0 section
+describes. Numbers printed; `k` is a threshold-session decision and is not
+chosen here.
