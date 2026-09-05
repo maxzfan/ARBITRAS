@@ -113,9 +113,9 @@ def main(argv=None) -> None:
 
     names = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
     for name in names:
-        if name == "carry_off":
+        if name in ("carry_off", "clock_carry_off"):
             if args.carrier_rate_error is None:
-                print("carry_off: SKIPPED -- carrier_rate_error demo pin is "
+                print(f"{name}: SKIPPED -- carrier_rate_error demo pin is "
                       "pending (picked by hand; pass --carrier-rate-error)")
                 continue
             spoof = SCENARIOS[name](onset=onset,
