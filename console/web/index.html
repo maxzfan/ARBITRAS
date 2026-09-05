@@ -4,13 +4,28 @@
 <style>
   /* Vendored so the console runs offline (design.md §14: venue wifi is a risk).
      font-display:block avoids a flash of fallback metrics mid-capture. */
-  @font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:block;
+  @font-face{font-family:'IBM Plex Sans';font-weight:400;font-display:block;
+             src:url('/vendor/plex-sans-400.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:500;font-display:block;
+             src:url('/vendor/plex-sans-500.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:600;font-display:block;
+             src:url('/vendor/plex-sans-600.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:700;font-display:block;
+             src:url('/vendor/plex-sans-700.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Mono';font-weight:400;font-display:block;
+             src:url('/vendor/plex-mono-400.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Mono';font-weight:500;font-display:block;
+             src:url('/vendor/plex-mono-500.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Mono';font-weight:600;font-display:block;
+             src:url('/vendor/plex-mono-600.woff2') format('woff2')}
+  /* Inter stays vendored as the fallback tier. */
+  @font-face{font-family:'Inter';font-weight:400;font-display:block;
              src:url('/vendor/inter-400.woff2') format('woff2')}
-  @font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:block;
+  @font-face{font-family:'Inter';font-weight:500;font-display:block;
              src:url('/vendor/inter-500.woff2') format('woff2')}
-  @font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:block;
+  @font-face{font-family:'Inter';font-weight:600;font-display:block;
              src:url('/vendor/inter-600.woff2') format('woff2')}
-  @font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:block;
+  @font-face{font-family:'Inter';font-weight:700;font-display:block;
              src:url('/vendor/inter-700.woff2') format('woff2')}
   :root{
     --bg:#0B0D0F; --panel:#0E1114; --line:#1C222A; --keyline:#2B333D;
@@ -18,11 +33,11 @@
     --accent:#E4551F;
     --nominal:#D8E2EC; --degraded:#E8A21C; --restricted:#E4551F; --surrendered:#D62119;
     --believed:#E4551F; --truth:#7FA8CC;
-    /* Three tiers, deliberately: condensed-black for display numbers, Inter
-       for prose and labels, mono for aligned instrument data. */
+    /* Three tiers, deliberately: condensed-black for display numbers, Plex Sans
+       for prose and labels, Plex Mono for aligned instrument data. */
     --display:"Helvetica Neue","Arial Narrow",Impact,system-ui,sans-serif;
-    --sans:'Inter',system-ui,-apple-system,sans-serif;
-    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:'IBM Plex Sans','Inter',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,"SF Mono",Menlo,monospace;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
@@ -50,8 +65,8 @@
      to ~1275px so nothing clips down to a 1280 viewport. */
   .c-auth{flex:0 1 330px;min-width:268px}
   .c-conf{flex:1 1 250px;min-width:186px}
-  .c-feat{flex:1 1 380px;min-width:226px}
-  .c-geom{flex:1 1 430px;min-width:398px}
+  .c-feat{flex:1 1 380px;min-width:220px}
+  .c-geom{flex:1 1 430px;min-width:404px}
   .c-drop{flex:0 0 196px;min-width:196px}
   .lbl{font-family:var(--sans);font-weight:600;font-size:10px;letter-spacing:.16em;
      color:var(--faint);text-transform:uppercase;margin-bottom:9px;white-space:nowrap}
@@ -78,7 +93,7 @@
   .frow .fb>span{position:absolute;inset:0 auto 0 0}
   .frow .v{font-family:var(--mono);width:36px;text-align:right;
          font-variant-numeric:tabular-nums;font-size:11px;flex:0 0 auto}
-  .geo{display:flex;gap:22px;align-items:flex-start;min-width:0}
+  .geo{display:flex;gap:20px;align-items:flex-start;min-width:0}
   .boundwrap{flex:0 0 auto}
   .bound{font-family:var(--display);font-weight:900;font-size:44px;line-height:1;
          letter-spacing:-.03em;font-variant-numeric:tabular-nums;color:var(--accent);
@@ -88,19 +103,21 @@
             letter-spacing:.11em;text-transform:uppercase;margin-top:6px;max-width:120px;
             line-height:1.3}
   .geokv{flex:1 1 auto;min-width:0}
-  .kv{font-family:var(--mono);display:flex;justify-content:space-between;gap:16px;
-    font-size:11px;margin:4px 0;color:var(--dim);letter-spacing:.02em;
+  .kv{font-family:var(--mono);display:flex;justify-content:space-between;gap:14px;
+    font-size:11px;margin:4px 0;color:var(--dim);letter-spacing:0;
     white-space:nowrap;font-variant-numeric:tabular-nums}
   .kv b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
   .sv{display:flex;flex-wrap:wrap;gap:5px}
-  .sv span{font-family:var(--mono);font-size:10px;padding:3px 7px;
-         border:1px solid var(--accent);color:var(--accent);letter-spacing:.06em}
+  .sv span{font-family:var(--mono);font-size:10px;padding:3px 6px;
+         border:1px solid var(--accent);color:var(--accent);letter-spacing:.04em}
   .sv span.none{border-color:var(--line);color:var(--faint)}
   .c-drop .lbl{white-space:normal;line-height:1.35}
 
-  /* ---- stage: the plot gets everything left over ---------------------- */
-  .stage{flex:1;position:relative;min-height:0;overflow:hidden}
-  svg{width:100%;height:100%;display:block}
+  /* ---- stage: map pane + sky pane ------------------------------------ */
+  .stage{flex:1;position:relative;min-height:0;overflow:hidden;display:flex}
+  .pane{position:relative;flex:1 1 0;min-width:0;min-height:0;overflow:hidden}
+  .pane+.pane{border-left:1px solid var(--line)}
+  .pane svg{position:absolute;inset:0;width:100%;height:100%;display:block}
   .kbox{border:1px solid var(--keyline);background:#0B0D0Fcc;padding:9px 12px}
   .layer{position:absolute;top:20px;right:20px;z-index:5;font-size:11px;
          letter-spacing:.16em;text-transform:uppercase}
@@ -118,12 +135,36 @@
         color:var(--dim)}
   .legend div{display:flex;align-items:center;gap:9px;margin-top:6px}
   .legend i{width:26px;height:0;border-top:2px solid}
+  .legend i.sw{width:8px;height:8px;border:0}
   .hint{position:absolute;bottom:18px;right:20px;z-index:5;font-family:var(--sans);
       font-weight:500;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
       color:var(--faint)}
   .idle{display:flex;height:100%;align-items:center;justify-content:center;
       font-family:var(--sans);font-weight:500;color:var(--faint);font-size:11px;
       letter-spacing:.16em;text-transform:uppercase}
+
+  /* sky dome */
+  .sky{position:absolute;inset:0}
+  .sky canvas{display:block;width:100%;height:100%}
+  .skylabels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+  .skl{position:absolute;transform:translate(0,-50%);font-family:var(--mono);
+       font-size:10px;letter-spacing:.04em;white-space:nowrap;color:var(--truth)}
+  .skl.x{color:var(--accent)}
+  .skl.cmp{font-family:var(--sans);font-weight:600;font-size:11px;letter-spacing:.16em;
+           color:var(--dim);transform:translate(-50%,-50%)}
+  .skycap{position:absolute;left:20px;z-index:5;font-family:var(--sans);font-weight:600;
+          font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim)}
+  .skycap .n2{font-family:var(--mono);font-weight:400;font-size:10px;color:var(--faint);
+              margin-top:5px;letter-spacing:.02em;text-transform:none}
+  .skycap .n2 b{color:var(--fg);font-weight:500}
+  .skyleg{position:absolute;bottom:18px;left:20px;z-index:5;font-family:var(--sans);
+          font-weight:500;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+          color:var(--dim)}
+  .skyleg div{display:flex;align-items:center;gap:9px;margin-top:6px}
+  .skyleg i{width:8px;height:8px;display:inline-block}
+  .skyidle{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+           font-family:var(--sans);font-weight:500;color:var(--faint);font-size:11px;
+           letter-spacing:.16em;text-transform:uppercase;pointer-events:none}
 
   /* ---- explanation, full width so it is never clipped ----------------- */
   .expbar{flex:0 0 auto;border-top:1px solid var(--keyline);background:#0A0C0E;
@@ -160,10 +201,15 @@ setTimeout(function () {
 </script>
 <script src="/vendor/react.js"></script>
 <script src="/vendor/react-dom.js"></script>
+<script src="/vendor/three.js"></script>
 <script type="module">
 import htmMod from '/vendor/htm.js';
-const {useState, useEffect} = React;
+const {useState, useEffect, useRef} = React;
 const html = htmMod.bind(React.createElement);
+
+const QS = new URLSearchParams(window.location.search);
+const VIEW = ['map', 'sky'].includes(QS.get('view')) ? QS.get('view') : 'split';
+const ORBIT = QS.get('orbit') === '1';
 
 const COLOR = {NOMINAL:'var(--nominal)', DEGRADED:'var(--degraded)',
                RESTRICTED:'var(--restricted)', SURRENDERED:'var(--surrendered)'};
@@ -182,10 +228,24 @@ const niceStep = s => {
   return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * p;
 };
 
-function Plot({trail, mission, sep}) {
-  if (!mission) return html`<div className="idle">loading mission</div>`;
-  // Wide, short viewBox to match the full-width stage under the strip.
-  const W = 1400, H = 560, cx = W/2, cy = H/2;
+// Pane size in CSS px, so the SVG draws 1:1 and nothing is letterboxed or
+// cropped when the map shares the stage with the dome.
+function useSize(ref) {
+  const [s, setS] = useState({w:0, h:0});
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const ro = new ResizeObserver(([e]) => {
+      const r = e.contentRect; setS({w:Math.round(r.width), h:Math.round(r.height)});
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return s;
+}
+
+function Plot({trail, mission, sep, size}) {
+  if (!mission || !size.w || !size.h) return html`<div className="idle">loading mission</div>`;
+  const W = size.w, H = size.h, cx = W/2, cy = H/2;
   const AL = mission.alert_limit_m;
   // Frame on the surveyed point; expand as displacement grows so the alert ring
   // is always legible and the plot never sits in a void.
@@ -196,10 +256,9 @@ function Plot({trail, mission, sep}) {
     const dE = (p.lon - mission.surveyed.lon) * mission.m_per_deg_lon;
     return [cx + dE*ppm, cy - dN*ppm];
   };
-  // Ring spacing keyed to the horizontal extent; the cap keeps the outermost
-  // label inside the viewBox instead of clipping it at the right edge.
-  const step = niceStep(span*0.7), rings = [];
-  for (let r = step; r <= span*2.6; r += step) rings.push(r);
+  // Rings out to whatever fits horizontally with room for the label.
+  const step = niceStep(span*0.7), rings = [], maxR = (W/2 - 64) / ppm;
+  for (let r = step; r <= maxR; r += step) rings.push(r);
   const path = trail.filter(p=>p.b).map((p,i)=>{
     const [x,y] = toXY(p.b); return `${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
@@ -208,7 +267,7 @@ function Plot({trail, mission, sep}) {
   const barM = niceStep(span*0.6), barPx = barM*ppm;
 
   return html`
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="0 0 ${W} ${H}" width=${W} height=${H}>
       <defs>
         <pattern id="grat" width="50" height="50" patternUnits="userSpaceOnUse">
           <path d="M50 0 L0 0 0 50" fill="none" stroke="#161B21" strokeWidth="1"/>
@@ -221,12 +280,12 @@ function Plot({trail, mission, sep}) {
         <circle cx=${cx} cy=${cy} r=${r*ppm} fill="none" stroke="#1C222A"
                 strokeDasharray="2 5"/>
         <text x=${cx + r*ppm + 5} y=${cy - 5} fill="#4E5A67" fontSize="11"
-              fontFamily="ui-monospace,monospace">${r} m</text>
+              fontFamily="var(--mono)">${r} m</text>
       </g>`)}
       <circle cx=${cx} cy=${cy} r=${AL*ppm} fill="none" stroke="var(--degraded)"
               strokeWidth="1.5" strokeDasharray="9 6" opacity=".75"/>
       <text x=${cx + AL*ppm*0.74} y=${cy - AL*ppm*0.74} fill="var(--degraded)"
-            fontSize="12" letterSpacing="1.6" fontFamily="ui-monospace,monospace">
+            fontSize="12" letterSpacing="1.6" fontFamily="var(--mono)">
         ALERT LIMIT ${AL} M
       </text>
       ${bxy && html`<line x1=${cx} y1=${cy} x2=${bxy[0]} y2=${bxy[1]}
@@ -238,16 +297,203 @@ function Plot({trail, mission, sep}) {
         <line x1=${cx} y1=${cy-11} x2=${cx} y2=${cy+11}/>
       </g>
       <text x=${cx-20} y=${cy-19} fill="var(--truth)" fontSize="11" letterSpacing="1.4"
-            textAnchor="end" fontFamily="ui-monospace,monospace">USN8 SURVEYED</text>
+            textAnchor="end" fontFamily="var(--mono)">USN8 SURVEYED</text>
       ${bxy && html`<circle cx=${bxy[0]} cy=${bxy[1]} r="7" fill="var(--accent)"/>`}
       <g transform=${`translate(24,${H-24})`}>
         <line x1="0" y1="0" x2=${barPx} y2="0" stroke="#8794A2" strokeWidth="2"/>
         <line x1="0" y1="-5" x2="0" y2="5" stroke="#8794A2" strokeWidth="2"/>
         <line x1=${barPx} y1="-5" x2=${barPx} y2="5" stroke="#8794A2" strokeWidth="2"/>
         <text x=${barPx/2} y="-11" fill="#8794A2" fontSize="11" textAnchor="middle"
-              letterSpacing="1.4" fontFamily="ui-monospace,monospace">${barM} M</text>
+              letterSpacing="1.4" fontFamily="var(--mono)">${barM} M</text>
       </g>
     </svg>`;
+}
+
+/* ---------------------------------------------------------------- 3D sky
+   Every element is real data from geometry.sky: satellite az/el propagated from
+   broadcast ephemeris at USN8, and the trusted flag from the detector. Nothing
+   decorative that could be read as a measurement. */
+const D2R = Math.PI / 180;
+// Scene frame: x = East, y = Up, z = South (North is -z). az clockwise from N.
+const azel = (az, el) => {
+  const a = az * D2R, e = el * D2R, c = Math.cos(e);
+  return new THREE.Vector3(Math.sin(a) * c, Math.sin(e), -Math.cos(a) * c);
+};
+const approach = (a, b, s) => a + Math.max(-s, Math.min(s, b - a));
+function glowTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0.00, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.16, 'rgba(255,255,255,0.9)');
+  grd.addColorStop(0.42, 'rgba(255,255,255,0.16)');
+  grd.addColorStop(1.00, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+const SKY_TRUSTED = 0xA9CCEA, SKY_EXCLUDED = 0xE4551F, RAY_ALPHA = 0.34;
+
+function SkyDome({sky, orbit}) {
+  const box = useRef(null), lab = useRef(null), S = useRef(null);
+  const [ok, setOk] = useState(typeof THREE !== 'undefined');
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof THREE === 'undefined') { setOk(false); return; }
+    const T = THREE;
+    const renderer = new T.WebGLRenderer({antialias:true, alpha:true});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setClearColor(0x000000, 0);
+    el.appendChild(renderer.domElement);
+    const scene = new T.Scene();
+    const cam = new T.PerspectiveCamera(34, 1, 0.05, 60);
+    const st = {renderer, scene, cam, sats:new Map(), w:0, h:0, interval:0, lastMsg:0,
+                tStart:performance.now(), theta:-0.62, labels:new Map(), cmp:[]};
+    S.current = st;
+
+    const line = (pts, color, opacity=1) => new T.Line(
+      new T.BufferGeometry().setFromPoints(pts),
+      new T.LineBasicMaterial({color, transparent:true, opacity}));
+    const ring = (elDeg, color) => {
+      const pts = [], y = Math.sin(elDeg*D2R), r = Math.cos(elDeg*D2R);
+      for (let i = 0; i <= 120; i++) { const a = i/120*2*Math.PI;
+        pts.push(new T.Vector3(r*Math.sin(a), y, -r*Math.cos(a))); }
+      return line(pts, color);
+    };
+    // graticule: horizon, 30°, 60° rings and meridian spokes every 30°
+    scene.add(ring(0, 0x2B333D)); scene.add(ring(30, 0x1C222A)); scene.add(ring(60, 0x1C222A));
+    for (let az = 0; az < 360; az += 30) {
+      const pts = []; for (let i = 0; i <= 30; i++) pts.push(azel(az, i*3));
+      scene.add(line(pts, 0x161B21));
+    }
+    // horizon disc
+    const disc = new T.Mesh(new T.CircleGeometry(1, 120),
+      new T.MeshBasicMaterial({color:0x0E1114, transparent:true, opacity:.9, side:T.DoubleSide}));
+    disc.rotation.x = -Math.PI/2; disc.position.y = -0.003; scene.add(disc);
+    // atmospheric rim: a radial alpha gradient, additive, in the --truth hue
+    const rim = new T.Mesh(new T.RingGeometry(0.985, 1.46, 160, 1), new T.ShaderMaterial({
+      transparent:true, depthWrite:false, blending:T.AdditiveBlending, side:T.DoubleSide,
+      uniforms:{c:{value:new T.Color(0x7FA8CC)}},
+      vertexShader:'varying vec2 vP; void main(){ vP=position.xy; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+      fragmentShader:'uniform vec3 c; varying vec2 vP; void main(){ float t=clamp((length(vP)-0.985)/0.475,0.0,1.0); float a=(1.0-t)*(1.0-t)*0.28; gl_FragColor=vec4(c*a,a); }',
+    }));
+    rim.rotation.x = -Math.PI/2; rim.position.y = -0.002; scene.add(rim);
+    // receiver
+    const tex = glowTexture();
+    const rx = new T.Sprite(new T.SpriteMaterial({map:tex, color:0xA9CCEA, transparent:true,
+      blending:T.AdditiveBlending, depthWrite:false}));
+    rx.scale.setScalar(0.07); rx.position.set(0, 0.004, 0); scene.add(rx);
+    st.tex = tex;
+
+    // compass labels (HTML, projected each frame)
+    const mkLabel = (cls, text) => { const d = document.createElement('div');
+      d.className = 'skl ' + cls; d.textContent = text; lab.current.appendChild(d); return d; };
+    st.cmp = [['N',0],['E',90],['S',180],['W',270]].map(([t,az]) =>
+      ({el: mkLabel('cmp', t), p: azel(az, -4).multiplyScalar(1.19)}));
+
+    const place = () => {
+      const w = st.w, h = st.h; if (!w || !h) return;
+      const aspect = w / h; cam.aspect = aspect; cam.updateProjectionMatrix();
+      // Frame for the horizon ring + compass labels (r~1.2), not the faint rim.
+      const dist = Math.max(3.85, 4.1 / Math.max(0.5, aspect));
+      const elv = 0.56;
+      cam.position.set(dist*Math.cos(elv)*Math.sin(st.theta), dist*Math.sin(elv),
+                       dist*Math.cos(elv)*Math.cos(st.theta));
+      cam.lookAt(0, 0.20, 0);
+    };
+    const ro = new ResizeObserver(([e]) => {
+      st.w = Math.round(e.contentRect.width); st.h = Math.round(e.contentRect.height);
+      renderer.setSize(st.w, st.h, false); place();
+    });
+    ro.observe(el);
+
+    const v = new T.Vector3();
+    const project = (p) => { v.copy(p).project(cam); return [(v.x+1)/2*st.w, (1-v.y)/2*st.h]; };
+    let last = performance.now(), raf = 0;
+    const loop = () => {
+      const now = performance.now(), dt = Math.min(0.1, (now - last)/1000); last = now;
+      const iv = st.interval || 70;
+      const t = Math.min(1, (now - st.tStart) / iv);
+      const fade = dt / 0.5;                       // 0.5 s fades
+      for (const [id, r] of st.sats) {
+        const daz = ((r.tgt.az - r.prev.az + 540) % 360) - 180;
+        r.cur.az = (r.prev.az + daz*t + 360) % 360;
+        r.cur.el = r.prev.el + (r.tgt.el - r.prev.el)*t;
+        const p = azel(r.cur.az, r.cur.el);
+        r.sprite.position.copy(p);
+        const pa = r.line.geometry.attributes.position;
+        pa.setXYZ(1, p.x, p.y, p.z); pa.needsUpdate = true;
+        r.alpha = approach(r.alpha, r.present ? 1 : 0, fade);
+        r.ray = approach(r.ray, (r.present && r.trusted) ? 1 : 0, fade);
+        r.sprite.material.color.setHex(r.trusted ? SKY_TRUSTED : SKY_EXCLUDED);
+        r.sprite.material.opacity = r.alpha * (r.trusted ? 1 : 0.62);
+        r.sprite.scale.setScalar(r.trusted ? 0.082 : 0.064);
+        r.line.material.opacity = r.ray * RAY_ALPHA;
+        const [x, y] = project(p);
+        r.lx = x + 9; r.ly = y;
+        r.label.style.opacity = r.alpha.toFixed(2);
+        r.label.className = 'skl' + (r.trusted ? '' : ' x');
+        if (!r.present && r.alpha <= 0) {
+          scene.remove(r.sprite); scene.remove(r.line);
+          r.sprite.material.dispose(); r.line.geometry.dispose(); r.line.material.dispose();
+          r.label.remove(); st.sats.delete(id);
+        }
+      }
+      // Labels of satellites that project close together get nudged apart so
+      // both stay readable; sprites themselves are never moved.
+      const ls = [...st.sats.values()].filter(r => r.alpha > 0).sort((a, b) => a.ly - b.ly);
+      for (let i = 0; i < ls.length; i++) for (let j = 0; j < i; j++) {
+        if (Math.abs(ls[i].lx - ls[j].lx) < 40 && ls[i].ly - ls[j].ly < 12) ls[i].ly = ls[j].ly + 12;
+      }
+      for (const r of ls) { r.label.style.left = r.lx + 'px'; r.label.style.top = r.ly + 'px'; }
+      for (const c of st.cmp) { const [x, y] = project(c.p);
+        c.el.style.left = x + 'px'; c.el.style.top = y + 'px'; }
+      if (orbit) { st.theta += 0.02*dt; place(); }
+      renderer.render(scene, cam);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+
+    return () => {
+      cancelAnimationFrame(raf); ro.disconnect();
+      for (const [, r] of st.sats) { r.label.remove(); }
+      for (const c of st.cmp) c.el.remove();
+      renderer.dispose(); el.removeChild(renderer.domElement); S.current = null;
+    };
+  }, [orbit]);
+
+  // new epoch -> new targets; positions lerp toward them over the measured
+  // inter-epoch interval so motion is fluid at any replay rate
+  useEffect(() => {
+    const st = S.current; if (!st) return;
+    const now = performance.now();
+    if (st.lastMsg) { const dt = now - st.lastMsg; st.interval = st.interval ? st.interval*0.7 + dt*0.3 : dt; }
+    st.lastMsg = now; st.tStart = now;
+    const seen = new Set();
+    for (const s of (sky || [])) {
+      seen.add(s.sv);
+      let r = st.sats.get(s.sv);
+      if (!r) {
+        const T = THREE;
+        const sprite = new T.Sprite(new T.SpriteMaterial({map:st.tex, transparent:true,
+          blending:T.AdditiveBlending, depthWrite:false, opacity:0}));
+        const geo = new T.BufferGeometry().setFromPoints([new T.Vector3(0,0,0), azel(s.az, s.el)]);
+        const ln = new T.Line(geo, new T.LineBasicMaterial({color:0xA9CCEA, transparent:true, opacity:0}));
+        const label = document.createElement('div'); label.className = 'skl';
+        label.textContent = s.sv; label.style.opacity = '0'; lab.current.appendChild(label);
+        r = {sprite, line:ln, label, alpha:0, ray:0, cur:{az:s.az, el:s.el}, prev:null, tgt:null};
+        st.scene.add(sprite); st.scene.add(ln); st.sats.set(s.sv, r);
+      }
+      r.prev = {az:r.cur.az, el:r.cur.el}; r.tgt = {az:s.az, el:s.el};
+      r.trusted = !!s.trusted; r.present = true;
+    }
+    for (const [id, r] of st.sats) if (!seen.has(id)) r.present = false;
+  }, [sky]);
+
+  return html`
+    <div className="sky" ref=${box}></div>
+    <div className="skylabels" ref=${lab}></div>
+    ${!ok && html`<div className="skyidle">3D unavailable — three.js did not load</div>`}
+    ${ok && !(sky && sky.length) && html`<div className="skyidle">no sky geometry in stream</div>`}`;
 }
 
 function Authority({state}) {
@@ -343,6 +589,8 @@ function App() {
   const [trail, setTrail] = useState([]);
   const [conn, setConn] = useState('connecting');
   const [mission, setMission] = useState(null);
+  const mapRef = useRef(null);
+  const mapSize = useSize(mapRef);
 
   useEffect(() => {
     fetch('/mission').then(r => r.json()).then(setMission).catch(() => {});
@@ -371,6 +619,9 @@ function App() {
   const state = d ? d.state : 'NOMINAL';
   const conf = d && d.confidence != null ? d.confidence : null;
   const layerOn = !d || d.layer_on;
+  const sky = d && d.geometry && d.geometry.sky;
+  const nTrusted = sky ? sky.filter(s => s.trusted).length : 0;
+  const nExcl = sky ? sky.length - nTrusted : 0;
 
   let sep = 0;
   if (d && d.position && mission) {
@@ -379,6 +630,7 @@ function App() {
     sep = Math.hypot(dN, dE);
   }
   const breached = mission && sep > mission.alert_limit_m;
+  const showMap = VIEW !== 'sky', showSky = VIEW !== 'map';
 
   return html`
     <div className="banners">
@@ -407,6 +659,27 @@ function App() {
     </div>
 
     <div className="stage">
+      ${showMap && html`
+        <div className="pane" ref=${mapRef}>
+          <${Plot} trail=${trail} mission=${mission} sep=${sep} size=${mapSize}/>
+          <div className="legend">
+            <div><i style=${{borderColor:'var(--accent)'}}></i>believed position</div>
+            <div><i style=${{borderColor:'var(--truth)'}}></i>surveyed truth</div>
+          </div>
+        </div>`}
+      ${showSky && html`
+        <div className="pane">
+          <${SkyDome} sky=${sky} orbit=${ORBIT}/>
+          <div className="skycap" style=${{top: showMap ? '18px' : '120px'}}>
+            Sky from USN8 · GPS + Galileo
+            <div className="n2"><b>${nTrusted}</b> trusted · <b>${nExcl}</b> excluded
+              · real ephemeris, ${d && d.timestamp ? d.timestamp.slice(11,19) + ' UTC' : '—'}</div>
+          </div>
+          <div className="skyleg">
+            <div><i style=${{background:'#A9CCEA'}}></i>trusted · line of sight kept</div>
+            <div><i style=${{background:'var(--accent)'}}></i>excluded · line of sight dropped</div>
+          </div>
+        </div>`}
       <div className="readout">
         <div className=${'n' + (breached ? '' : ' safe')}>${sep.toFixed(0)}<span
           style=${{fontSize:'22px',marginLeft:'6px'}}>m</span></div>
@@ -414,11 +687,6 @@ function App() {
       </div>
       <div className=${'layer kbox' + (layerOn ? '' : ' off')}>
         Trust layer <b>${layerOn ? 'ON' : 'OFF'}</b></div>
-      <${Plot} trail=${trail} mission=${mission} sep=${sep}/>
-      <div className="legend">
-        <div><i style=${{borderColor:'var(--accent)'}}></i>believed position</div>
-        <div><i style=${{borderColor:'var(--truth)'}}></i>surveyed truth</div>
-      </div>
       <div className="hint">
         ${conn === 'ended' ? 'replay complete · ' : ''}${conn === 'connecting' ? 'connecting · ' : ''}press R to reset
       </div>

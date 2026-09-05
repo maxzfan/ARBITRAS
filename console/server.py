@@ -120,7 +120,12 @@ def decide(arb: Arbiter, epoch, layer_on: bool) -> dict:
         payload["explanation"] = None
         payload["confidence"] = None
         payload["features"] = {}
-        payload["geometry"] = {}
+        # Satellite POSITIONS are not trust-layer output -- an unprotected receiver
+        # still sees the sky -- but the trusted FLAGS are. Keep the positions,
+        # force every flag true, drop everything else in the block. The dome then
+        # shows the whole constellation with nothing dark during beat 2.
+        sky = (epoch.get("geometry") or {}).get("sky") if isinstance(epoch, dict) else None
+        payload["geometry"] = {"sky": [dict(sv, trusted=True) for sv in sky]} if sky else {}
         payload["geometry_divergence"] = None
         payload["implied_state"] = None
         payload["reason"] = "layer_off"
