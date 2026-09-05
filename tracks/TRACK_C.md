@@ -172,3 +172,45 @@ positions_at(t, svs, nav=None) -> DataFrame ECEF m; elevations_at(t, svs, sta_ec
 Ours (backend/geometry/skyview.py, G+E) feeds geometry.sky — converge on his for H.
 
 ## 3. Not yet merged into track_b: Eric's 2600c8d on main (BDT-offset fix + E+C solvability check).
+
+---
+
+# 18:30 CHECKPOINT — converge these, all three tracks (written ~13:35)
+
+Two people found the same physics independently today, which is good news and a
+coordination hazard at once:
+
+1. **Uniform range offset on one constellation = that constellation's clock.**
+   Position moves 0.0 m. Eric (262f220) and Track B's WLS agent (2ee0239) both
+   measured it. Consequences: Track A's default all-GPS carry-off is a TIMING
+   attack; the demo stream uses Eric's `top_n_by_elevation(6)` subset rule so
+   the fix actually moves (273 m peak). **Decide the demo attack together** —
+   Eric flagged "walk direction is a physics decision"; it is also the thing
+   the 21:00 thresholds are fitted to.
+
+2. **Two position solvers.** `backend/rinex/solve.py` (Eric: absolute
+   all-in-view, iono-free dual-freq, tropo, 5° mask, 3.9–12.3 m from surveyed)
+   and `backend/geometry/solve.py` (Track B: single-band, differential
+   clean-vs-injected so atmosphere cancels, 0.73 m median from surveyed).
+   Different jobs — his feeds the cross-constellation feature, ours feeds the
+   displayed displacement — but they are two definitions of "believed position".
+   `backend/demo.py` bypasses `replay.run()` and uses ours; `replay.run()` with
+   `xc`+`nav` emits his (`position_source: solution`). Pick one for the stream,
+   or state the layering in docs/stream_provenance.md.
+
+3. **Two propagators.** `backend/rinex/ephemeris.py` (Eric, pseudorange-
+   validated, G+E+C, transmit-time) and `backend/geometry/skyview.py` (Track B,
+   gnss-lib-py, G+E) — the latter still feeds `geometry.sky`. Converge on Eric's.
+
+4. **Cross-constellation feature exists (§6a.4) but is NOT in the demo stream.**
+   Console shows `—` for it. Wiring it into `backend/demo.py` changes confidence
+   and therefore the threshold distributions — do it BEFORE 21:00 or not until
+   after. Eric's numbers: meaconing composite d′ 0.18 → 5.04 with it.
+
+5. **Thresholds** (§10 step 4, by hand): attack percentiles in the handoff above
+   are stale (all-GPS); current top-6 stream: attack p50 0.564, clean p1 0.652,
+   gap +0.034. Post-fit residual RMS (267 m attack vs 2.1 m clean, 127×) is
+   the strongest unused signal — `Fix.residuals_m` in `backend/geometry/solve.py`.
+
+6. `position_source` is in the epoch but not copied onto the SSE payload —
+   trivial, `console/server.py decide()`, if the console ever needs to show it.

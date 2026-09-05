@@ -79,6 +79,6 @@ def test_as_dict_shape_and_frame_flag():
 
 
 def test_demo_window_traverses_most_of_route():
-    # 240-epoch demo (12:00-14:00) should cover the bulk of the route, not overshoot wildly.
-    covered = 240 * M.ROUTE_SPEED_M_PER_EPOCH
+    # 360-epoch demo (12:00-15:00 UTC) should cover the bulk of the route, not overshoot wildly.
+    covered = 360 * M.ROUTE_SPEED_M_PER_EPOCH
     assert 0.85 * M.route_length() <= covered <= 1.05 * M.route_length()

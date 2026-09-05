@@ -35,7 +35,7 @@ VENDOR_MIME = {
     ".glb": "model/gltf-binary", ".gltf": "model/gltf+json",
     ".wasm": "application/wasm",
 }
-DEFAULT_SOURCE = Path("out/fixture_stream.jsonl")
+DEFAULT_SOURCE = Path("out/demo.jsonl")   # real USN8 data (backend/demo.py); fixture retired
 
 
 def read_epochs(path: Path):
@@ -162,6 +162,9 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
             return self._file(WEB / "index.html", "text/html; charset=utf-8")
+        if u.path == "/route.js":
+            # Our own kinematics module (mirrors console/mission.py); not vendor.
+            return self._file(WEB / "route.js", "application/javascript")
         if u.path == "/mission":
             body = json.dumps(mission.as_dict()).encode()
             self.send_response(200)
@@ -249,7 +252,7 @@ def main():
     if not Path(a.source).exists():
         raise SystemExit(
             f"no stream at {a.source}\n"
-            f"  generate the development fixture:  python -m console.fixture_stream\n"
+            f"  generate the real streams:  python -m backend.demo\n"
             f"  or point --source at Track A's output"
         )
 
