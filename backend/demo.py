@@ -54,9 +54,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from backend.correction.emit import CorrectionEmitter
 from backend.detection import (FEATURE_NAMES, CrossConstellation,
-                               FeatureExtractor, Weights, fit, fit_cross,
-                               record, score, write_jsonl)
+                               FeatureExtractor, Weights, by_sv_scores, fit,
+                               fit_cross, record, score, write_jsonl)
 from backend.geometry.engine import compute_geometry_block, set_sigma_uere
 from backend.geometry.solve import (NavTables, displacement, error_from_surveyed,
                                     solve_epoch)
@@ -220,7 +221,8 @@ def solve_positions(clean, injected, nav: NavTables) -> tuple[dict, dict]:
 
 def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
                  label: str = "", positions: dict | None = None,
-                 xc: CrossConstellation | None = None, nav_xc=None) -> list[dict]:
+                 xc: CrossConstellation | None = None, nav_xc=None,
+                 corrector=None) -> list[dict]:
     fx, w, out = FeatureExtractor(cal), Weights(), []
     n = len(epochs)
     for i, ep in enumerate(epochs):
@@ -235,11 +237,17 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
                 ep, solve_per_constellation(ep, nav_xc))["value"]
         excluded = distrusted(res["per_sv"], cal)
         geom = geometry_block(ep.time, excluded, list(ep.df.index))
+        if corrector is not None:
+            # Track D (TRACK_D.md D4): reads the solve context the engine
+            # just left, so this must follow geometry_block. Emitted even
+            # when it fails (correction_ok false) — never a silent pass.
+            geom["correction"] = corrector(ep, excluded)
         sol = positions.get(ep.time) if positions else None
         solved = sol is not None and sol["believed"] is not None
         rec = record(ep.time, feats, score(feats, geom, w),
                      n_sv=ep.n_sv, geometry=geom, credential_status="VALID",
-                     position=dict(sol["believed"].lla) if solved else None)
+                     position=dict(sol["believed"].lla) if solved else None,
+                     by_sv=by_sv_scores(res["per_sv"], cal.z_sat))
         # Replay ground truth for the console (underscore = out of contract):
         # the WLS fix from the CLEAN pseudoranges at this epoch. `position` is
         # the fix from the injected ones. Same satellites, same weights.
@@ -318,16 +326,22 @@ def main(argv=None) -> None:
                                              "d": displacement(s["truth"], s["truth"])})
                  for t, s in positions.items()}
 
+    # Track D's corrector: one emitter, reset per replay (owns the gate).
+    corrector = CorrectionEmitter(nav)
+
     print("clean replay", flush=True)
     xc.reset()
+    corrector.reset()
     clean_recs = score_stream(clean, cal, label="clean", positions=clean_pos,
-                              xc=xc, nav_xc=nav_xc)
+                              xc=xc, nav_xc=nav_xc, corrector=corrector)
     write_atomic(clean_recs, out / "clean.jsonl")
 
     print("carry-off replay", flush=True)
     xc.reset()
+    corrector.reset()
     inj_recs = score_stream(injected, cal, truth=truth, label="carry",
-                            positions=positions, xc=xc, nav_xc=nav_xc)
+                            positions=positions, xc=xc, nav_xc=nav_xc,
+                            corrector=corrector)
     write_atomic(inj_recs, out / "carryoff.jsonl")
 
     # Four-beat stitch: one contiguous slice of the SAME causal injected run,

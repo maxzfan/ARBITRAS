@@ -53,16 +53,25 @@ SURVEYED = ecef_to_lla(*USN8_ECEF)
 
 def record(time: datetime, features: dict, scored: dict, n_sv: int,
            geometry: dict | None = None, credential_status: str = "VALID",
-           position: dict | None = None) -> dict:
-    """One §5 contract object."""
+           position: dict | None = None, by_sv: dict | None = None) -> dict:
+    """One §5 contract object.
+
+    `by_sv` (TRACK_D.md contract extension 1) nests into `features` as the
+    per-satellite anomaly map — detection.by_sv_scores computes it; this
+    emitter only rounds and passes it through, like every other block.
+    """
     ts = time if time.tzinfo else time.replace(tzinfo=timezone.utc)
+    feats = {k: round(float(v), 4) for k, v in features.items()}
+    if by_sv is not None:
+        feats["by_sv"] = {sv: round(float(v), 4)
+                          for sv, v in sorted(by_sv.items())}
     return {
         "timestamp": ts.isoformat().replace("+00:00", "Z"),
         "confidence": round(scored["confidence"], 4),
         "credential_status": credential_status,
         "position": position or dict(SURVEYED),
         "position_source": "solution" if position else "surveyed",
-        "features": {k: round(float(v), 4) for k, v in features.items()},
+        "features": feats,
         "geometry": geometry,
         "satellites_tracked": int(n_sv),
         # Not in §5, and additive rather than a change to it: the composite is

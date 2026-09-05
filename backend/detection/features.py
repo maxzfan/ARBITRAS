@@ -122,6 +122,20 @@ def flagged_sv(per_sv: pd.DataFrame, z_sat: dict, k: float | None) -> list:
     return sorted(worst.index[worst >= k])
 
 
+def by_sv_scores(per_sv: pd.DataFrame, z_sat: dict) -> dict:
+    """`features.by_sv` (TRACK_D.md contract extension 1): one anomaly number
+    per satellite — the max over the three per-SV features, each normalised
+    by its calibrated saturation and clipped to [0, 1], the same [0, 1]
+    normalisation the epoch aggregate uses. Cross-constellation is a
+    solution-level feature and does not enter. Satellites with no scored
+    feature this epoch are omitted rather than reported as clean.
+    """
+    if per_sv.empty:
+        return {}
+    worst = (per_sv / pd.Series(z_sat)).clip(0.0, 1.0).max(axis=1)
+    return {sv: float(v) for sv, v in worst.items() if np.isfinite(v)}
+
+
 @dataclass
 class FeatureConfig:
     """Window lengths, in epochs. At 30 s sampling: 20 epochs = 10 minutes."""

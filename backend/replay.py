@@ -17,10 +17,13 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-from .detection import (CrossConstellation, FeatureExtractor, Weights, fit,
-                        fit_cross, flagged_sv, record, score, write_jsonl)
+from .correction.emit import CorrectionEmitter
+from .detection import (CrossConstellation, FeatureExtractor, Weights,
+                        by_sv_scores, fit, fit_cross, flagged_sv, record,
+                        score, write_jsonl)
 from .detection.emit import ecef_to_lla
 from .geometry.engine import geometry_for
+from .geometry.solve import NavTables
 from .injector import SCENARIOS, inject, summarise
 from .rinex import ephemeris, noise
 from .rinex.loader import load_obs
@@ -32,12 +35,18 @@ ONSET = datetime(2026, 8, 20, 12, 30)
 
 def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
         xc: CrossConstellation | None = None, nav=None,
-        exclude_z: float | None = None):
+        exclude_z: float | None = None, corrector=None):
     """Score a replay. Returns the list of §5 records.
 
     `geometry_for(epoch)` and `credential_for(epoch)` are the seams for Track C
     and the credential layer. Absent, the geometry block is null and the blend
     collapses to the feature half (see confidence.score).
+
+    `corrector(epoch, excluded_sv)` is Track D's seam (TRACK_D.md D4,
+    backend/correction/emit.py CorrectionEmitter): called after the geometry
+    seam so it can read the epoch's solve context, its block rides in
+    `geometry.correction`. One instance per replay — the caller resets it,
+    same as `xc`. Absent, the geometry block is exactly what Track C emitted.
 
     With `xc` and `nav` given, each epoch also gets per-constellation position
     solutions: the cross_constellation feature is scored from them and the
@@ -71,9 +80,15 @@ def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
             # block; this is the one field only the detector can fill.
             geom = dict(geom or {})
             geom["excluded_sv"] = excluded
+        if corrector is not None and geom is not None:
+            # Track D: weighted trusted-subset fix, PL, gate. Emitted even
+            # when it fails (correction_ok false) — never a silent pass.
+            geom = dict(geom)
+            geom["correction"] = corrector(ep, excluded)
         out.append(record(ep.time, feats, score(feats, geom, weights),
                           n_sv=ep.n_sv, geometry=geom, credential_status=cred,
-                          position=position))
+                          position=position,
+                          by_sv=by_sv_scores(res["per_sv"], cal.z_sat)))
     return out
 
 
@@ -105,9 +120,13 @@ def main(argv=None) -> None:
     xc = CrossConstellation(fit_cross(clean, nav), nav)
     print(xc.cal)
 
+    # Track D's corrector: one emitter, reset per replay (owns the gate).
+    corrector = CorrectionEmitter(NavTables.load())
+
     xc.reset()
+    corrector.reset()
     recs = run(clean, cal, geometry_for=geometry_for, xc=xc, nav=nav,
-               exclude_z=args.exclude_z)
+               exclude_z=args.exclude_z, corrector=corrector)
     print(f"clean    {len(recs):5d} epochs -> "
           f"{write_jsonl(recs, Path(args.out) / 'clean.jsonl')}")
 
@@ -124,8 +143,9 @@ def main(argv=None) -> None:
             spoof = SCENARIOS[name](onset=onset)
         injected, truth = inject(clean, spoof, floor)
         xc.reset()
+        corrector.reset()
         recs = run(injected, cal, geometry_for=geometry_for, xc=xc, nav=nav,
-                   exclude_z=args.exclude_z)
+                   exclude_z=args.exclude_z, corrector=corrector)
         truth.to_csv(Path(args.out) / f"{name}_truth.csv")
         print(f"{name:9s}{len(recs):5d} epochs -> "
               f"{write_jsonl(recs, Path(args.out) / f'{name}.jsonl')}")

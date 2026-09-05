@@ -65,14 +65,20 @@ def explain(d: Decision) -> dict:
         parts.append("Silence is treated as degradation, not as consent.")
     else:
         worst = None
-        if d.features:
-            worst = max(d.features, key=lambda k: d.features.get(k, 0) or 0)
-            if (d.features.get(worst) or 0) < SALIENCE_FLOOR:
+        # Only scalar features can be "the signal that diverged": the
+        # contract's `features` also carries the nested per-satellite map
+        # `by_sv` (TRACK_D.md contract extension 1), which is not a feature
+        # score and must not be compared against one.
+        numeric = {k: v for k, v in (d.features or {}).items()
+                   if isinstance(v, (int, float))}
+        if numeric:
+            worst = max(numeric, key=lambda k: numeric.get(k) or 0)
+            if (numeric.get(worst) or 0) < SALIENCE_FLOOR:
                 worst = None
         if worst:
             headline = FEATURE_PHRASE.get(worst, worst).capitalize() + "."
             claims.append(
-                _claim(f"{d.features[worst]:.2f}", d.features[worst],
+                _claim(f"{numeric[worst]:.2f}", numeric[worst],
                        f"features.{worst}")
             )
         elif d.state is TrustState.NOMINAL:

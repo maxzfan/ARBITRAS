@@ -12,7 +12,12 @@
     "cn0_anomaly": 0.71,
     "pseudorange_residual": 0.15,
     "code_carrier_divergence": 0.08,
-    "cross_constellation": 0.34
+    "cross_constellation": 0.34,
+    "by_sv": {
+      "E12": 0.04,
+      "G07": 0.91,
+      "G13": 0.88
+    }
   },
   "geometry": {
     "information_ratio": 0.58,
@@ -41,7 +46,31 @@
         "el": 18.9,
         "trusted": false
       }
-    ]
+    ],
+    "correction": {
+      "corrected_position": {
+        "lat": 38.9207,
+        "lon": -77.0669,
+        "alt": 58.3
+      },
+      "protection_level_m": null,
+      "alert_limit_m": 15.0,
+      "weights": {
+        "E12": 1.0,
+        "G07": 0.0,
+        "G13": 0.0
+      },
+      "checks": {
+        "pl_under_al": null,
+        "redundancy": true,
+        "residual_test": null,
+        "continuity": null,
+        "cross_constellation": null
+      },
+      "trusted_count": 1,
+      "correction_ok": false,
+      "speed_scale": 0.0
+    }
   },
   "satellites_tracked": 11,
   "score_detail": {

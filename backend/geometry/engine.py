@@ -151,6 +151,13 @@ def compute_geometry_block(t: datetime, excluded_sv: list[str],
     return _ENGINE.compute(t, excluded_sv, tracked_sv, freeze)
 
 
+def last_solve_context() -> dict | None:
+    """Module-level accessor for Track D's emitter (TRACK_D.md D4): the
+    solve context left by the singleton engine's most recent compute().
+    None before any compute — the emitter fails closed on it."""
+    return _ENGINE.solve_context() if _ENGINE is not None else None
+
+
 def geometry_for(ep, excluded_sv: list[str] | None = None,
                  freeze: bool = False) -> dict:
     """Adapter for the `geometry_for(epoch)` seam in backend.replay.run.
