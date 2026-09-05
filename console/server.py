@@ -28,6 +28,13 @@ from console.arbiter.states import THRESHOLD_PROVENANCE, THRESHOLDS, TrustState
 from console import mission
 
 WEB = Path(__file__).parent / "web"
+VENDOR_MIME = {
+    ".js": "application/javascript", ".woff2": "font/woff2",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".hdr": "application/octet-stream",          # RGBELoader reads an arraybuffer
+    ".glb": "model/gltf-binary", ".gltf": "model/gltf+json",
+    ".wasm": "application/wasm",
+}
 DEFAULT_SOURCE = Path("out/fixture_stream.jsonl")
 
 
@@ -166,11 +173,20 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/events":
             return self._events(parse_qs(u.query))
         if u.path.startswith("/vendor/"):
-            name = Path(u.path).name          # no traversal: basename only
-            ctype = ("application/javascript" if name.endswith(".js")
-                     else "font/woff2" if name.endswith(".woff2")
-                     else "application/octet-stream")
-            return self._file(WEB / "vendor" / name, ctype)
+            # Basename only, plus at most one whitelisted subdirectory, so a
+            # request can never walk out of vendor/.
+            parts = [x for x in u.path.split("/")[2:] if x]
+            if ".." in parts or not parts or len(parts) > 3:
+                return self.send_error(404)
+            sub = parts[:-1]
+            if sub and (sub[0] != "three" or len(sub) > 2 or ".." in sub):
+                return self.send_error(404)
+            name = Path(parts[-1]).name
+            ext = Path(name).suffix.lower()
+            # A wrong MIME fails silently in the browser: fonts are refused,
+            # textures may or may not be sniffed. Be explicit.
+            ctype = VENDOR_MIME.get(ext, "application/octet-stream")
+            return self._file(WEB.joinpath("vendor", *sub, name), ctype)
         self.send_error(404)
 
     def _file(self, path: Path, ctype):
