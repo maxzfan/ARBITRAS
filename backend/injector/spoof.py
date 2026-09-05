@@ -157,6 +157,12 @@ class Spoof:
 SWEEP_BEARINGS_DEG = tuple(range(0, 360, 45))
 EAST_BEARING_DEG = 90.0          # demo pin: cross-corridor east
 
+# Demo pin for the code/carrier divergence rate, ruled by hand 2026-09-05 from
+# the printed arithmetic at k = 2 sigma, t = 30 s: 2 * 0.204 / 30 = 0.0136 m/s.
+# Chosen for demo legibility, not as a physical claim; the reported
+# displacement bound is measured at carrier_rate_error = 0.
+DEMO_CARRIER_RATE_ERROR = 0.0136  # m/s
+
 
 def enu_basis(sta_ecef) -> np.ndarray:
     """Rows (east, north, up) as ECEF unit vectors at a station."""

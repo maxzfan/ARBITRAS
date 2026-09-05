@@ -9,34 +9,41 @@ statistic may see an epoch at or after the one it is scoring. Anything else
 would make the false-surrender rate and the time-to-alert meaningless.
 
     cn0_anomaly              per-SV C/N0 against its own trailing mean
-    pseudorange_residual     code-minus-carrier LEVEL against a slow baseline
+    pseudorange_residual     POST-FIT residual of the position solution, per
+                             satellite, against its own trailing baseline
     code_carrier_divergence  code-minus-carrier RATE, epoch to epoch
 
-## What feature 2 is, honestly
+## Feature 2 is the post-fit residual, and why that matters
 
-§6a.2 calls for "deviation from a smoothed per-satellite baseline" for the
-pseudorange residual. A *true* pseudorange residual is the leftover after
-fitting one receiver position and clock to all satellites at once — and that
-needs line-of-sight vectors, which need the nav file, which is Track C's
-geometry (§6b). Track A does not take that dependency: §6b already warns that
-one file failure costs two components.
+§6a.2 specifies "deviation from a smoothed per-satellite baseline" for the
+pseudorange residual. It is now exactly that: the per-satellite post-fit
+residual of the all-in-view least-squares solution (`solve()['resid_m']`)
+against its own trailing median, normalised by a per-satellite sigma measured
+on the clean day.
 
-Without geometry, every nav-free per-satellite check reduces to the same
-observable. Pseudorange change over an epoch is geometric range change plus
-receiver clock; carrier phase measures the same range change to millimetres;
-so code minus carrier is what is left, and there is nothing else to look at.
-So features 2 and 3 are **two statistics of one observable — its level and its
-rate — not two independent observables.** They are genuinely complementary in
-time, which is what §6a claims for them:
+An earlier version scored the LEVEL of code-minus-carrier here, which made
+features 2 and 3 two statistics of one observable. Measured before replacing
+it (docs/measured.md): the two were not redundant -- correlation +0.11 on
+clean data, because a level and its own first difference are near-orthogonal
+for a drifting signal -- but feature 2 earned d' 0.77 against both meaconing
+and a coherent walk, and removing it entirely RAISED the composite. The reason
+to replace it was never redundancy; it was that **no feature in 1-3 carried
+geometry, so none of them could see a coordinated position walk**, leaving
+feature 4 as the single channel holding the whole detection.
 
-- the **rate** fires on the lift-off transient and on any epoch where the
-  spoofer's carrier stops matching its code, then settles;
-- the **level** integrates that rate, so it keeps climbing for as long as the
-  walk-off continues and is still elevated long after the C/N0 signal is gone.
+The post-fit residual carries geometry by construction. A coordinated walk on
+one constellation lies in the position columns of H, so a single-constellation
+solve absorbs it -- but the all-in-view solution cannot satisfy the spoofed
+and authentic subsets at once, and the leftover lands here. Measured on the
+build check: the all-in-view residual RMS grows 4 -> 40 m across a 0 -> 140 m
+walk while a GPS-only solve stays flat at 4.7-5.4 m.
 
-Say this out loud rather than presenting three independent observables. The
-upgrade is available and cheap: once Track C's H matrix exists, feature 2 is
-replaced by the real position-solution residual and the two become independent.
+**The dependency this takes on.** Feature 2 now needs satellite positions, so
+it needs the nav file, which §6b warns costs two components on one file
+failure -- now three. The fallback is explicit rather than silent: with no
+residual supplied, feature 2 is not scored at all (NaN, excluded from the
+aggregate) instead of quietly reading zero, and `n_scored` drops. A run
+without the nav file is visibly a different measurement.
 
 ## Why C/N0 fades, and on whose clock
 
@@ -96,30 +103,98 @@ def aggregate(scores: pd.Series) -> float:
     return float(big.max() if len(big) else scores.mean())
 
 
-def flagged_sv(per_sv: pd.DataFrame, z_sat: dict, k: float | None) -> list:
-    """Satellites whose worst per-SV score reaches k * its saturation.
+@dataclass
+class ExclusionRule:
+    """When the detector stops trusting a satellite. Ruled by hand 2026-09-05.
 
-    This is the only honest source for the §5 `excluded_sv` list: it names the
-    satellites the detector actually stopped trusting, per satellite, rather
-    than restating what the injector did.
+    `k` is the multiple of a satellite's calibrated saturation its worst
+    per-SV score must reach. Measured on the clean full day, PER EPOCH -- the
+    denominator that matters, because it is epochs that lose H rows (the
+    per-SV-epoch rate is given alongside for scale, and is ~40x smaller since
+    the station tracks 39.9 satellites per epoch):
 
-    `k` has NO default and None returns []. Choosing it is a threshold-class
-    decision (design.md §10) and the clean-day cost is steep, because the
-    per-SV tail is heavy on low-elevation satellites (docs/measured.md):
+        k      P(>=1 SV excluded)   mean SV excluded   P(per SV-epoch)
+        1.0                 61.1%               0.92            2.30%
+        1.5                 22.6%               0.25            0.63%
+        2.0                  9.5%               0.10            0.25%
+        3.0                  2.2%               0.02            0.06%
+        5.0                  0.3%               0.00            0.01%
 
-        k = 1.0 -> 78.9% of CLEAN epochs flag at least one satellite
-        k = 1.5 -> 34.6%      k = 2.0 -> 12.7%
-        k = 3.0 ->  2.7%      k = 5.0 ->  0.5%
+    (Measured after feature 2 became the post-fit residual. With the earlier
+    code-minus-carrier feature 2 every rate was higher -- 78.9% at k = 1.0 --
+    so replacing that feature cut the false-exclusion rate by about a fifth at
+    every k as a side effect.)
 
-    Those are false exclusions on a clean sky: each one is a satellite the
-    console would paint as distrusted during demo beat 1, and each one removes
-    a row from Track C's H. Numbers printed, choice not made here.
+    The tails stay an order of magnitude heavier than Gaussian at every k and
+    floor at 0.3%. **That floor is elevation-driven, and essentially
+    entirely:** binned by elevation, 100% of clean-day exclusions at k = 3
+    fall in the 0-15 degree bin, at a median elevation of 0.4 degrees. Above
+    15 degrees the clean exclusion rate is 0.00% in every bin, at both k = 3
+    and k = 5.
+
+    Caveat on the binning: elevations come from Keplerian broadcast ephemeris,
+    which covers G/E/C only, so GLONASS and SBAS SV-epochs (about a quarter of
+    the sky) are absent from the bin table.
+
+    So the ruled rule is `k = 3.0` plus a low-elevation mask. **The mask
+    cutoff is UNSET and the rule returns nothing until a cutoff is given** --
+    picking it is a threshold-session decision. `FLAT_K5` is the configured
+    fallback: k = 5.0 with no mask, usable without a cutoff and without
+    elevations.
     """
-    if k is None or per_sv.empty:
+    k: float
+    elevation_mask_deg: float | None = None
+    requires_mask: bool = True
+
+    @property
+    def armed(self) -> bool:
+        return not self.requires_mask or self.elevation_mask_deg is not None
+
+    def __str__(self) -> str:
+        if not self.armed:
+            return (f"exclusion k={self.k} with low-elevation mask: "
+                    f"DISARMED (mask cutoff unset -> no satellites excluded)")
+        m = ("no mask" if self.elevation_mask_deg is None
+             else f"mask <{self.elevation_mask_deg:g} deg")
+        return f"exclusion k={self.k}, {m}"
+
+
+# The ruled rule: k = 3.0, mask cutoff deliberately unset.
+MASKED_K3 = ExclusionRule(k=3.0, elevation_mask_deg=None, requires_mask=True)
+# Configured fallback: flat k = 5.0, no mask, no elevations needed.
+FLAT_K5 = ExclusionRule(k=5.0, elevation_mask_deg=None, requires_mask=False)
+
+
+def flagged_sv(per_sv: pd.DataFrame, z_sat: dict,
+               rule: ExclusionRule | float | None,
+               elevations: pd.Series | None = None) -> list:
+    """Satellites the detector has stopped trusting.
+
+    The only honest source for §5's `excluded_sv`: per-satellite scores, not a
+    restatement of what the injector did. Returns [] when the rule is None or
+    disarmed. A bare float is accepted as a flat rule for convenience.
+
+    A satellite below the mask cutoff is NOT excluded by this rule -- the mask
+    says "this satellite's score is not trustworthy evidence of spoofing",
+    which is the opposite of "this satellite is spoofed". Whether a
+    low-elevation satellite should be dropped from H for its own noise is a
+    separate question and Track C's.
+    """
+    if rule is None or per_sv.empty:
+        return []
+    if not isinstance(rule, ExclusionRule):
+        rule = ExclusionRule(k=float(rule), requires_mask=False)
+    if not rule.armed:
         return []
     norm = per_sv / pd.Series(z_sat)
-    worst = norm.max(axis=1)
-    return sorted(worst.index[worst >= k])
+    worst = norm.max(axis=1).dropna()
+    hit = worst.index[worst >= rule.k]
+    if rule.elevation_mask_deg is not None:
+        if elevations is None:
+            raise ValueError("this exclusion rule needs elevations")
+        el = elevations.reindex(hit)
+        hit = el.index[el >= rule.elevation_mask_deg]
+    return sorted(hit)
 
 
 def by_sv_scores(per_sv: pd.DataFrame, z_sat: dict) -> dict:
@@ -167,14 +242,19 @@ class Calibration:
     z_sat: dict                       # feature name -> saturating |z|
     cn0_sigma: pd.Series              # per-SV, dB-Hz, floored
     cmc_sigma: pd.Series              # per-SV, metres
+    resid_sigma: pd.Series = None     # per-SV post-fit residual, metres
     quantile: float = 0.99
     n_epochs: int = 0
 
     def __str__(self) -> str:
         z = "  ".join(f"{k} {v:.1f}" for k, v in self.z_sat.items())
+        r = (f", resid sigma median "
+             f"{self.resid_sigma.median():.2f} m"
+             if self.resid_sigma is not None and len(self.resid_sigma)
+             else ", resid sigma UNSET (feature 2 not scored)")
         return (f"calibration on {self.n_epochs} clean epochs, "
                 f"saturating |z| at the median per-SV "
-                f"p{self.quantile * 100:g}: {z}")
+                f"p{self.quantile * 100:g}: {z}{r}")
 
 
 def _sigma_series(by_sv: pd.Series, floor: float) -> pd.Series:
@@ -193,16 +273,20 @@ class FeatureExtractor:
         c = self.cfg
         self._cn0 = defaultdict(lambda: deque(maxlen=c.cn0_window))
         self._cmc = defaultdict(lambda: deque(maxlen=c.cmc_window))
+        self._res = defaultdict(lambda: deque(maxlen=c.cmc_window))
         self._last_cmc = {}
         self._last_seen = {}
         self._n = 0
 
     # -- per-satellite z-scores, all against strictly past epochs --------------
 
-    def _sv_z(self, sv: str, cn0: float, cmc: float):
+    def _sv_z(self, sv: str, cn0: float, cmc: float, resid: float = np.nan):
         cfg, cal = self.cfg, self.cal
         s_cn0 = float(cal.cn0_sigma.get(sv, cal.cn0_sigma.median()))
         s_cmc = float(cal.cmc_sigma.get(sv, cal.cmc_sigma.median()))
+        s_res = (float(cal.resid_sigma.get(sv, cal.resid_sigma.median()))
+                 if cal.resid_sigma is not None and len(cal.resid_sigma)
+                 else np.nan)
 
         z = {}
         hist = self._cn0[sv]
@@ -222,9 +306,14 @@ class FeatureExtractor:
                     return {}
                 z["code_carrier_divergence"] = abs(rate)
 
-            base = self._cmc[sv]
-            if len(base) >= cfg.min_history:
-                z["pseudorange_residual"] = abs(cmc - float(np.mean(base))) / s_cmc
+        # Feature 2: post-fit residual of the position solution against its own
+        # trailing baseline. Not scored at all when no solution was supplied.
+        if np.isfinite(resid) and np.isfinite(s_res):
+            hist = self._res[sv]
+            if len(hist) >= cfg.min_history:
+                z["pseudorange_residual"] = (abs(resid - float(np.median(hist)))
+                                             / s_res)
+            hist.append(resid)
 
         return z
 
@@ -237,12 +326,16 @@ class FeatureExtractor:
 
     # -- one epoch ------------------------------------------------------------
 
-    def step(self, epoch, band: int = 1) -> dict:
+    def step(self, epoch, band: int = 1, resid: dict | None = None) -> dict:
         """Score one epoch, then absorb it into the baselines. Returns
 
             {"features": {name: [0,1]}, "per_sv": DataFrame of |z| by SV,
              "n_scored": int}
+
+        `resid` is {sv: post-fit residual m} from the all-in-view solution.
+        Without it feature 2 is not scored (see the module docstring).
         """
+        resid = resid or {}
         df = epoch.df
         cn0 = df[f"cn0_{band}"]
         cmc = df[f"code_{band}"] - df[f"phase_m_{band}"]
@@ -253,7 +346,8 @@ class FeatureExtractor:
                 self._cmc[sv].clear()
                 self._last_cmc.pop(sv, None)
 
-        rows = {sv: self._sv_z(sv, cn0.get(sv, np.nan), cmc.get(sv, np.nan))
+        rows = {sv: self._sv_z(sv, cn0.get(sv, np.nan), cmc.get(sv, np.nan),
+                               resid.get(sv, np.nan))
                 for sv in df.index}
         for sv in df.index:
             self._absorb(sv, cn0.get(sv, np.nan), cmc.get(sv, np.nan))
@@ -274,13 +368,19 @@ class FeatureExtractor:
         return {"features": feats, "per_sv": per_sv,
                 "n_scored": int(per_sv.notna().any(axis=1).sum())}
 
-    def run(self, epochs, band: int = 1) -> list:
+    def run(self, epochs, band: int = 1, resid_panel=None) -> list:
         self.reset()
-        return [self.step(ep, band=band) for ep in epochs]
+        out = []
+        for ep in epochs:
+            r = None
+            if resid_panel is not None and ep.time in resid_panel.index:
+                r = resid_panel.loc[ep.time].dropna().to_dict()
+            out.append(self.step(ep, band=band, resid=r))
+        return out
 
 
 def fit(clean_epochs, floor, cfg: FeatureConfig | None = None,
-        quantile: float = 0.99) -> Calibration:
+        quantile: float = 0.99, resid_panel=None) -> Calibration:
     """Fit the saturation scales on a clean replay.
 
     Two passes: the first collects per-satellite z-scores with the saturation
@@ -288,16 +388,27 @@ def fit(clean_epochs, floor, cfg: FeatureConfig | None = None,
     use. Nothing here sees injected data.
     """
     cfg = cfg or FeatureConfig()
+    # Per-SV post-fit residual sigma, from the differenced MAD of the clean
+    # residual series -- the same estimator noise.py uses, for the same reason:
+    # differencing removes the slowly varying part and leaves the noise.
+    resid_sigma = pd.Series(dtype=float)
+    if resid_panel is not None and len(resid_panel):
+        d = resid_panel.diff()
+        resid_sigma = (1.4826 * (d - d.median()).abs().median()
+                       / np.sqrt(2)).dropna().clip(lower=1e-3)
     cal = Calibration(
         z_sat={n: 1.0 for n in PER_SV_FEATURES},
         cn0_sigma=_sigma_series(floor.cn0_sigma_by_sv, CN0_SIGMA_FLOOR),
         cmc_sigma=_sigma_series(floor.cmc_sigma_by_sv, 1e-3),
+        resid_sigma=resid_sigma,
         quantile=quantile,
     )
-    out = FeatureExtractor(cal, cfg).run(clean_epochs)
+    out = FeatureExtractor(cal, cfg).run(clean_epochs, resid_panel=resid_panel)
     z = pd.concat([o["per_sv"] for o in out])
     per_sv = z.groupby(level=0).quantile(quantile)     # each satellite's own tail
-    cal.z_sat = {n: float(per_sv[n].median()) for n in PER_SV_FEATURES}
+    cal.z_sat = {n: (float(per_sv[n].median())
+                     if per_sv[n].notna().any() else 1.0)
+                 for n in PER_SV_FEATURES}
     cal.n_epochs = len(clean_epochs)
     return cal
 
