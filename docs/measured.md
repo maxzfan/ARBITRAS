@@ -83,6 +83,14 @@ positioning and is present for the roadmap argument in §4.
 
 # Detection — clean vs injected, USN8 full day
 
+> **Staleness note (5 Sep, ruling):** the carry-off rows below were produced
+> with the pre-ruling divergence model (2σ/epoch ≈ 0.014 m/s equivalent). The
+> parameter is now `carrier_rate_error` with the demo pin pending; carry-off
+> figures will be regenerated when the pin lands. Clean-day, simplistic and
+> meaconing figures in this section are unaffected by that ruling but
+> superseded by the four-feature results in the cross-constellation section
+> below.
+
 Calibration fitted on the **clean** replay only and reused for every injected
 one; fitting on injected data would let the attack define normal and make the
 false-surrender rate meaningless. Saturating |z|, median per-satellite p99:
@@ -161,3 +169,72 @@ overlap plotted, and reports the separation it chose (§10 step 4).
 - **β = 1.0 until geometry arrives**, so `weight_sensitive_fraction` currently
   reads 1.0. That figure is the answer to arXiv 2607.05415 and it only improves
   once the derived half is in.
+
+---
+
+# Cross-constellation feature (§6a.4) and the position solver
+
+Gate for this feature was the E+C solvability check: solvable every epoch of
+the demo window, GDOP ≤ 2.05, zero degenerate epochs.
+
+## Solver (`backend/rinex/solve.py`)
+
+Iono-free dual-frequency code, broadcast ephemeris at **transmit time**, SV
+clock af0+af1, Sagnac, standard-atmosphere tropo, 5° mask. All-in-view vs
+USN8 surveyed ECEF at 00:30/06:30/12:30/18:30: **3.9–12.3 m** (residual RMS
+4–8 m). Per-constellation solutions 11–44 m (weak single-system geometry;
+only *changes* in disagreement are scored). Two propagation bugs were caught
+by measurement on the way: reception-time evaluation (±50 m prefit spread —
+the satellite moves ~270 m during signal flight) and the BDT 14 s offset
+misplaced into the earth-rotation term (~1 mrad node error, 0.4–5 km on every
+BDS MEO).
+
+## The finding that shaped the feature
+
+**A range offset applied uniformly to every satellite of one constellation is
+indistinguishable from that constellation's clock.** The solver absorbs it
+entirely; the believed position moves 0.0 m (measured, meaconing 300 m). Two
+consequences:
+
+1. A position-only cross-constellation comparison is blind to meaconing *and*
+   to the current carry-off injection. The feature therefore scores
+   **inter-system clock offsets** (dt_G−dt_E, dt_G−dt_C, dt_E−dt_C) alongside
+   pairwise position disagreement — the 300 m meaconing bias lands on clk_GE
+   at its full size.
+2. **The injector's walk-off currently walks the receiver's clock, not its
+   position.** Making beat 2's believed track actually move needs per-SV
+   offsets `e_sv·Δp` toward a spoofed position — a physics decision (walk
+   direction) that is not Claude's to make.
+
+## Scoring design — three measured failure modes, then the one that works
+
+| Design | Clean day | Attack |
+|---|---|---|
+| global clean-day centre | idles at 0.655 (drift read as anomaly) | caught |
+| trailing baseline, level-gated | latches: 10% of clean pinned at 1.0 (rise/set jumps refused forever) | caught, sustained |
+| + relearn on SV-set change | clean healthy | 11 h meaconing **adopted as baseline** at first rise/set: d′ 0.09 |
+| **+ measured-step compensation, increment-gated** | **mean 0.229, p99 0.644** | **meaconing 1.000 sustained 11.5 h, d′ 6.18** |
+
+The working form: when a constellation's tracked set changes, both epochs are
+re-solved on the common subset and the baseline is shifted by the *measured*
+geometry step (an attacker's standing bias cancels out of it; an attack step
+cannot hide in it). Absorption into the trailing window is gated on the
+per-epoch **increment** (clean p99.9, per channel) — slow drift (cm/epoch) is
+followed, attack steps and walks (30–300 m/epoch) are refused forever.
+
+## Full-day results, four features, believed position from the solver
+
+| | clean | simplistic | meaconing |
+|---|---|---|---|
+| cross_constellation mean | 0.229 | 0.222 | **1.000** (sustained) |
+| cross_constellation d′ | — | 0.04 | **6.18** |
+| composite confidence mean | 0.751 | 0.526 | 0.541 |
+| composite d′ | — | 4.52 | **5.04** (was 0.18 with 3 features) |
+
+Clean confidence: mean 0.751, σ 0.051, min 0.533. `position_source:
+"solution"` on all 2,880 epochs. Simplistic's xc d′ 0.04 is the stated blind
+spot (an all-sky bias shifts every clock together), owned by features 1–2 at
+composite d′ 4.52.
+
+Carry-off is not in this table: the demo pin for `carrier_rate_error` is
+pending and `backend.replay` skips it by design until the pin is given.
