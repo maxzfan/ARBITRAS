@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from backend.demo import ATTACK_EPOCHS, PRE_EPOCHS
+from backend.demo import (ATTACK_EPOCHS, DISCLOSURE_LAG_INTERVALS, LEGIBLE_EPOCHS,
+                          PENDING_EPOCHS, POST_EXPIRED_EPOCHS, POST_VALID_EPOCHS,
+                          PRE_EPOCHS, T_INT_EPOCHS)
+from console.arbiter.states import TrustState
+from console.replay import arbitrate
 
 DEMO = Path("out/demo.jsonl")
 CLEAN = Path("out/clean.jsonl")
@@ -68,7 +72,36 @@ def test_credential_schedule_is_ordered_with_the_tesla_lag(demo):
     creds = [r["credential_status"] for r in demo]
     order = [c for i, c in enumerate(creds) if i == 0 or c != creds[i - 1]]
     assert order == ["VALID", "PENDING", "EXPIRED"]
-    assert creds.count("PENDING") == 20, "T_int 10 x d 2 (design.md section 9)"
+    # PENDING is the disclosure lag and nothing else: derived from T_int x d
+    # (design.md section 9), never a literal.
+    assert PENDING_EPOCHS == T_INT_EPOCHS * DISCLOSURE_LAG_INTERVALS
+    assert creds.count("PENDING") == PENDING_EPOCHS
+
+
+def test_each_credential_state_is_legible_at_demo_rate(demo):
+    """Video beat 4 (design.md section 11a/11b): each credential state must hold
+    >= LEGIBLE_EPOCHS (3 s at the 15 epochs/s demo rate) so it reads on screen."""
+    creds = [r["credential_status"] for r in demo]
+    tail = creds[PRE_EPOCHS + ATTACK_EPOCHS:]
+    assert tail.count("VALID") == POST_VALID_EPOCHS >= LEGIBLE_EPOCHS
+    assert tail.count("PENDING") == PENDING_EPOCHS >= LEGIBLE_EPOCHS
+    assert tail.count("EXPIRED") == POST_EXPIRED_EPOCHS >= LEGIBLE_EPOCHS
+    # No attack epoch may carry a lapsed credential: the lapse is beat 4, after
+    # the attack has stopped, under a clean sky.
+    assert all(c == "VALID" for c in creds[:PRE_EPOCHS + ATTACK_EPOCHS])
+
+
+def test_credential_lapse_forces_a_visible_drop(demo):
+    """The credential-force transition must be a drop the viewer can see: the
+    epoch before EXPIRED is not already SURRENDERED, the first EXPIRED epoch is
+    SURRENDERED for reason credential_force, and it holds to the end."""
+    creds = [r["credential_status"] for r in demo]
+    i0 = creds.index("EXPIRED")
+    decisions = arbitrate(demo)
+    assert decisions[i0 - 1].state is not TrustState.SURRENDERED
+    assert decisions[i0].state is TrustState.SURRENDERED
+    assert decisions[i0].reason == "credential_force"
+    assert all(d.state is TrustState.SURRENDERED for d in decisions[i0:])
 
 
 def test_clean_epochs_have_truth_equal_to_position(clean):

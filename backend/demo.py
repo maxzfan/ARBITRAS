@@ -12,6 +12,8 @@ seams `backend.replay.run` leaves open:
                  Fisher-information fields stay null; they are Track C's.
   credential    a SCRIPTED schedule on the demo tail (VALID -> PENDING ->
                  EXPIRED) standing in for the TESLA layer until T1 lands.
+                 T_int and d are venue-tuned (§9) so each state is legible
+                 at the demo replay rate; PENDING is always T_int x d.
 
 Nothing in Track A's modules is edited. The feature extractor is driven
 directly (not via replay.run) because that helper throws away `per_sv`, and the
@@ -28,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -51,17 +54,36 @@ ONSET = datetime(2026, 8, 20, 12, 30)
 CARRIER_RATE_ERROR_MPS = 0.02
 
 EPOCH_S = 30
-# Team demo window 12:00-14:00 UTC (coordinator, 2026-09-05), built around Track
-# A's code-default onset of 12:30 so every file on the team attacks at the same
-# epoch. 240 epochs: 60 clean lead-in, 90 carry-off, 90 clean tail.
+DEMO_RATE_EPS = 15.0     # §5 demo replay rate (10-20 epochs/s); legibility budget below
+LEGIBLE_EPOCHS = 45      # 3.0 s on screen at DEMO_RATE_EPS -- the minimum a credential
+                         # state must hold for video beat 4 to be readable (§11b)
+
+# Team demo window built around Track A's code-default onset of 12:30, so every
+# file on the team attacks at the same epoch. Lead-in and attack are unchanged
+# from the 12:00-14:00 window agreed on 2026-09-05; the tail was extended to
+# 15:00 so the credential lapse holds on screen. 360 epochs: 60 clean lead-in,
+# 90 carry-off, 210 clean tail.
 PRE_EPOCHS = 60          # beat 1: 12:00:00 -> 12:29:30
 ATTACK_EPOCHS = 90       # beats 2/3: 12:30:00 -> 13:14:30
-POST_EPOCHS = 90         # beat 4: 13:15:00 -> 13:59:30, credential lapses
 
-# design.md §9: T_int = 10 epochs, d = 2 intervals -> PENDING lasts exactly 20.
-T_INT_EPOCHS, DISCLOSURE_LAG_INTERVALS = 10, 2
+# TESLA parameters -- VENUE-TUNED, per design.md §9 ("Parameters (tune at venue)";
+# known weaknesses: "interval length and disclosure lag become operational
+# parameters tuned against comms reliability"). The §9 defaults (T_int 10, d 2
+# -> PENDING 20 epochs) flash past in 1.3 s at DEMO_RATE_EPS and beat 4 is
+# illegible. Tuned to T_int 30 x d 2 = 60 epochs (4.0 s). PENDING is always
+# derived from T_int x d; never a literal.
+T_INT_EPOCHS, DISCLOSURE_LAG_INTERVALS = 30, 2
 PENDING_EPOCHS = T_INT_EPOCHS * DISCLOSURE_LAG_INTERVALS
-POST_VALID_EPOCHS = 40   # tail = 40 VALID, 20 PENDING, 30 EXPIRED
+# Tail composition. VALID must outlast the arbiter's recovery from RESTRICTED
+# (~40 epochs under the placeholder thresholds) by >= LEGIBLE_EPOCHS of
+# NOMINAL+VALID; EXPIRED holds SURRENDERED-under-a-clean-sky >= LEGIBLE_EPOCHS.
+POST_VALID_EPOCHS = 90   # 13:15:00 -> 13:59:30
+POST_EXPIRED_EPOCHS = 60 # 14:30:00 -> 14:59:30
+POST_EPOCHS = POST_VALID_EPOCHS + PENDING_EPOCHS + POST_EXPIRED_EPOCHS   # 210
+for _name, _n in (("POST_VALID_EPOCHS", POST_VALID_EPOCHS),
+                  ("PENDING_EPOCHS", PENDING_EPOCHS),
+                  ("POST_EXPIRED_EPOCHS", POST_EXPIRED_EPOCHS)):
+    assert _n >= LEGIBLE_EPOCHS, f"{_name}={_n} < LEGIBLE_EPOCHS={LEGIBLE_EPOCHS}"
 
 # Distrust rule. A satellite is excluded on an epoch when its own pseudorange-
 # residual |z| reaches the calibrated saturation scale — i.e. it is beyond the
@@ -73,6 +95,22 @@ DISTRUST_FEATURE = "pseudorange_residual"
 
 OUT = Path("out")
 PROVENANCE = Path("docs/stream_provenance.md")
+
+
+# --------------------------------------------------------------------------- io
+
+def write_atomic(records, path: Path) -> Path:
+    """Write to a sibling temp file, then os.replace() onto `path`.
+
+    The console server opens out/demo.jsonl per SSE connection; a connection
+    opened mid-write must never see a truncated stream (it would read as a
+    shorter day, and a missing epoch is evidence of degradation under §5).
+    """
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.tmp")
+    write_jsonl(records, tmp)
+    os.replace(tmp, path)
+    return path
 
 
 # --------------------------------------------------------------------------- seams
@@ -166,7 +204,7 @@ def main(argv=None) -> None:
 
     print("clean replay", flush=True)
     clean_recs = score_stream(clean, cal, sky, label="clean")
-    write_jsonl(clean_recs, out / "clean.jsonl")
+    write_atomic(clean_recs, out / "clean.jsonl")
 
     print("carry-off replay", flush=True)
     # Spoof.stage() treats dt == duration_s as still under attack, so a duration
@@ -176,7 +214,7 @@ def main(argv=None) -> None:
                       duration_s=ATTACK_EPOCHS * EPOCH_S - 1)
     injected, truth = inject(clean, spoof, floor)
     inj_recs = score_stream(injected, cal, sky, truth=truth, label="carry")
-    write_jsonl(inj_recs, out / "carryoff.jsonl")
+    write_atomic(inj_recs, out / "carryoff.jsonl")
     truth.to_csv(out / "carryoff_truth.csv")
     print(" ", summarise(truth))
 
@@ -188,7 +226,7 @@ def main(argv=None) -> None:
     demo = [dict(r) for r in inj_recs[lo:hi]]
     for j, r in enumerate(demo):
         r["credential_status"] = credential_schedule(j)
-    write_jsonl(demo, out / "demo.jsonl")
+    write_atomic(demo, out / "demo.jsonl")
 
     _write_provenance(clean, floor, cal, truth, demo, onset_i, lo, hi, clean_recs)
     print(f"\nwrote {out/'clean.jsonl'} ({len(clean_recs)}), "
@@ -204,6 +242,9 @@ def _write_provenance(clean, floor, cal, truth, demo, onset_i, lo, hi, clean_rec
     t0, t1 = demo[0]["timestamp"], demo[-1]["timestamp"]
     ta0 = demo[PRE_EPOCHS]["timestamp"]
     ta1 = demo[PRE_EPOCHS + ATTACK_EPOCHS - 1]["timestamp"]
+    tv0 = demo[PRE_EPOCHS + ATTACK_EPOCHS]["timestamp"]
+    tp0 = demo[creds.index("PENDING")]["timestamp"]
+    te0 = demo[creds.index("EXPIRED")]["timestamp"]
     md = f"""# Stream provenance — out/demo.jsonl, out/clean.jsonl, out/carryoff.jsonl
 
 Generated by `python -m backend.demo`. Every field below is classified so that
@@ -228,7 +269,7 @@ systems {SYSTEMS}. {floor}
 | `geometry.sky[]` | propagated | real az/el from `backend/geometry/skyview.py` (gnss-lib-py, G+E only, 10° mask). **A second, pseudorange-validated propagator with BeiDou exists in `backend/rinex/ephemeris.py` (Track A); convergence is an 18:30 checkpoint item.** |
 | `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `{DISTRUST_FEATURE}` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day {ex_clean:.1%} of epochs have ≥1 excluded SV |
 | `geometry.information_ratio`, `displacement_bound_m`, `next_best_observation` | **null, awaiting Track C** | not fabricated |
-| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}, §9) → EXPIRED. Stands in for TESLA T1 |
+| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last {20 / DEMO_RATE_EPS:.1f} s at the {DEMO_RATE_EPS:.0f} epochs/s demo rate; tuned to {T_INT_EPOCHS} × {DISCLOSURE_LAG_INTERVALS} so every credential state holds ≥ {LEGIBLE_EPOCHS / DEMO_RATE_EPS:.0f} s on screen. Stands in for the live TESLA verifier until Track A's T1 lands |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 
@@ -243,8 +284,10 @@ No record carries `_synthetic`.
 | demo.jsonl | {len(demo)} | slice [{lo}, {hi}) of carryoff: {t0} → {t1} |
 
 demo.jsonl beats: {PRE_EPOCHS} clean · {ATTACK_EPOCHS} attack ({ta0} → {ta1}) ·
-{POST_EPOCHS} post-attack clean with credential {POST_VALID_EPOCHS} VALID /
-{n_pending} PENDING / {POST_EPOCHS - POST_VALID_EPOCHS - n_pending} EXPIRED.
+{POST_EPOCHS} post-attack clean with credential {POST_VALID_EPOCHS} VALID ({tv0} → {tp0}) /
+{n_pending} PENDING ({tp0} → {te0}) / {POST_EXPIRED_EPOCHS} EXPIRED ({te0} → {t1}).
+At {DEMO_RATE_EPS:.0f} epochs/s: VALID tail {POST_VALID_EPOCHS / DEMO_RATE_EPS:.1f} s ·
+PENDING {n_pending / DEMO_RATE_EPS:.1f} s · EXPIRED {POST_EXPIRED_EPOCHS / DEMO_RATE_EPS:.1f} s.
 
 ## Injector parameters (design.md §7 carry-off, Track A defaults)
 
