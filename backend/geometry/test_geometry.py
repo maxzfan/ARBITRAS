@@ -290,6 +290,31 @@ def test_displacement_bound_widens_on_real_geometry():
 
 
 @needs_data
+def test_engine_emits_contract_shape_from_fixture():
+    # End-to-end: fixtures/epoch.json inputs -> exact §5 geometry block.
+    # Fixture timestamps are UTC ("Z"); the engine works in GPST (+18 s).
+    import json
+    from backend.geometry.engine import GeometryEngine
+    fx = json.loads(Path("fixtures/epoch.json").read_text())
+    t_gpst = datetime.fromisoformat(
+        fx["timestamp"].replace("Z", "")) + timedelta(seconds=18)
+    eng = GeometryEngine(sigma_uere_m=1.0)
+    block = eng.compute(t_gpst, excluded_sv=fx["geometry"]["excluded_sv"])
+    assert set(block) == {"information_ratio", "excluded_sv",
+                          "displacement_bound_m", "next_best_observation"}
+    assert 0.0 <= block["information_ratio"] <= 1.0
+    assert block["excluded_sv"] == sorted(fx["geometry"]["excluded_sv"])
+    assert isinstance(block["displacement_bound_m"], float)
+    assert block["next_best_observation"] in (None, "G", "E", "C")
+    # sigma unset -> bound honestly None, everything else unchanged
+    eng_nosigma = GeometryEngine()
+    block2 = eng_nosigma.compute(t_gpst,
+                                 excluded_sv=fx["geometry"]["excluded_sv"])
+    assert block2["displacement_bound_m"] is None
+    assert block2["information_ratio"] == block["information_ratio"]
+
+
+@needs_data
 def test_usn8_visible_gps_count_in_band():
     from backend.geometry.ephemeris import load_records, sv_positions_at
     rx = np.array([1112161.8802, -4842854.4026, 3985497.3830])
