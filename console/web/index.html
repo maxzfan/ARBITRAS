@@ -185,6 +185,7 @@
   .stage.env .readout .n.safe{color:var(--fg)}
   .stage.env .readout .n,.stage.env .readout .u,.stage.env .hint{text-shadow:0 1px 3px #000c,0 0 10px #0009}
   .envhud{position:absolute;top:120px;left:20px;z-index:5;font-family:var(--sans);font-weight:500;
+          border:1px solid var(--keyline);background:#0B0D0Fd9;padding:10px 12px 12px;
           font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);
           text-shadow:0 1px 2px #000c,0 0 8px #0008}
   .envhud div{display:flex;align-items:center;gap:9px;margin-top:6px}
@@ -195,10 +196,16 @@
   .envhud .n2 b{color:var(--fg);font-weight:500}
   .envhud .st{display:block;font-family:var(--mono);font-weight:400;font-size:10px;color:var(--degraded);
               margin-top:6px;letter-spacing:.04em}
-  .rcap{position:absolute;bottom:18px;left:20px;z-index:5;font-family:var(--mono);font-size:10px;
+  .rcap{position:absolute;bottom:18px;left:20px;z-index:5;font-family:var(--mono);font-size:10px;max-width:calc(100% - 360px);line-height:1.5;
         letter-spacing:.08em;text-transform:uppercase;color:var(--faint);text-shadow:0 1px 2px #000c,0 0 8px #0008}
+  .stage:not(.env) .pane .rcap{bottom:46px}   /* map pane: clear the scale bar */
   .attrib{position:absolute;bottom:38px;right:20px;z-index:5;font-family:var(--mono);font-size:9.5px;
           letter-spacing:.04em;color:var(--faint);text-shadow:0 1px 2px #000c,0 0 8px #0008}
+  .skl.gs{color:var(--truth);opacity:.9}
+  .legend i.dash{border-top-style:dashed}
+  .legend i.band{height:6px;border:0;background:#E8A21C33;outline:1px dashed #E8A21C;outline-offset:-1px}
+  .march{animation:march .9s linear infinite}
+  @keyframes march{to{stroke-dashoffset:-14}}
 </style>
 <div id="root"></div>
 <script>
@@ -221,9 +228,9 @@ setTimeout(function () {
     window.__fatal('React did not mount within 4s.\n\ntypeof React    = ' + (typeof React)
       + '\ntypeof ReactDOM = ' + (typeof ReactDOM)
       + '\ncreateRoot      = ' + (typeof (window.ReactDOM || {}).createRoot)
-      + '\nTHREE           = ' + (typeof THREE)
+      + '\nTHREE           = ' + (typeof THREE) + '   Route = ' + (typeof window.Route)
       + '\nthree examples  = ' + ['GLTFLoader','DRACOLoader','RGBELoader','EffectComposer','RenderPass',
-          'SSAOPass','UnrealBloomPass','ShaderPass','GammaCorrectionShader','SkeletonUtils']
+          'SSAOPass','UnrealBloomPass','ShaderPass','GammaCorrectionShader','SkeletonUtils','OrbitControls']
           .map(function (n) { return n + ':' + typeof ((window.THREE || {})[n]); }).join(' '));
   }
 }, 4000);
@@ -247,6 +254,8 @@ setTimeout(function () {
 <script src="/vendor/three/DRACOLoader.js"></script>
 <script src="/vendor/three/RGBELoader.js"></script>
 <script src="/vendor/three/SkeletonUtils.js"></script>
+<script src="/vendor/three/OrbitControls.js"></script>
+<script src="/route.js"></script>
 <script type="module">
 import htmMod from '/vendor/htm.js';
 const {useState, useEffect, useRef} = React;
@@ -255,6 +264,8 @@ const html = htmMod.bind(React.createElement);
 const QS = new URLSearchParams(window.location.search);
 const VIEW = ['map', 'sky', 'split'].includes(QS.get('view')) ? QS.get('view') : 'env';
 const ORBIT = QS.get('orbit') === '1';
+const LOCK = QS.get('lock') === '1';     // ?lock=1: no user camera input (video capture)
+const R = window.Route;                   // console/web/route.js -- mirrors console/mission.py
 
 const COLOR = {NOMINAL:'var(--nominal)', DEGRADED:'var(--degraded)',
                RESTRICTED:'var(--restricted)', SURRENDERED:'var(--surrendered)'};
@@ -288,28 +299,68 @@ function useSize(ref) {
   return s;
 }
 
-function Plot({trail, mission, sep, size}) {
+/* ---------------------------------------------------------------- frame math
+   The route is a PRESENTATION FRAME: the receiver at USN8 is a static station.
+     TRUE     = routePoint(s), s = epoch_index * speed        (scripted)
+     BELIEVED = TRUE + D,  D = ENU(position) - ENU(_truth)    (measured)
+   D is the only thing that separates the two tracks, and D comes from the
+   stream. When the stream carries no displacement the tracks coincide. */
+const dispOf = (m, ep) => {
+  if (!m || !ep || !ep.position) return {e:0, n:0, mag:0, src:'none'};
+  const t = ep._truth || m.surveyed;                 // no truth channel -> surveyed (static receiver)
+  const b = R.latLonToEnu(m, ep.position.lat, ep.position.lon), tt = R.latLonToEnu(m, t.lat, t.lon);
+  const e = b.e - tt.e, n = b.n - tt.n;
+  return {e, n, mag:Math.hypot(e, n), src: ep._truth ? 'truth' : 'surveyed'};
+};
+const truePt = (m, i) => R.routePoint(m, i * m.speed_m_per_epoch);
+const travelAz = headingRad => (90 - headingRad / D2R + 360) % 360;   // math angle -> compass azimuth
+const norm2 = (x, y) => { const l = Math.hypot(x, y) || 1; return [x/l, y/l]; };
+// Offset polyline (simple miter) for corridor edges. +hw = left of travel.
+function offsetPolyline(pts, hw) {
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], a = pts[Math.max(0, i-1)], b = pts[Math.min(pts.length-1, i+1)];
+    const d1 = i > 0 ? norm2(p.e-a.e, p.n-a.n) : null, d2 = i < pts.length-1 ? norm2(b.e-p.e, b.n-p.n) : null;
+    const t = d1 && d2 ? norm2(d1[0]+d2[0], d1[1]+d2[1]) : (d1 || d2);
+    let m = 1; if (d1 && d2) m = 1 / Math.max(0.5, d1[0]*t[0] + d1[1]*t[1]);
+    out.push({e: p.e - t[1]*hw*m, n: p.n + t[0]*hw*m});
+  }
+  return out;
+}
+// Ground uplink (TESLA mission authorisation, design.md §9) -- styled by the
+// credential state. It comes from the GROUND station, never a satellite.
+const UPLINK = {
+  VALID:      {stroke:'var(--truth)',    dash:null,  cls:'',      frac:1,   op:.85},
+  PENDING:    {stroke:'var(--truth)',    dash:'7 7', cls:'march', frac:1,   op:.85},  // key not yet disclosed
+  UNVERIFIED: {stroke:'var(--degraded)', dash:'4 6', cls:'',      frac:1,   op:.85},
+  EXPIRED:    {stroke:'var(--accent)',   dash:null,  cls:'',      frac:.45, op:.55},  // link broken
+  REVOKED:    {stroke:'var(--accent)',   dash:null,  cls:'',      frac:.45, op:.55},
+};
+
+function Plot({trail, mission, size, credential}) {
   if (!mission || !size.w || !size.h) return html`<div className="idle">loading mission</div>`;
-  const W = size.w, H = size.h, cx = W/2, cy = H/2;
-  const AL = mission.alert_limit_m;
-  // Frame on the surveyed point; expand as displacement grows so the alert ring
-  // is always legible and the plot never sits in a void.
-  const span = Math.max(AL * 2.6, (sep || 0) * 1.45, 12);   // metres, half-height
-  const ppm = (H/2 - 40) / span;
-  const toXY = p => {
-    const dN = (p.lat - mission.surveyed.lat) * mission.m_per_deg_lat;
-    const dE = (p.lon - mission.surveyed.lon) * mission.m_per_deg_lon;
-    return [cx + dE*ppm, cy - dN*ppm];
-  };
-  // Rings out to whatever fits horizontally with room for the label.
-  const step = niceStep(span*0.7), rings = [], maxR = (W/2 - 64) / ppm;
-  for (let r = step; r <= maxR; r += step) rings.push(r);
-  const path = trail.filter(p=>p.b).map((p,i)=>{
-    const [x,y] = toXY(p.b); return `${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
+  const W = size.w, H = size.h, cx = W/2, cy = H/2, hw = mission.corridor_half_width_m;
   const last = trail.length ? trail[trail.length-1] : null;
-  const bxy = last && last.b ? toXY(last.b) : null;
+  const T0 = last ? truePt(mission, last.i) : R.routePoint(mission, 0);
+  const D = last ? dispOf(mission, last.ep) : {e:0, n:0, mag:0};
+  // Frame follows the TRUE vehicle, north-up; widen as displacement grows.
+  const span = Math.max(hw * 3.2, D.mag * 1.45, 18);       // metres, half-height
+  const ppm = (H/2 - 40) / span;
+  const XY = (e, n) => [cx + (e - T0.e)*ppm, cy - (n - T0.n)*ppm];
+  const path = pts => pts.map((q, i) => { const [x, y] = XY(q.e, q.n); return `${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
+  const L = offsetPolyline(mission.route, hw), Rr = offsetPolyline(mission.route, -hw);
+  const band = path(L) + ' ' + path([...Rr].reverse()).replace(/^M/, 'L') + ' Z';
+  const tTrail = trail.map(p => truePt(mission, p.i));
+  const bTrail = trail.map((p, k) => { const d = dispOf(mission, p.ep); return {e: tTrail[k].e + d.e, n: tTrail[k].n + d.n}; });
+  const B = {e: T0.e + D.e, n: T0.n + D.n};
+  const [tx, ty] = XY(T0.e, T0.n), [bx, by] = XY(B.e, B.n), [ox, oy] = XY(0, 0);
+  const hd = T0.heading, hx = Math.cos(hd), hy = Math.sin(hd);
+  const gs = mission.ground_station, [gx, gy] = XY(gs.e, gs.n);
+  const up = UPLINK[credential] || UPLINK.VALID;
+  const ux = gx + (tx - gx)*up.frac, uy = gy + (ty - gy)*up.frac;
+  const inView = (x, y) => x > -30 && x < W + 30 && y > -30 && y < H + 30;
   const barM = niceStep(span*0.6), barPx = barM*ppm;
+  const progress = Math.min(1, (last ? last.i * mission.speed_m_per_epoch : 0) / mission.route_length_m);
 
   return html`
     <svg viewBox="0 0 ${W} ${H}" width=${W} height=${H}>
@@ -319,37 +370,37 @@ function Plot({trail, mission, sep, size}) {
         </pattern>
       </defs>
       <rect width=${W} height=${H} fill="url(#grat)"/>
-      <line x1="0" y1=${cy} x2=${W} y2=${cy} stroke="#1C222A"/>
-      <line x1=${cx} y1="0" x2=${cx} y2=${H} stroke="#1C222A"/>
-      ${rings.map(r => html`<g key=${r}>
-        <circle cx=${cx} cy=${cy} r=${r*ppm} fill="none" stroke="#1C222A"
-                strokeDasharray="2 5"/>
-        <text x=${cx + r*ppm + 5} y=${cy - 5} fill="#4E5A67" fontSize="11"
-              fontFamily="var(--mono)">${r} m</text>
-      </g>`)}
-      <circle cx=${cx} cy=${cy} r=${AL*ppm} fill="none" stroke="var(--degraded)"
-              strokeWidth="1.5" strokeDasharray="9 6" opacity=".75"/>
-      <text x=${cx + AL*ppm*0.74} y=${cy - AL*ppm*0.74} fill="var(--degraded)"
-            fontSize="12" letterSpacing="1.6" fontFamily="var(--mono)">
-        ALERT LIMIT ${AL} M
-      </text>
-      ${bxy && html`<line x1=${cx} y1=${cy} x2=${bxy[0]} y2=${bxy[1]}
-                          stroke="var(--accent)" strokeWidth="1" strokeDasharray="3 4"
-                          opacity=".65"/>`}
-      <path d=${path} fill="none" stroke="var(--accent)" strokeWidth="2.5"/>
-      <g stroke="var(--truth)" strokeWidth="2">
-        <line x1=${cx-11} y1=${cy} x2=${cx+11} y2=${cy}/>
-        <line x1=${cx} y1=${cy-11} x2=${cx} y2=${cy+11}/>
-      </g>
-      <text x=${cx-20} y=${cy-19} fill="var(--truth)" fontSize="11" letterSpacing="1.4"
-            textAnchor="end" fontFamily="var(--mono)">USN8 SURVEYED</text>
-      ${bxy && html`<circle cx=${bxy[0]} cy=${bxy[1]} r="7" fill="var(--accent)"/>`}
+      <path d=${band} fill="#E8A21C" fillOpacity=".07" stroke="none"/>
+      <path d=${path(L)} fill="none" stroke="var(--degraded)" strokeWidth="1.2" strokeDasharray="9 6" opacity=".7"/>
+      <path d=${path(Rr)} fill="none" stroke="var(--degraded)" strokeWidth="1.2" strokeDasharray="9 6" opacity=".7"/>
+      <path d=${path(mission.route)} fill="none" stroke="#2B333D" strokeWidth="1"/>
+      ${inView(ox, oy) && html`<g>
+        <g stroke="var(--truth)" strokeWidth="2">
+          <line x1=${ox-10} y1=${oy} x2=${ox+10} y2=${oy}/><line x1=${ox} y1=${oy-10} x2=${ox} y2=${oy+10}/>
+        </g>
+        <text x=${ox+14} y=${oy-12} fill="var(--truth)" fontSize="10" letterSpacing="1.3" fontFamily="var(--mono)">USN8 · RECEIVER (STATIC)</text>
+      </g>`}
+      ${inView(gx, gy) && html`<g>
+        <rect x=${gx-6} y=${gy-6} width="12" height="12" fill="none" stroke="var(--truth)" strokeWidth="1.5"/>
+        <line x1=${gx} y1=${gy-6} x2=${gx} y2=${gy-16} stroke="var(--truth)" strokeWidth="1.5"/>
+        <text x=${gx+12} y=${gy+4} fill="var(--truth)" fontSize="10" letterSpacing="1.3" fontFamily="var(--mono)">GROUND STATION · AUTHORISATION</text>
+      </g>`}
+      <line className=${up.cls} x1=${gx} y1=${gy} x2=${ux} y2=${uy} stroke=${up.stroke} strokeWidth="1.5"
+            strokeDasharray=${up.dash || 'none'} opacity=${up.op}/>
+      <path d=${path(tTrail)} fill="none" stroke="var(--truth)" strokeWidth="2.5" opacity=".9"/>
+      <path d=${path(bTrail)} fill="none" stroke="var(--accent)" strokeWidth="2.5"/>
+      ${D.mag > 0.5 && html`<line x1=${tx} y1=${ty} x2=${bx} y2=${by} stroke="var(--accent)" strokeWidth="1" strokeDasharray="3 4" opacity=".65"/>`}
+      <line x1=${tx} y1=${ty} x2=${tx + hx*16} y2=${ty - hy*16} stroke="var(--truth)" strokeWidth="2"/>
+      <circle cx=${tx} cy=${ty} r="6.5" fill="var(--truth)"/>
+      ${D.mag > 0.5 && html`<circle cx=${bx} cy=${by} r="6.5" fill="var(--accent)"/>`}
+      <text x=${tx + 12} y=${ty + 18} fill="var(--truth)" fontSize="10" letterSpacing="1.3" fontFamily="var(--mono)">${D.mag > 0.5 ? 'TRUE · ROUTE FRAME' : 'TRUE = BELIEVED · NO MEASURED DISPLACEMENT'}</text>
+      ${D.mag > 0.5 && html`<text x=${bx + 12} y=${by - 10} fill="var(--accent)" fontSize="10" letterSpacing="1.3" fontFamily="var(--mono)">BELIEVED · ${D.mag.toFixed(0)} M</text>`}
       <g transform=${`translate(24,${H-24})`}>
         <line x1="0" y1="0" x2=${barPx} y2="0" stroke="#8794A2" strokeWidth="2"/>
         <line x1="0" y1="-5" x2="0" y2="5" stroke="#8794A2" strokeWidth="2"/>
         <line x1=${barPx} y1="-5" x2=${barPx} y2="5" stroke="#8794A2" strokeWidth="2"/>
-        <text x=${barPx/2} y="-11" fill="#8794A2" fontSize="11" textAnchor="middle"
-              letterSpacing="1.4" fontFamily="var(--mono)">${barM} M</text>
+        <text x=${barPx/2} y="-11" fill="#8794A2" fontSize="11" textAnchor="middle" letterSpacing="1.4" fontFamily="var(--mono)">${barM} M</text>
+        <text x=${barPx + 18} y="4" fill="#4E5A67" fontSize="10" letterSpacing="1.4" fontFamily="var(--mono)">NORTH UP · ROUTE ${(progress*100).toFixed(0)}%</text>
       </g>
     </svg>`;
 }
@@ -461,6 +512,7 @@ class SatLayer {
       if (Math.abs(ls[i].lx - ls[j].lx) < 40 && ls[i].ly - ls[j].ly < 12) ls[i].ly = ls[j].ly + 12;
     }
     for (const r of ls) { r.label.style.left = r.lx + 'px'; r.label.style.top = r.ly + 'px'; }
+    for (const [, r] of this.sats) if (!(r.alpha > 0 && r.vis)) { r.label.style.left = '0px'; r.label.style.top = '0px'; }
   }
   dispose() {
     for (const [, r] of this.sats) {
@@ -538,9 +590,17 @@ function SkyDome({sky, orbit}) {
                        dist*Math.cos(elv)*Math.cos(st.theta));
       cam.lookAt(0, 0.20, 0);
     };
+    let controls = null;
+    if (!LOCK && typeof T.OrbitControls === 'function') {
+      controls = new T.OrbitControls(cam, renderer.domElement);
+      controls.enableDamping = true; controls.dampingFactor = 0.08; controls.target.set(0, 0.2, 0);
+      controls.minDistance = 1.6; controls.maxDistance = 9; controls.maxPolarAngle = 1.5;
+      controls.addEventListener('start', () => { st.userCam = true; });
+    }
     const ro = new ResizeObserver(([e]) => {
       st.w = Math.round(e.contentRect.width); st.h = Math.round(e.contentRect.height);
-      renderer.setSize(st.w, st.h, false); place();
+      renderer.setSize(st.w, st.h, false);
+      if (st.userCam) { cam.aspect = st.w/st.h; cam.updateProjectionMatrix(); } else place();
     });
     ro.observe(el);
 
@@ -552,7 +612,8 @@ function SkyDome({sky, orbit}) {
       st.layer.tick(dt, project);
       for (const c of st.cmp) { const [x, y] = project(c.p);
         c.el.style.left = x + 'px'; c.el.style.top = y + 'px'; }
-      if (orbit) { st.theta += 0.02*dt; place(); }
+      if (st.userCam && controls) controls.update();
+      else if (orbit) { st.theta += 0.02*dt; place(); }
       renderer.render(scene, cam);
       raf = requestAnimationFrame(loop);
     };
@@ -560,6 +621,7 @@ function SkyDome({sky, orbit}) {
 
     return () => {
       cancelAnimationFrame(raf); ro.disconnect();
+      if (controls) controls.dispose();
       st.layer.dispose();
       for (const c of st.cmp) c.el.remove();
       renderer.dispose(); el.removeChild(renderer.domElement); S.current = null;
@@ -602,30 +664,37 @@ const ENV = {
   R: 400,                                  // dome radius, metres
   // Camera azimuth (where the camera SITS relative to the vehicle). Default NNW,
   // looking SSE toward the HDRI sun so the warm horizon is in frame. ?cam=155 etc.
-  camAz: QS.has('cam') ? +QS.get('cam') : 345,
   faceAz: QS.has('face') ? +QS.get('face') : 200,   // vehicle nose, azimuth
-  lightAz: 285, lightEl: 14,               // fallback key if the HDRI fails to load
-  horizon: 0x8A5E44, mid: 0x33405A, zenith: 0x0A0E18,   // fallback gradient sky
-  ground: 0x4A463E, rock: 0x5C574D,
+  // Earth backdrop (console/web/EARTH_BACKDROP.md): kloofendal_48d_partly_cloudy
+  // lights the scene; its sun was measured at az 124.4 / el 47.3 in this frame.
+  sunAz: 124.4, sunEl: 47.3, sunColor: 0xFFF4E0, sunIntensity: 3.0,
+  // Headless captures cannot judge absolute brightness (see TRACK_B.md); tune on
+  // the demo machine with ?exposure=1.2 etc. Default errs bright for a 0.1-albedo ground.
+  exposure: QS.has('exposure') ? +QS.get('exposure') : 1.5,
+  // Procedural sky ~2 stops darker than the measured HDRI sky, so the additive
+  // satellite sprites and LOS rays stay legible (the HDRI is NOT the background).
+  horizon: 0x8F94A1, mid: 0x7891B0, zenith: 0x5F7FB5, fogDensity: 0.0022,
+  ground: 0x6B6A5E, rock: 0x5C574D,
   model: '/vendor/asset-rover.glb', vehicleHeight: 2.2,   // Perseverance, mast deployed
-  hdr: '/vendor/asset-sky.hdr',
-  tex: {diff:'/vendor/asset-ground-diff.jpg', nor:'/vendor/asset-ground-nor_gl.jpg', rough:'/vendor/asset-ground-rough.jpg'},
+  hdr: '/vendor/asset-earth-sky.hdr',
+  tex: {diff:'/vendor/asset-earth-ground-diff-2k.jpg', nor:'/vendor/asset-earth-ground-nor_gl.jpg', rough:'/vendor/asset-earth-ground-rough.jpg'},
+  rockTex: {diff:'/vendor/asset-ground-diff.jpg', nor:'/vendor/asset-ground-nor_gl.jpg', rough:'/vendor/asset-ground-rough.jpg'},
   attribFull: 'Vehicle: NASA 3D Resources, public domain · Sky, ground: Poly Haven, CC0',
   attribNoModel: 'Sky, ground: Poly Haven, CC0',
 };
 const POST = QS.get('post') !== '0';        // ?post=0 bypasses the composer if a machine misbehaves
 const noise = makeNoise(7);
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x-a)/(b-a))); return t*t*(3-2*t); };
-// Terrain is flat under the vehicles and along the displacement corridor so the
-// ghost sits on the ground and nothing occludes it. The ghost is also grounded
-// by sampling the height directly, so any bearing works.
-const CB = {x: Math.sin(118*D2R), z: -Math.cos(118*D2R)};
-const corridorDist = (x, z) => { const t = Math.max(0, Math.min(80, x*CB.x + z*CB.z));
-  return Math.hypot(x - CB.x*t, z - CB.z*t); };
-const terrainHeight = (x, z) => {
-  const base = 2.4*noise(x/70+3.1, z/70+1.7) + 0.7*noise(x/22, z/22) + 0.18*noise(x/6, z/6);
-  return base * smooth(12, 34, Math.hypot(x, z)) * smooth(6, 16, corridorDist(x, z));
-};
+// Terrain height is built per mission inside EnvScene (it must be flat along
+// the route corridor and under the ground station); see makeTerrain().
+function makeTerrain(m) {
+  const hw = m.corridor_half_width_m, gs = m.ground_station;
+  const lat = (x, z) => Math.abs(R.lateralOffset(m, x, -z));          // scene z = -north
+  return (x, z) => {
+    const base = 2.4*noise(x/70+3.1, z/70+1.7) + 0.7*noise(x/22, z/22) + 0.18*noise(x/6, z/6);
+    return base * smooth(hw + 3, hw + 16, lat(x, z)) * smooth(7, 20, Math.hypot(x - gs.e, z + gs.n));
+  };
+}
 
 function roundedRect(w, h, r) {
   const s = new THREE.Shape(), x = -w/2, y = -h/2;
@@ -764,15 +833,15 @@ function ghostOf(root, ghostMat) {
   return g;
 }
 
-function EnvScene({sky, offset, mission, orbit, onStatus}) {
+function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
   const box = useRef(null), lab = useRef(null), S = useRef(null), statusRef = useRef(onStatus);
   statusRef.current = onStatus;
   const [ok, setOk] = useState(typeof THREE !== 'undefined');
 
   useEffect(() => {
     const el = box.current;
-    if (!el || typeof THREE === 'undefined') { setOk(false); return; }
-    const T = THREE;
+    if (!el || typeof THREE === 'undefined' || !mission) { setOk(false); return; }
+    const T = THREE, m = mission, hw = m.corridor_half_width_m;
     let alive = true;
     const status = {model:'loading', sky:'loading', ground:'loading'};
     const report = () => { if (!alive || !statusRef.current) return;
@@ -786,46 +855,53 @@ function EnvScene({sky, offset, mission, orbit, onStatus}) {
         attrib: status.model === 'loaded' ? ENV.attribFull : ENV.attribNoModel, ...status}); };
     report();
 
-    // Hex colours are sRGB; convert on the way in, encode on the way out. Global
-    // to three.js, but only one 3D view is mounted per page load.
     T.ColorManagement.legacyMode = false;
     const renderer = new T.WebGLRenderer({antialias:true, alpha:false, powerPreference:'high-performance'});
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputEncoding = T.sRGBEncoding;
-    renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.6;
+    renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = ENV.exposure;
     renderer.info.autoReset = false;
-    renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+    renderer.shadowMap.enabled = QS.get('shadow') !== '0'; renderer.shadowMap.type = T.PCFSoftShadowMap;   // ?shadow=0: diagnostic
     renderer.setClearColor(ENV.horizon, 1);
     el.appendChild(renderer.domElement);
     const aniso = renderer.capabilities.getMaxAnisotropy();
 
     const scene = new T.Scene();
-    scene.fog = new T.FogExp2(ENV.horizon, 0.0028);
+    scene.fog = new T.FogExp2(ENV.horizon, ENV.fogDensity);
     const cam = new T.PerspectiveCamera(38, 1, 0.5, 1500);
     const rnd = mulberry32(11);
-    const st = {renderer, scene, cam, w:0, h:0, theta:ENV.camAz*D2R, cmp:[], D:11,
-                mid:new T.Vector3(), gPrev:new T.Vector3(), gTgt:new T.Vector3(),
-                gCur:new T.Vector3(), gT0:performance.now(), ring:null, passes:[],
-                antenna:new T.Vector3(0, 2.2, 0), status};
+    const terrainHeight = makeTerrain(m);
+    const toScene = (e, n, y=0) => new T.Vector3(e, y, -n);          // ENU -> scene (x=E, y=Up, z=S)
+    const st = {renderer, scene, cam, w:0, h:0, cmp:[], status, terrainHeight,
+                sPrev:0, sTgt:0, sCur:0, T0:performance.now(),
+                gPrev:new T.Vector3(), gTgt:new T.Vector3(), gCur:new T.Vector3(), Dmag:0,
+                truePos:new T.Vector3(), prevTrue:new T.Vector3(), travelAz:0,
+                camOff:new T.Vector3(), lookOff:new T.Vector3(), camInit:false, userCam:false,
+                antennaLocal:new T.Vector3(0, 2.2, 0), antW:new T.Vector3(), cred:'VALID', passes:[]};
     S.current = st;
 
     // -- lights: warm key for shadows (re-aimed at the HDRI sun once it loads) --
-    const LDIR = azel(ENV.lightAz, ENV.lightEl);
-    const key = new T.DirectionalLight(0xFFB380, 1.3);
+    const LDIR = azel(ENV.sunAz, ENV.sunEl);          // matches the HDRI as loaded (no envmap rotation in r147)
+    const key = new T.DirectionalLight(ENV.sunColor, ENV.sunIntensity);
     key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
     Object.assign(key.shadow.camera, {left:-60, right:60, top:60, bottom:-60, near:10, far:420});
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03;
     scene.add(key); scene.add(key.target);
     const hemi = new T.HemisphereLight(0x4A5A78, 0x2A241E, 0.6); scene.add(hemi);
 
-    // -- terrain: procedural heightfield, PBR-textured once the maps arrive ------
-    const groundMat = new T.MeshStandardMaterial({color:ENV.ground, roughness:1, metalness:0, envMapIntensity:0.55});
+    // -- terrain: covers the whole route (+margin), flat along the corridor --------
+    const groundMat = new T.MeshStandardMaterial({color:ENV.ground, roughness:1, metalness:0, envMapIntensity:1.0});
+    const es = m.route.map(w => w.e), ns = m.route.map(w => w.n);
+    const minE = Math.min(...es, m.ground_station.e), maxE = Math.max(...es, m.ground_station.e);
+    const minN = Math.min(...ns, m.ground_station.n), maxN = Math.max(...ns, m.ground_station.n);
+    const TW = (maxE - minE) + 1000, TD = (maxN - minN) + 1000, TCx = (minE + maxE)/2, TCz = -(minN + maxN)/2;
     {
-      const geo = new T.PlaneGeometry(900, 900, 128, 128), p = geo.attributes.position;
-      for (let i = 0; i < p.count; i++) p.setZ(i, terrainHeight(p.getX(i), -p.getY(i)));
+      const geo = new T.PlaneGeometry(TW, TD, Math.min(Math.round(TW/10), 200), Math.min(Math.round(TD/10), 200));   // ~10 m quads
+      const pa = geo.attributes.position;
+      for (let i = 0; i < pa.count; i++) pa.setZ(i, terrainHeight(pa.getX(i) + TCx, -pa.getY(i) + TCz));
       geo.computeVertexNormals();
       const ground = new T.Mesh(geo, groundMat);
-      ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
+      ground.rotation.x = -Math.PI/2; ground.position.set(TCx, 0, TCz); ground.receiveShadow = true; scene.add(ground);
     }
     const rockMat = new T.MeshStandardMaterial({color:ENV.rock, roughness:0.92, metalness:0.02, envMapIntensity:0.55});
     {
@@ -842,14 +918,15 @@ function EnvScene({sky, offset, mission, orbit, onStatus}) {
         sv.set(s*(0.8+rnd()*0.5), s*(0.55+rnd()*0.5), s*(0.8+rnd()*0.5));
         m4.compose(pv.set(x, terrainHeight(x, z) - 0.22*s, z), q, sv); rocks.setMatrixAt(n++, m4);
       };
-      while (n < 320 && tries++ < 6000) {
-        const x = (rnd()-0.5)*520, z = (rnd()-0.5)*520;
-        if (Math.hypot(x, z) < 13 || corridorDist(x, z) < 8) continue;
+      while (n < 320 && tries++ < 12000) {
+        const x = TCx + (rnd()-0.5)*(TW-300), z = TCz + (rnd()-0.5)*(TD-300);
+        if (Math.abs(R.lateralOffset(m, x, -z)) < hw + 8) continue;
+        if (Math.hypot(x - m.ground_station.e, z + m.ground_station.n) < 16) continue;
         if (rnd() > 0.35 + 0.65*(noise(x/40, z/40)+1)/2) continue;
         put(x, z, 0.35 + rnd()*rnd()*1.9);
       }
-      for (let i = 0; i < 16; i++) { const a = rnd()*Math.PI*2, d = 130 + rnd()*150;   // skyline outcrops
-        put(Math.sin(a)*d, Math.cos(a)*d, 5 + rnd()*9); }
+      for (let i = 0; i < 20; i++) { const a = rnd()*Math.PI*2, d = 160 + rnd()*200;   // skyline outcrops
+        put(TCx + Math.sin(a)*d, TCz + Math.cos(a)*d, 5 + rnd()*9); }
       rocks.count = n; rocks.castShadow = true; rocks.receiveShadow = true; scene.add(rocks);
     }
     Promise.all([
@@ -857,14 +934,39 @@ function EnvScene({sky, offset, mission, orbit, onStatus}) {
       loadTexture(ENV.tex.rough, false, 225, aniso),
     ]).then(([map, nor, rough]) => {
       if (!alive) return;
-      Object.assign(groundMat, {map, normalMap:nor, roughnessMap:rough, color:new T.Color(0xB0A08C), envMapIntensity:0.4});
-      groundMat.normalScale.set(1, 1); groundMat.needsUpdate = true;
-      const rm = map.clone(), rn = nor.clone(), rr = rough.clone();
-      for (const t of [rm, rn, rr]) { t.repeat.set(1.6, 1.6); t.needsUpdate = true; }
-      Object.assign(rockMat, {map:rm, normalMap:rn, roughnessMap:rr, color:new T.Color(0xB8AC9C), envMapIntensity:0.4});
-      rockMat.needsUpdate = true;
+      const rep = Math.round(Math.max(TW, TD) / 3.5);                      // one tile ~3.5 m
+      for (const t of [map, nor, rough]) { t.repeat.set(rep, rep); t.needsUpdate = true; }
+      Object.assign(groundMat, {map, normalMap:nor, roughnessMap:rough, color:new T.Color(0xFFFFFF), metalness:0, envMapIntensity:1.0});
+      groundMat.normalScale.set(0.8, 0.8); groundMat.needsUpdate = true;
       status.ground = 'loaded'; report();
     }).catch(() => { status.ground = 'fallback'; report(); });
+    Promise.all([
+      loadTexture(ENV.rockTex.diff, true, 1.6, aniso), loadTexture(ENV.rockTex.nor, false, 1.6, aniso),
+      loadTexture(ENV.rockTex.rough, false, 1.6, aniso),
+    ]).then(([rm, rn, rr]) => {
+      if (!alive) return;
+      Object.assign(rockMat, {map:rm, normalMap:rn, roughnessMap:rr, color:new T.Color(0xB8AC9C), envMapIntensity:1.0});
+      rockMat.needsUpdate = true;
+    }).catch(() => {});
+
+    // -- corridor: ONE ribbon mesh + two dashed edge lines + a faint centreline ---
+    {
+      const Lp = offsetPolyline(m.route, hw), Rp = offsetPolyline(m.route, -hw), n = m.route.length;
+      const pos = new Float32Array(n * 2 * 3), idx = [];
+      for (let i = 0; i < n; i++) {
+        pos.set([Lp[i].e, 0.06, -Lp[i].n], i*6); pos.set([Rp[i].e, 0.06, -Rp[i].n], i*6 + 3);
+        if (i) idx.push(2*i-2, 2*i-1, 2*i, 2*i-1, 2*i+1, 2*i);
+      }
+      const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(pos, 3)); g.setIndex(idx);
+      scene.add(new T.Mesh(g, new T.MeshBasicMaterial({color:0xE8A21C, transparent:true, opacity:0.10,
+        depthWrite:false, side:T.DoubleSide, toneMapped:false, fog:true})));
+      const edge = pts => { const l = new T.Line(new T.BufferGeometry().setFromPoints(pts.map(q => toScene(q.e, q.n, 0.09))),
+        new T.LineDashedMaterial({color:0xE8A21C, dashSize:2.2, gapSize:1.4, transparent:true, opacity:0.85, toneMapped:false}));
+        l.computeLineDistances(); scene.add(l); return l; };
+      edge(Lp); edge(Rp);
+      scene.add(new T.Line(new T.BufferGeometry().setFromPoints(m.route.map(q => toScene(q.e, q.n, 0.08))),
+        new T.LineBasicMaterial({color:0x8794A2, transparent:true, opacity:0.35, toneMapped:false})));
+    }
 
     // -- sky: HDRI environment + background; gradient sphere only as fallback ----
     const addGradientSky = () => {
@@ -875,33 +977,35 @@ function EnvScene({sky, offset, mission, orbit, onStatus}) {
         fragmentShader:'uniform vec3 ch,cm,cz; varying vec3 vW; void main(){ float e=normalize(vW).y; vec3 c=mix(ch,cm,smoothstep(-0.06,0.09,e)); c=mix(c,cz,smoothstep(0.08,0.70,e)); gl_FragColor=linearToOutputTexel(vec4(c,1.0)); }',
       })));
     };
-    withTimeout(loadHDR(ENV.hdr, renderer), 20000, 'HDRI').then(h => {
+    addGradientSky();                                   // always: the HDRI lights, it is not the backdrop
+    st.sunAz = ENV.sunAz; st.sunEl = ENV.sunEl;
+    withTimeout(loadHDR(ENV.hdr, renderer), 25000, 'HDRI').then(h => {
       if (!alive) return;
-      scene.environment = h.env; scene.background = h.background;
-      scene.fog.color.copy(h.fog); renderer.setClearColor(h.fog, 1);
-      hemi.intensity = 0.12;                                   // the environment map now carries the ambient
-      // Key light from the HDRI sun; a sun on or below the horizon still needs
-      // enough elevation to cast readable shadows.
-      const d = h.sunDir.clone(); const elv = Math.max(6*D2R, Math.asin(Math.max(-1, Math.min(1, d.y))));
-      const hz = Math.hypot(d.x, d.z) || 1; d.set(d.x/hz*Math.cos(elv), Math.sin(elv), d.z/hz*Math.cos(elv));
-      LDIR.copy(d); key.color.setHex(h.sunEl < 8 ? 0xFFA870 : 0xFFD2A8);
-      st.sunAz = ((Math.atan2(d.x, -d.z)/D2R) + 360) % 360; st.sunEl = h.sunEl;
+      if (QS.get('env') !== '0') scene.environment = h.env;   // PBR lighting + reflections only (?env=0: diagnostic)
+      h.background.dispose && h.background.dispose();
+      hemi.intensity = 0.12;
+      // Sanity: the measured sun (EARTH_BACKDROP.md) and the brightest HDR pixel should agree.
+      const dAz = ((Math.atan2(h.sunDir.x, -h.sunDir.z)/D2R) + 360) % 360;
+      st.sunCheck = {hdrAz:+dAz.toFixed(1), hdrEl:+h.sunEl.toFixed(1), specAz:ENV.sunAz, specEl:ENV.sunEl};
       status.sky = 'loaded'; report();
-    }).catch(() => { if (!alive) return; addGradientSky(); status.sky = 'fallback'; report(); });
+    }).catch(() => { if (!alive) return; status.sky = 'fallback'; report(); });
 
-    // -- vehicle: GLB (real CAD-derived geometry) with a primitive fallback ------
+    // -- vehicles: pivot groups so yaw/position per frame never disturb the model's
+    //    baked centring. veh = TRUE (route frame); ghostG = BELIEVED = TRUE + D. ----
     const ghostMat = new T.MeshStandardMaterial({color:0xE4551F, emissive:0xE4551F, emissiveIntensity:0.55,
       transparent:true, opacity:0.38, depthWrite:false, roughness:0.7, metalness:0});
-    let solid = null, ghost = null;
-    const install = (root, antennaWorld) => {
-      if (solid) { scene.remove(solid); scene.remove(ghost); }
-      solid = root; scene.add(solid);
-      ghost = ghostOf(root, ghostMat); ghost.visible = false; scene.add(ghost);
-      st.antenna.copy(antennaWorld); st.layer.target.copy(antennaWorld);
-      rxGlow.position.copy(antennaWorld); st.lblTruth.p.copy(antennaWorld).y += 0.9;
+    const veh = new T.Group(), ghostG = new T.Group(); ghostG.visible = false;
+    scene.add(veh); scene.add(ghostG);
+    let modelRoot = null;
+    const install = (root, antennaLocal) => {
+      if (modelRoot) { veh.clear(); ghostG.clear(); }
+      modelRoot = root; veh.add(root); ghostG.add(ghostOf(root, ghostMat));
+      st.antennaLocal.copy(antennaLocal);
     };
-    // dome + rays to the antenna (target updated once the model is measured)
-    st.layer = new SatLayer(scene, lab.current, {radius:ENV.R, target:st.antenna.clone(),
+    // Dome: satellite az/el do not change measurably over an 800 m route, so the
+    // dome is simply re-centred on the moving vehicle each frame. Rays terminate
+    // on the TRUE vehicle's antenna -- that is what the receiver sees.
+    st.layer = new SatLayer(scene, lab.current, {radius:ENV.R, center:st.truePos, target:st.antW,
       scale:{trusted:9, excluded:7}, rayAlpha:0.30, labelCls:'env'});
     const rxGlow = new T.Sprite(new T.SpriteMaterial({map:st.layer.tex, color:SKY_TRUSTED, transparent:true,
       blending:T.AdditiveBlending, depthWrite:false, fog:false, toneMapped:false}));
@@ -910,14 +1014,13 @@ function EnvScene({sky, offset, mission, orbit, onStatus}) {
       blending:T.AdditiveBlending, depthWrite:false, fog:false, toneMapped:false}));
     gGlow.scale.setScalar(1.6); gGlow.visible = false; scene.add(gGlow);
 
-    // HTML labels projected each frame
     const mkLabel = (cls, text) => { const d = document.createElement('div');
       d.className = 'skl ' + cls; d.textContent = text; lab.current.appendChild(d); return d; };
     st.cmp = [['N',0],['E',90],['S',180],['W',270]].map(([t,az]) =>
-      ({el: mkLabel('cmp env', t), p: azel(az, 2.5).multiplyScalar(ENV.R)}));
-    st.lblTruth = {el: mkLabel('env lb', 'USN8 · SURVEYED TRUTH'), p: st.antenna.clone().add(new T.Vector3(0, 0.9, 0))};
+      ({el: mkLabel('cmp env', t), base: azel(az, 2.5).multiplyScalar(ENV.R), p: new T.Vector3()}));
+    st.lblTruth = {el: mkLabel('env lb', 'TRUE · ROUTE FRAME'), p: new T.Vector3()};
     st.lblGhost = {el: mkLabel('env x lb', ''), p: new T.Vector3()};
-    st.lblRing  = {el: mkLabel('env al', ''), p: new T.Vector3()};
+    st.lblGS    = {el: mkLabel('env gs lb', 'GROUND STATION · MISSION AUTHORISATION'), p: new T.Vector3()};
 
     withTimeout(loadVehicle(ENV.model), 25000, 'vehicle model').then(root => {
       if (!alive) return;
@@ -933,35 +1036,53 @@ function EnvScene({sky, offset, mission, orbit, onStatus}) {
       status.model = 'fallback'; report();
     });
 
-    // faint dome graticule so the sky reads as an instrument, not a backdrop
-    const gline = (pts, op) => new T.Line(new T.BufferGeometry().setFromPoints(pts),
-      new T.LineBasicMaterial({color:0x9FB8CC, transparent:true, opacity:op, fog:false, toneMapped:false}));
-    for (const elv of [0.6, 30, 60]) { const pts = [];
-      for (let i = 0; i <= 160; i++) pts.push(azel(i/160*360, elv).multiplyScalar(ENV.R));
-      scene.add(gline(pts, elv < 1 ? 0.16 : 0.09)); }
-    for (let az = 0; az < 360; az += 30) { const pts = [];
-      for (let i = 0; i <= 30; i++) pts.push(azel(az, 0.6 + i*2.98).multiplyScalar(ENV.R));
-      scene.add(gline(pts, 0.07)); }
-    // truth -> believed, dashed on the ground
-    const dline = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]),
-      new T.LineDashedMaterial({color:0xE4551F, dashSize:1.0, gapSize:0.7, transparent:true, opacity:0.75, toneMapped:false}));
-    dline.visible = false; scene.add(dline);
+    // -- ground station: the TESLA authorisation source (design.md §9). A mast, a
+    //    dish and a hut on the terrain; ONE uplink line to the true vehicle's antenna
+    //    whose material follows credential_status. Never routed via a satellite. ---
+    const gsE = m.ground_station.e, gsN = m.ground_station.n, gsY = terrainHeight(gsE, -gsN);
+    const gsTop = toScene(gsE, gsN, gsY + 7.2);
+    {
+      const mat = new T.MeshStandardMaterial({color:0x8A857A, roughness:0.6, metalness:0.35});
+      const dark = new T.MeshStandardMaterial({color:0x2E2F33, roughness:0.9, metalness:0.1});
+      const add = (geo, mt, x, y, z, rx=0) => { const o = new T.Mesh(geo, mt); o.position.set(x, y, z); o.rotation.x = rx;
+        o.castShadow = o.receiveShadow = true; scene.add(o); return o; };
+      add(new T.BoxGeometry(3.2, 2.4, 3.2), dark, gsE, gsY + 1.2, -gsN);
+      add(new T.CylinderGeometry(0.12, 0.16, 7, 10), mat, gsE, gsY + 3.5, -gsN);
+      add(new T.ConeGeometry(1.5, 0.7, 24, 1, true), mat, gsE, gsY + 6.6, -gsN, -0.9).material.side = T.DoubleSide;
+      st.lblGS.p.copy(gsTop).y += 1.3;
+    }
+    const upMats = {
+      VALID:      new T.LineBasicMaterial({color:0xA9CCEA, transparent:true, opacity:0.85, toneMapped:false}),
+      PENDING:    new T.LineDashedMaterial({color:0xA9CCEA, dashSize:3, gapSize:3, transparent:true, opacity:0.85, toneMapped:false}),
+      UNVERIFIED: new T.LineDashedMaterial({color:0xE8A21C, dashSize:2, gapSize:3, transparent:true, opacity:0.85, toneMapped:false}),
+      BROKEN:     new T.LineBasicMaterial({color:0xE4551F, transparent:true, opacity:0.55, toneMapped:false}),
+    };
+    const upGeo = new T.BufferGeometry().setFromPoints([gsTop.clone(), gsTop.clone()]);
+    upGeo.setAttribute('lineDistance', new T.BufferAttribute(new Float32Array(2), 1));
+    const uplink = new T.Line(upGeo, upMats.VALID); scene.add(uplink);
 
-    // -- post: RenderPass -> SSAO -> bloom -> gamma. Tone mapping runs inside the
-    //    RenderPass (r147 does not gate it on the render target), so the buffer
-    //    is display-linear and GammaCorrection restores sRGB at the end.
+    // -- post: RenderPass -> SSAO -> bloom -> gamma --------------------------------
     let composer = null, ssao = null, bloom = null;
     if (POST && T.EffectComposer && T.RenderPass && T.SSAOPass && T.UnrealBloomPass && T.ShaderPass && T.GammaCorrectionShader) {
       composer = new T.EffectComposer(renderer); composer.setPixelRatio(renderer.getPixelRatio());
       composer.addPass(new T.RenderPass(scene, cam));
       ssao = new T.SSAOPass(scene, cam, 2, 2);
-      ssao.kernelRadius = 0.7; ssao.minDistance = 0.00005; ssao.maxDistance = 0.0025;   // metres / normalised depth
+      ssao.kernelRadius = 0.7; ssao.minDistance = 0.00005; ssao.maxDistance = 0.0025;
       composer.addPass(ssao);
       bloom = new T.UnrealBloomPass(new T.Vector2(2, 2), 0.32, 0.45, 0.80); composer.addPass(bloom);
       composer.addPass(new T.ShaderPass(T.GammaCorrectionShader));
       st.passes = ['RenderPass', 'SSAOPass', 'UnrealBloomPass', 'ShaderPass(GammaCorrection)'];
     } else st.passes = ['direct (no composer)'];
 
+    // -- camera: damped chase behind the true vehicle by default; the user may take
+    //    over with OrbitControls (drag) unless ?lock=1 (video capture). ------------
+    let controls = null;
+    if (!LOCK && typeof T.OrbitControls === 'function') {
+      controls = new T.OrbitControls(cam, renderer.domElement);
+      controls.enableDamping = true; controls.dampingFactor = 0.08;
+      controls.maxPolarAngle = 1.52; controls.minDistance = 4; controls.maxDistance = 350;
+      controls.addEventListener('start', () => { st.userCam = true; });
+    }
     const place = () => { if (!st.w || !st.h) return;
       cam.aspect = st.w / st.h; cam.updateProjectionMatrix();
       renderer.setSize(st.w, st.h, false); if (composer) composer.setSize(st.w, st.h); };
@@ -969,101 +1090,147 @@ function EnvScene({sky, offset, mission, orbit, onStatus}) {
       st.w = Math.round(e.contentRect.width); st.h = Math.round(e.contentRect.height); place(); });
     ro.observe(el);
 
-    const v = new T.Vector3(), tv = new T.Vector3(), fwd = new T.Vector3(), mid = new T.Vector3();
+    const v = new T.Vector3(), tv = new T.Vector3(), fwd = new T.Vector3(), look = new T.Vector3(),
+          want = new T.Vector3(), camFwd = new T.Vector3(), gAnt = new T.Vector3(), cp = new T.Vector3(), cl = new T.Vector3();
     const project = (p) => {
-      const infront = tv.copy(p).sub(cam.position).dot(fwd) > 0;
+      const infront = tv.copy(p).sub(cam.position).dot(camFwd) > 0;
       v.copy(p).project(cam);
       const x = (v.x+1)/2*st.w, y = (1-v.y)/2*st.h;
       return [x, y, infront && x > -20 && x < st.w+20 && y > -20 && y < st.h+20];
     };
     const putLabel = (L) => { const [x, y, vis] = project(L.p);
-      L.el.style.left = x + 'px'; L.el.style.top = y + 'px'; L.el.style.opacity = vis ? 1 : 0; };
+      L.el.style.left = (vis ? x : 0) + 'px'; L.el.style.top = (vis ? y : 0) + 'px'; L.el.style.opacity = vis ? 1 : 0; };
     // Verification hooks for the headless audit.
-    window.__envProject = (az, el) => project(azel(az, el).multiplyScalar(ENV.R));
-    window.__envInfo = () => ({...renderer.info.render, passes:st.passes, model:st.model,
-      status:{...status}, sunAz:st.sunAz, sunEl:st.sunEl, sep:Math.hypot(st.gCur.x, st.gCur.z),
-      antenna:st.antenna.toArray().map(x => +x.toFixed(2))});
+    window.__envProject = (az, el) => project(azel(az, el).multiplyScalar(ENV.R).add(st.truePos));
+    window.__envInfo = () => ({...renderer.info.render, passes:st.passes, model:st.model, status:{...status},
+      sunAz:st.sunAz, sunEl:st.sunEl, sunCheck:st.sunCheck, D:st.Dmag, envSet:!!scene.environment, exposure:renderer.toneMappingExposure, key:key.intensity, hemi:hemi.intensity, groundMap:!!groundMat.map, epoch:st.lastEpoch, ghostVisible:ghostG.visible, cred:st.cred,
+      veh:{e:+st.truePos.x.toFixed(2), n:+(-st.truePos.z).toFixed(2), az:+st.travelAz.toFixed(1), s:+st.sCur.toFixed(1)},
+      camMode: st.userCam ? 'orbit' : 'chase', antenna:st.antW.toArray().map(x => +x.toFixed(2)),
+      uplink:{material:uplink.material.type, dashed:!!uplink.material.isLineDashedMaterial, color:'#'+uplink.material.color.getHexString(),
+              len:+gsTop.distanceTo(new T.Vector3().fromBufferAttribute(upGeo.attributes.position, 1)).toFixed(1),
+              full:+gsTop.distanceTo(st.antW).toFixed(1)}});
+    window.__envDrag = () => { st.userCam = true; };
 
-    let last = performance.now(), raf = 0;
+    let last = performance.now(), raf = 0, march = 0;
     const loop = () => {
       const now = performance.now(), dt = Math.min(0.1, (now - last)/1000); last = now;
       renderer.info.reset();
-      // ghost: lerp to the epoch's believed position, grounded on the terrain
-      const iv = st.layer.interval || 70, t = Math.min(1, (now - st.gT0) / iv);
+      // -- kinematics: lerp along the route (s) and lerp the measured D vector ----
+      const iv = st.layer.interval || 70, t = Math.min(1, (now - st.T0) / iv);
+      st.sCur = st.sPrev + (st.sTgt - st.sPrev) * t;
       st.gCur.lerpVectors(st.gPrev, st.gTgt, t);
-      const sep = Math.hypot(st.gCur.x, st.gCur.z), show = sep > 0.5 && !!ghost;
-      if (ghost) ghost.visible = show;
-      dline.visible = gGlow.visible = show;
+      const P = R.routePoint(m, st.sCur), azDeg = travelAz(P.heading), az = azDeg * D2R;
+      st.travelAz = azDeg;
+      st.prevTrue.copy(st.truePos);
+      st.truePos.set(P.e, terrainHeight(P.e, -P.n), -P.n);
+      veh.position.copy(st.truePos); veh.rotation.y = (ENV.faceAz - azDeg) * D2R; veh.updateMatrixWorld(true);
+      st.antW.copy(st.antennaLocal).applyMatrix4(veh.matrixWorld);
+      rxGlow.position.copy(st.antW); st.lblTruth.p.copy(st.antW).y += 0.9;
+      const show = st.Dmag > 0.5 && !!modelRoot;          // same D the readout shows
+      ghostG.visible = gGlow.visible = show;
       if (show) {
-        const gy = terrainHeight(st.gCur.x, st.gCur.z);
-        ghost.position.set(solid.position.x + st.gCur.x, solid.position.y + gy, solid.position.z + st.gCur.z);
-        const gp = dline.geometry.attributes.position;
-        gp.setXYZ(0, 0, 0.12, 0); gp.setXYZ(1, st.gCur.x, gy + 0.12, st.gCur.z);
-        gp.needsUpdate = true; dline.computeLineDistances();
-        gGlow.position.set(st.antenna.x + st.gCur.x, st.antenna.y + gy, st.antenna.z + st.gCur.z);
-        st.lblGhost.p.copy(gGlow.position).y += 1.1;
-        st.lblGhost.el.textContent = 'BELIEVED POSITION · ' + sep.toFixed(0) + ' M';
+        const gx = st.truePos.x + st.gCur.x, gz = st.truePos.z + st.gCur.z;
+        ghostG.position.set(gx, terrainHeight(gx, gz), gz); ghostG.rotation.y = veh.rotation.y; ghostG.updateMatrixWorld(true);
+        gAnt.copy(st.antennaLocal).applyMatrix4(ghostG.matrixWorld); gGlow.position.copy(gAnt);
+        st.lblGhost.p.copy(gAnt).y += 1.1;
       }
       st.lblGhost.el.style.display = show ? '' : 'none';
-      // camera: damped framing on the truth/ghost midpoint, low 3/4 angle
-      mid.set(show ? st.gCur.x*0.5 : 0, 0, show ? st.gCur.z*0.5 : 0);
-      const k = Math.min(1, dt*2.2);
-      st.D += (Math.min(100, 11 + sep*1.15) - st.D) * k; st.mid.lerp(mid, k);
-      if (orbit) st.theta += 0.012*dt;
-      const Hc = st.D*0.17;
-      cam.position.set(st.mid.x + Math.sin(st.theta)*st.D, Hc, st.mid.z - Math.cos(st.theta)*st.D);
-      cam.lookAt(st.mid.x, Hc*0.5, st.mid.z);
-      cam.getWorldDirection(fwd);
-      key.position.set(st.mid.x + LDIR.x*160, LDIR.y*160, st.mid.z + LDIR.z*160);
-      key.target.position.copy(st.mid); key.target.updateMatrixWorld();
-
+      // -- ground uplink: geometry to the antenna, material by credential ----------
+      { const pa = upGeo.attributes.position, end = st.cred === 'EXPIRED' || st.cred === 'REVOKED'
+          ? tv.copy(gsTop).lerp(st.antW, 0.45) : st.antW;
+        pa.setXYZ(0, gsTop.x, gsTop.y, gsTop.z); pa.setXYZ(1, end.x, end.y, end.z); pa.needsUpdate = true;
+        const len = gsTop.distanceTo(end); if (st.cred === 'PENDING') march = (march + dt*12) % 6;
+        const ld = upGeo.attributes.lineDistance; ld.setX(0, -march); ld.setX(1, len - march); ld.needsUpdate = true;
+        uplink.material = upMats[st.cred] || (st.cred === 'EXPIRED' || st.cred === 'REVOKED' ? upMats.BROKEN : upMats.VALID); }
+      // -- camera ---------------------------------------------------------------
+      fwd.set(Math.sin(az), 0, -Math.cos(az));
+      if (st.userCam && controls) {
+        const dx = st.truePos.x - st.prevTrue.x, dz = st.truePos.z - st.prevTrue.z;   // orbit target rides with the vehicle
+        controls.target.x += dx; controls.target.z += dz; cam.position.x += dx; cam.position.z += dz;
+        controls.update();
+      } else {
+        // Offsets are RELATIVE to the true vehicle: the rig rides with it (no lag at
+        // any frame rate); only the offset -- which depends on heading and |D| -- is damped.
+        const dist = Math.min(92, 16 + st.Dmag*1.15), hgt = 3.5 + dist*0.22;   // cap: rover stays readable; ghost gets an edge marker
+        let camAz = az + Math.PI - 0.62;                                   // over the left shoulder
+        if (orbit) camAz += now/1000*0.03;
+        const gm = Math.hypot(st.gCur.x, st.gCur.z), gk = show ? Math.min(0.5, 30/Math.max(gm, 1)) : 0;   // look toward the ghost, at most 30 m of bias
+        look.set(st.gCur.x*gk + fwd.x*5, 1.2, st.gCur.z*gk + fwd.z*5);
+        want.set(look.x + Math.sin(camAz)*dist, hgt, look.z - Math.cos(camAz)*dist);
+        const kk = 1 - Math.exp(-dt*3.5);                                    // frame-rate independent damping
+        if (!st.camInit) { st.camOff.copy(want); st.lookOff.copy(look); st.camInit = true; }
+        st.camOff.lerp(want, kk); st.lookOff.lerp(look, kk);
+        cp.copy(st.truePos).add(st.camOff); cl.copy(st.truePos).add(st.lookOff);
+        cp.y = Math.max(cp.y, terrainHeight(cp.x, cp.z) + 2.0);           // never below ground
+        cam.position.copy(cp); cam.lookAt(cl);
+        if (controls) controls.target.copy(cl);
+      }
+      cam.getWorldDirection(camFwd);
+      key.position.set(st.truePos.x + LDIR.x*160, LDIR.y*160, st.truePos.z + LDIR.z*160);
+      key.target.position.copy(st.truePos); key.target.updateMatrixWorld();
+      // -- sky: dome re-centred on the vehicle; rays follow st.antW (shared vector) -
+      dome.position.copy(st.truePos);
       st.layer.tick(dt, project);
-      for (const c of st.cmp) putLabel(c);
-      putLabel(st.lblTruth); if (show) putLabel(st.lblGhost);
-      if (st.ring) putLabel(st.lblRing); else st.lblRing.el.style.opacity = 0;
+      for (const c of st.cmp) { c.p.copy(c.base).add(st.truePos); putLabel(c); }
+      putLabel(st.lblTruth); putLabel(st.lblGS);
+      if (show) {
+        const [gx, gy, gvis] = project(st.lblGhost.p);
+        if (gvis) { st.lblGhost.el.style.left = gx + 'px'; st.lblGhost.el.style.top = gy + 'px'; st.lblGhost.el.style.opacity = 1;
+          st.lblGhost.el.textContent = st.lblGhost.base; }
+        else {
+          // ghost is off-frame (or behind): pin its label to the frame edge in its direction
+          const [tx, ty] = project(st.antW); let dx = gx - tx, dy = gy - ty;
+          if (tv.copy(st.lblGhost.p).sub(cam.position).dot(camFwd) < 0) { dx = -dx; dy = -dy; }
+          const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+          const M = 28, ex = Math.max(M, Math.min(st.w - 170, tx + dx*4000)), ey = Math.max(M, Math.min(st.h - M, ty + dy*4000));
+          const arrow = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? ' →' : '← ') : (dy > 0 ? ' ↓' : ' ↑');
+          st.lblGhost.el.style.left = ex + 'px'; st.lblGhost.el.style.top = ey + 'px'; st.lblGhost.el.style.opacity = 1;
+          st.lblGhost.el.textContent = (dx < 0 && Math.abs(dx) > Math.abs(dy) ? arrow : '') + st.lblGhost.base + ' · OFF FRAME' + (dx < 0 && Math.abs(dx) > Math.abs(dy) ? '' : arrow);
+        }
+      }
       if (composer) composer.render(); else renderer.render(scene, cam);
       raf = requestAnimationFrame(loop);
     };
+    // faint dome graticule, grouped so it can follow the vehicle
+    const dome = new T.Group(); scene.add(dome);
+    const gline = (pts, op) => new T.Line(new T.BufferGeometry().setFromPoints(pts),
+      new T.LineBasicMaterial({color:0x1C222A, transparent:true, opacity:op, fog:false, toneMapped:false}));
+    for (const elv of [0.6, 30, 60]) { const pts = [];
+      for (let i = 0; i <= 160; i++) pts.push(azel(i/160*360, elv).multiplyScalar(ENV.R));
+      dome.add(gline(pts, elv < 1 ? 0.7 : 0.45)); }
+    for (let a2 = 0; a2 < 360; a2 += 30) { const pts = [];
+      for (let i = 0; i <= 30; i++) pts.push(azel(a2, 0.6 + i*2.98).multiplyScalar(ENV.R));
+      dome.add(gline(pts, 0.35)); }
     raf = requestAnimationFrame(loop);
 
     return () => {
       alive = false;
       cancelAnimationFrame(raf); ro.disconnect(); st.layer.dispose();
+      if (controls) controls.dispose();
       for (const c of st.cmp) c.el.remove();
-      st.lblTruth.el.remove(); st.lblGhost.el.remove(); st.lblRing.el.remove();
+      st.lblTruth.el.remove(); st.lblGhost.el.remove(); st.lblGS.el.remove();
       scene.traverse(o => { if (o.geometry) o.geometry.dispose();
-        if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); });
+        if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(mm => mm.dispose()); });
       if (scene.environment) scene.environment.dispose();
       if (scene.background && scene.background.dispose) scene.background.dispose();
       if (composer) composer.dispose && composer.dispose();
-      delete window.__envProject; delete window.__envInfo;
+      delete window.__envProject; delete window.__envInfo; delete window.__envDrag;
       renderer.dispose(); el.removeChild(renderer.domElement); S.current = null;
     };
   }, [orbit]);
 
-  // alert ring: needs /mission for the radius, so it is built when that lands
-  useEffect(() => {
-    const st = S.current; if (!st || !mission) return;
-    const T = THREE, R = mission.alert_limit_m, pts = [];
-    for (let i = 0; i <= 160; i++) { const a = i/160*2*Math.PI, x = R*Math.sin(a), z = -R*Math.cos(a);
-      pts.push(new T.Vector3(x, terrainHeight(x, z) + 0.08, z)); }
-    if (st.ring) { st.scene.remove(st.ring); st.ring.geometry.dispose(); st.ring.material.dispose(); }
-    st.ring = new T.Line(new T.BufferGeometry().setFromPoints(pts),
-      new T.LineDashedMaterial({color:0xE8A21C, dashSize:1.1, gapSize:0.7, transparent:true, opacity:0.9, toneMapped:false}));
-    st.ring.computeLineDistances(); st.scene.add(st.ring);
-    const lx = R*Math.sin(35*D2R), lz = -R*Math.cos(35*D2R);
-    st.lblRing.p.set(lx, terrainHeight(lx, lz) + 0.9, lz);
-    st.lblRing.el.textContent = 'ALERT LIMIT ' + R + ' M';
-  }, [mission && mission.alert_limit_m]);
-
   useEffect(() => { const st = S.current; if (st) st.layer.setEpoch(sky); }, [sky]);
-
-  // believed position -> ghost target (east = +x, north = -z)
+  // per-epoch targets: route arc length s and the measured displacement D
   useEffect(() => {
-    const st = S.current; if (!st) return;
-    st.gPrev.copy(st.gCur); st.gTgt.set(offset ? offset.dE : 0, 0, offset ? -offset.dN : 0);
-    st.gT0 = performance.now();
-  }, [offset && offset.dE, offset && offset.dN]);
+    const st = S.current; if (!st || !mission || epochIndex == null) return;
+    st.lastEpoch = epochIndex; st.sPrev = st.sTgt; st.sTgt = epochIndex * mission.speed_m_per_epoch;
+    st.gPrev.copy(st.gTgt); st.gTgt.set(D ? D.e : 0, 0, D ? -D.n : 0); st.Dmag = D ? D.mag : 0;
+    // Written here, on the epoch event, so it can never disagree with the readout
+    // (the rAF loop can starve on slow renderers; the DOM update must not depend on it).
+    st.lblGhost.base = 'BELIEVED · ' + st.Dmag.toFixed(0) + ' M'; st.lblGhost.el.textContent = st.lblGhost.base;
+    st.T0 = performance.now();
+  }, [epochIndex]);
+  useEffect(() => { const st = S.current; if (st) st.cred = credential || 'VALID'; }, [credential]);
 
   return html`
     <div className="sky" ref=${box}></div>
@@ -1178,8 +1345,10 @@ function App() {
     src.onmessage = e => {
       const m = JSON.parse(e.data);
       setD(m);
+      // Trail keeps only what the frame math needs: epoch index (-> s along the
+      // route) and the believed/true pair (-> measured displacement D).
       if (m.position) setTrail(t => [...t.slice(-2400),
-        {b:{lat:m.position.lat, lon:m.position.lon}}]);
+        {i:m.epoch_index, ep:{position:m.position, _truth:m._truth}}]);
     };
     src.addEventListener('end', () => { setConn('ended'); src.close(); });
     src.onerror = () => setConn(src.readyState === 2 ? 'lost' : 'connecting');
@@ -1198,17 +1367,18 @@ function App() {
   const sky = d && d.geometry && d.geometry.sky;
   const nTrusted = sky ? sky.filter(s => s.trusted).length : 0;
   const nExcl = sky ? sky.length - nTrusted : 0;
-
-  let sep = 0, dE = 0, dN = 0;
-  if (d && d.position && mission) {
-    dN = (d.position.lat - mission.surveyed.lat) * mission.m_per_deg_lat;
-    dE = (d.position.lon - mission.surveyed.lon) * mission.m_per_deg_lon;
-    sep = Math.hypot(dN, dE);
-  }
+  // ONE displacement value drives the readout, the alert test, the ghost and its
+  // label (the 3D ghost only lerps its position toward it).
+  const D = dispOf(mission, d);
+  const sep = D.mag;
   const breached = mission && sep > mission.alert_limit_m;
+  // layer=off is about the signal side; the credential channel is drawn static VALID.
+  const credShown = layerOn ? (d && d.credential_status) || 'VALID' : 'VALID';
   const showMap = VIEW === 'map' || VIEW === 'split', showSky = VIEW === 'sky' || VIEW === 'split';
   const showEnv = VIEW === 'env';
   const ts = d && d.timestamp ? d.timestamp.slice(11,19) + ' UTC' : '—';
+  const routeM = mission && d ? Math.min(mission.route_length_m, d.epoch_index * mission.speed_m_per_epoch) : 0;
+  const orbitHint = (showEnv || showSky) && !LOCK ? 'drag to orbit · ' : '';
 
   return html`
     <div className="banners">
@@ -1239,25 +1409,34 @@ function App() {
     <div className=${'stage' + (showEnv ? ' env' : '')}>
       ${showEnv && html`
         <div className="pane">
-          <${EnvScene} sky=${sky} offset=${{dE, dN}} mission=${mission} orbit=${ORBIT} onStatus=${setEnvStatus}/>
+          ${mission
+            ? html`<${EnvScene} sky=${sky} epochIndex=${d ? d.epoch_index : null} D=${D} mission=${mission}
+                                orbit=${ORBIT} onStatus=${setEnvStatus} credential=${credShown}/>`
+            : html`<div className="idle">loading mission</div>`}
           <div className="envhud">
-            <div><i style=${{background:'#8A857A'}}></i>solid · surveyed truth</div>
-            <div><i className="gh"></i>ghost · believed position</div>
-            <div><i style=${{background:'#A9CCEA'}}></i>trusted · line of sight kept</div>
-            <div><i style=${{background:'var(--accent)'}}></i>excluded · line of sight dropped</div>
-            <div className="n2"><b>${nTrusted}</b> trusted · <b>${nExcl}</b> excluded · real ephemeris, ${ts}</div>
+            <div><i style=${{background:'#8A857A'}}></i>solid · true (route frame)</div>
+            <div><i className="gh"></i>ghost · believed = true + measured displacement</div>
+            <div><i style=${{background:'#A9CCEA'}}></i>satellite links · ranging (position)</div>
+            <div><i style=${{background:'var(--accent)'}}></i>excluded satellite · link dropped</div>
+            <div><i style=${{background:'none',borderTop:'2px solid #A9CCEA',height:0}}></i>ground uplink · TESLA mission authorisation (authority)</div>
+            <div className="n2"><b>${nTrusted}</b> trusted · <b>${nExcl}</b> excluded · real ephemeris, ${ts}
+              · route <b>${routeM.toFixed(0)}</b> / ${mission ? mission.route_length_m.toFixed(0) : '—'} m</div>
+            ${mission && sep < 0.5 && html`<div className="st" style=${{color:'var(--truth)'}}>believed = true · no measured displacement in this stream</div>`}
             ${envStatus.note && html`<div className="st">${envStatus.note}</div>`}
           </div>
-          <div className="rcap">Rendered scene · vehicle positions and satellites from data · terrain and vehicle model illustrative</div>
+          <div className="rcap">Rendered scene · route and motion are a presentation frame; the receiver is static · position divergence and satellites are from data · terrain and vehicle model illustrative</div>
           <div className="attrib">${envStatus.attrib}</div>
         </div>`}
       ${showMap && html`
         <div className="pane" ref=${mapRef}>
-          <${Plot} trail=${trail} mission=${mission} sep=${sep} size=${mapSize}/>
+          <${Plot} trail=${trail} mission=${mission} size=${mapSize} credential=${credShown}/>
           <div className="legend">
-            <div><i style=${{borderColor:'var(--accent)'}}></i>believed position</div>
-            <div><i style=${{borderColor:'var(--truth)'}}></i>surveyed truth</div>
+            <div><i style=${{borderColor:'var(--truth)'}}></i>true · route frame</div>
+            <div><i style=${{borderColor:'var(--accent)'}}></i>believed · true + measured displacement</div>
+            <div><i className="band"></i>corridor · alert limit ${mission ? mission.corridor_half_width_m : '—'} m half-width</div>
+            <div><i className="dash" style=${{borderColor:'var(--truth)'}}></i>ground uplink · mission authorisation</div>
           </div>
+          <div className="rcap">Route and motion are a presentation frame · the receiver is static · divergence is measured</div>
         </div>`}
       ${showSky && html`
         <div className="pane">
@@ -1275,12 +1454,12 @@ function App() {
       <div className="readout">
         <div className=${'n' + (breached ? '' : ' safe')}>${sep.toFixed(0)}<span
           style=${{fontSize:'22px',marginLeft:'6px'}}>m</span></div>
-        <div className="u">${breached ? 'beyond alert limit' : 'from surveyed position'}</div>
+        <div className="u">${breached ? 'beyond alert limit' : 'measured displacement'}</div>
       </div>
       <div className=${'layer kbox' + (layerOn ? '' : ' off')}>
         Trust layer <b>${layerOn ? 'ON' : 'OFF'}</b></div>
       <div className="hint">
-        ${conn === 'ended' ? 'replay complete · ' : ''}${conn === 'connecting' ? 'connecting · ' : ''}press R to reset
+        ${conn === 'ended' ? 'replay complete · ' : ''}${conn === 'connecting' ? 'connecting · ' : ''}${orbitHint}press R to reset
       </div>
     </div>
 
