@@ -78,3 +78,86 @@ components.
 S CMC σ 1.085 m, ~5× the other constellations. Geostationary, so this is not a
 channel-frequency artefact. Not chased — SBAS is not in the trusted set for
 positioning and is present for the roadmap argument in §4.
+
+---
+
+# Detection — clean vs injected, USN8 full day
+
+Calibration fitted on the **clean** replay only and reused for every injected
+one; fitting on injected data would let the attack define normal and make the
+false-surrender rate meaningless. Saturating |z|, median per-satellite p99:
+C/N₀ 15.8, pseudorange residual 12.7, code-minus-carrier 5.1.
+
+Regenerate with `python -m backend.replay`.
+
+## Feature separation, d′ against the clean day
+
+Sustained window = 30–90 min after onset. Onset window = first 10 epochs.
+
+| Scenario | C/N₀ onset | C/N₀ sustained | Residual sustained | CMC sustained |
+|---|---|---|---|---|
+| simplistic (15 dB, all SV) | **21.9** | 0.60 | **11.0** | 3.5 |
+| carry-off (2 dB, GPS subset) | 1.6 | 0.10 | **11.0** | 1.8 |
+| meaconing (8 dB, GPS bias) | **10.5** | 0.44 | 0.70 | 0.13 |
+
+The §6a claims reproduce, including the ones that are admissions:
+
+- **C/N₀ fires hard and then goes quiet.** d′ 21.9 → 0.60 on the crude attack.
+  §6a.1 predicts this. In this pipeline the fade takes `cn0_window` = 20 epochs,
+  because that is how long the trailing mean takes to absorb the step — the
+  receiver's own 10 s loop dynamics are not observable at 30 s sampling. Quote
+  the window, not the 10 s.
+- **The residual carries the sustained detection**, d′ 11.0 on both walk-off
+  attacks, saturating at 1.000. §6a.2's stated role, confirmed.
+- **Meaconing is invisible to features 2 and 3** — d′ 0.70 and 0.13, i.e. not
+  detected at all once the C/N₀ transient passes. Correct by construction: a
+  repeater re-radiates the authentic signal, so the code/carrier relationship
+  survives intact. This is the concrete argument that cross-constellation
+  (§6a.4) is needed rather than optional, and it is worth weighing against its
+  position on the §14 cut list.
+
+## Composite confidence — and the placeholder thresholds are wrong
+
+Equal feature weights, β = 1.0 (no geometry half yet, so the whole score is
+weight-sensitive; this drops to β once Track C lands).
+
+| | confidence |
+|---|---|
+| clean day, mean | 0.745 |
+| clean day, σ | 0.042 |
+| clean day, p1 / p50 / p99 | 0.652 / 0.744 / 0.831 |
+| clean day, min / max | 0.605 / 1.000 |
+| carry-off, attack window mean | 0.487 |
+| carry-off, **d′ vs clean** | **6.88** |
+| simplistic, d′ vs clean | 4.85 |
+| meaconing, d′ vs clean | 0.18 |
+
+> **design.md §8's placeholder NOMINAL threshold of 0.75 sits almost exactly on
+> the clean day's median of 0.744. On clean data it produces a false surrender
+> rate of 55.6%** — 1,602 of 2,880 epochs downgraded to DEGRADED with nothing
+> wrong. Nothing reaches RESTRICTED or SURRENDERED.
+
+§8 already says the thresholds are placeholders to be replaced with measured
+separation points. This is how wrong they are, measured, and it is the starting
+input to the threshold session (§10, TRACK_A.md 21:00–22:30). For scale: a
+NOMINAL threshold at the clean p1 of 0.652 would put FSR at 1% while still
+sitting 3.9σ above the carry-off attack mean of 0.487.
+
+**Do not read that 0.652 as the answer.** It is one distribution against one
+scenario; the session sets thresholds against both distributions with the
+overlap plotted, and reports the separation it chose (§10 step 4).
+
+## Open, carried into integration
+
+- **Features 2 and 3 are two statistics of one observable** — the level and the
+  rate of code-minus-carrier — not two independent observables. A true
+  pseudorange residual needs the position solution, which needs Track C's H.
+  Cheap upgrade once it lands, and it makes the two independent. Stated in
+  `backend/detection/features.py` rather than presented as three.
+- **Clean features sit at 0.20–0.31, not near zero.** Consequence of saturating
+  at a measured tail rather than at the noise. Harmless for separation, and
+  deliberately not corrected here — rescaling is a threshold-session decision
+  made with both distributions in view.
+- **β = 1.0 until geometry arrives**, so `weight_sensitive_fraction` currently
+  reads 1.0. That figure is the answer to arXiv 2607.05415 and it only improves
+  once the derived half is in.
