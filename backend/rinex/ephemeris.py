@@ -25,7 +25,7 @@ import pandas as pd
 
 BRDC_GZ = Path("data/BRDC00IGS_R_20262320000_01D_MN.rnx.gz")
 BRDC = Path("data/brdc_filtered.rnx")
-CACHE = Path(".cache/rinex/nav.pkl")
+CACHE = Path(".cache/rinex/nav-v3.pkl")
 
 # (mu, earth rotation rate) per system ICD
 GM_OMEGA = {
@@ -38,7 +38,13 @@ MAX_EPH_AGE_S = 4 * 3600.0
 
 KEPLER_FIELDS = ("sqrtA", "Eccentricity", "M0", "DeltaN", "Toe", "Omega0",
                  "OmegaDot", "Io", "IDOT", "omega", "Cuc", "Cus", "Crc",
-                 "Crs", "Cic", "Cis")
+                 "Crs", "Cic", "Cis",
+                 # not a Kepler element, but rides along: the broadcast SV
+                 # clock bias af0 (s). A pseudorange is range + c*(dt_rx -
+                 # dt_sv); any range check that ignores af0 mis-reads a big
+                 # satellite clock as a propagation error (E11 runs 5.7 ms
+                 # off, which is 1700 km if read as geometry).
+                 "SVclockBias", "SVclockDrift")
 
 
 def _ensure_filtered() -> Path:
@@ -69,7 +75,7 @@ def load_nav(systems: str = "GEC") -> pd.DataFrame:
         for i, t in enumerate(pd.to_datetime(ds["time"].values)):
             rec = {f: float(sub[f].values[i]) for f in KEPLER_FIELDS
                    if f in sub}
-            if any(not np.isfinite(v) for v in rec.values()) or len(rec) < 16:
+            if any(not np.isfinite(v) for v in rec.values()) or len(rec) < 18:
                 continue
             rec["sv"], rec["t"] = sv, t.to_pydatetime()
             rows.append(rec)
@@ -112,15 +118,27 @@ def _kepler_ecef(eph: pd.Series, t: datetime, system: str) -> np.ndarray:
     inc = eph["Io"] + eph["IDOT"] * tk + eph["Cis"] * s2 + eph["Cic"] * c2
 
     xp, yp = r * np.cos(u), r * np.sin(u)
+    # The node term uses Toe exactly as broadcast: Omega0 is referenced to
+    # the system's own timescale, so the BDT offset lives in tk alone.
+    # Putting it here too rotates the node by 14 s of earth rotation (~1 mrad,
+    # kilometres on the line of sight) -- measured before being fixed.
     lon = (eph["Omega0"] + (eph["OmegaDot"] - omega_e) * tk
-           - omega_e * (eph["Toe"] + TOE_OFFSET_S.get(system, 0.0)))
+           - omega_e * eph["Toe"])
     return np.array([xp * np.cos(lon) - yp * np.cos(inc) * np.sin(lon),
                      xp * np.sin(lon) + yp * np.cos(inc) * np.cos(lon),
                      yp * np.sin(inc)])
 
 
-def positions_at(t: datetime, svs, nav: pd.DataFrame | None = None) -> pd.DataFrame:
-    """ECEF positions (m) at time t for the SVs that have usable ephemeris."""
+def positions_at(t: datetime, svs, nav: pd.DataFrame | None = None,
+                 tx_delay_s: dict | None = None) -> pd.DataFrame:
+    """ECEF positions (m) at time t for the SVs that have usable ephemeris.
+
+    `tx_delay_s` maps sv -> signal flight time (s); when given, each satellite
+    is evaluated at its own TRANSMIT time t - tau rather than at reception.
+    The satellite moves ~270 m during the ~70 ms flight; ignoring it costs
+    tens of metres on the line of sight, azimuth-dependent -- measured as a
+    +/-50 m prefit spread across every constellation before this existed.
+    pseudorange/c is plenty accurate for tau (1 us of tau error is 4 mm)."""
     nav = load_nav() if nav is None else nav
     out = {}
     for sv in svs:
@@ -131,10 +149,21 @@ def positions_at(t: datetime, svs, nav: pd.DataFrame | None = None) -> pd.DataFr
         i = int(np.argmin(age))
         if age[i] > MAX_EPH_AGE_S:
             continue
-        out[sv] = _kepler_ecef(recs.iloc[i], t, sv[0])
+        t_sv = t - timedelta(seconds=tx_delay_s[sv]) if tx_delay_s else t
+        out[sv] = _kepler_ecef(recs.iloc[i], t_sv, sv[0])
     df = pd.DataFrame(out, index=["x", "y", "z"]).T
     df.index.name = "sv"
     return df
+
+
+def clock_bias(sv: str, t: datetime, nav: pd.DataFrame | None = None) -> float:
+    """Broadcast SV clock offset af0 + af1*(t - toc), seconds, nearest record."""
+    nav = load_nav() if nav is None else nav
+    recs = nav.loc[sv]
+    dt = (recs.index - t).total_seconds()
+    i = int(np.argmin(np.abs(dt)))
+    return float(recs.iloc[i]["SVclockBias"]
+                 - recs.iloc[i]["SVclockDrift"] * dt[i])
 
 
 def elevations(sat_ecef: pd.DataFrame, sta_ecef) -> pd.Series:

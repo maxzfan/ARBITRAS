@@ -17,33 +17,51 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-from .detection import (FeatureExtractor, Weights, fit, record, score,
-                        write_jsonl)
+from .detection import (CrossConstellation, FeatureExtractor, Weights, fit,
+                        fit_cross, record, score, write_jsonl)
+from .detection.emit import ecef_to_lla
 from .geometry.engine import geometry_for
 from .injector import SCENARIOS, inject, summarise
-from .rinex import noise
+from .rinex import ephemeris, noise
 from .rinex.loader import load_obs
+from .rinex.solve import solve_per_constellation
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
 ONSET = datetime(2026, 8, 20, 12, 30)
 
 
-def run(epochs, cal, weights=None, geometry_for=None, credential_for=None):
+def run(epochs, cal, weights=None, geometry_for=None, credential_for=None,
+        xc: CrossConstellation | None = None, nav=None):
     """Score a replay. Returns the list of §5 records.
 
     `geometry_for(epoch)` and `credential_for(epoch)` are the seams for Track C
     and the credential layer. Absent, the geometry block is null and the blend
     collapses to the feature half (see confidence.score).
+
+    With `xc` and `nav` given, each epoch also gets per-constellation position
+    solutions: the cross_constellation feature is scored from them and the
+    believed position becomes the all-in-view solution (`position_source:
+    "solution"`) — under attack, the spoofed one, which is the point (§5).
+    Without them the feature reads 0.0 and the surveyed position is emitted,
+    exactly the degraded fallback §6b requires to be visible.
     """
     weights = weights or Weights()
     fx = FeatureExtractor(cal)
     out = []
     for ep in epochs:
         res = fx.step(ep)
+        feats = res["features"]
+        position = None
+        if xc is not None and nav is not None:
+            sols = solve_per_constellation(ep, nav)
+            feats["cross_constellation"] = xc.score(ep, sols)["value"]
+            if "all" in sols:
+                position = ecef_to_lla(*sols["all"]["pos"])
         geom = geometry_for(ep) if geometry_for else None
         cred = credential_for(ep) if credential_for else "VALID"
-        out.append(record(ep.time, res["features"], score(res["features"], geom, weights),
-                          n_sv=ep.n_sv, geometry=geom, credential_status=cred))
+        out.append(record(ep.time, feats, score(feats, geom, weights),
+                          n_sv=ep.n_sv, geometry=geom, credential_status=cred,
+                          position=position))
     return out
 
 
@@ -67,8 +85,12 @@ def main(argv=None) -> None:
 
     cal = fit(clean, floor)
     print(cal)
+    nav = ephemeris.load_nav()
+    xc = CrossConstellation(fit_cross(clean, nav), nav)
+    print(xc.cal)
 
-    recs = run(clean, cal, geometry_for=geometry_for)
+    xc.reset()
+    recs = run(clean, cal, geometry_for=geometry_for, xc=xc, nav=nav)
     print(f"clean    {len(recs):5d} epochs -> "
           f"{write_jsonl(recs, Path(args.out) / 'clean.jsonl')}")
 
@@ -84,7 +106,8 @@ def main(argv=None) -> None:
         else:
             spoof = SCENARIOS[name](onset=onset)
         injected, truth = inject(clean, spoof, floor)
-        recs = run(injected, cal, geometry_for=geometry_for)
+        xc.reset()
+        recs = run(injected, cal, geometry_for=geometry_for, xc=xc, nav=nav)
         truth.to_csv(Path(args.out) / f"{name}_truth.csv")
         print(f"{name:9s}{len(recs):5d} epochs -> "
               f"{write_jsonl(recs, Path(args.out) / f'{name}.jsonl')}")
