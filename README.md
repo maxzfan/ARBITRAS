@@ -71,6 +71,49 @@ The geometry half behaves as derived, on real data:
   0.0007 at 30 min, ≤ 0.015 over a 2 h freeze
   ([plot](docs/plots/freeze_divergence.png)).
 
+## Course correction (Track D) — weighted RAIM, by name
+
+After exclusion the system does not stop at "don't trust it" — it re-solves
+position on the trusted subset, bounds how wrong that fix could be, and
+gates driving on it. This is RAIM fault exclusion plus a protection level,
+ported from aviation, not invented: `PL = τ · max_i ||S[0:3,i]|| / √P_ii`
+(single-fault weighted-RAIM slope), evaluated on the corrected solution.
+`d_rho` has the broadcast satellite clock removed; iono/tropo are ignored
+as near common-mode at one site — the clean-day residual floor absorbs
+them, and the thresholds are fit on that floor rather than assuming it
+away.
+
+Clean-day check (the go/no-go for shipping a corrected fix): the corrected
+position sits on the antenna **horizontally at 0.95 m median, 3.97 m max**
+over all 2,880 epochs; the 3D error (median 15.2 m) is the unmodelled
+single-frequency vertical atmospheric bias
+([plot](docs/plots/correction_clean_day_error.png)). Clean-day PL: median
+3.51 m, max 6.67 m against the 15 m alert limit — small and stable
+([plot](docs/plots/correction_clean_day_pl.png)). Gate availability on the
+clean day: 0.9816 (three chi-square tail revokes, each costing the
+10-epoch re-grant — the predicted ~3/day at the p99.9 fit).
+
+Under attack, the explicit §10-style check was run: **zero epochs in all
+four scenarios** where `correction_ok` was true while the attack-induced
+displacement of the corrected fix exceeded PL
+([plot](docs/plots/correction_displacement_vs_pl.png)). The carry-off
+revokes one epoch after onset; believed, corrected and `_truth` tracks are
+on one axis in
+[the scenario plot](docs/plots/correction_carry_off_positions.png). Two
+findings worth stating plainly: uniform-offset attacks (simplistic,
+meaconing) displace the corrected position by 0.000 m — the constellation
+clock states absorb a common bias exactly, so the gate correctly does not
+revoke for them; and 14 clean epochs show fault-free error above PL,
+because the single-fault slope bound carries no nominal-noise term
+(aviation adds K·σ) — a documented limitation, not an integrity violation.
+
+Correction thresholds, same by-hand procedure as below, fit on the clean
+day only (`python -m backend.correction.validate`): **τ = 5.187 m** (p99.9
+of 49,287 per-SV post-fit residuals), **chi-square cutoff = 7.703 m²**
+(p99.9 of the per-epoch r'Wr/dof statistic), **DR drift bound = 20.672 m**
+(p99.9 of the clean 3D corrected-fix error; on the replay dead reckoning
+is "still at the antenna", so the bound is the measured noise floor).
+
 ## How the thresholds were set
 
 By hand, from distributions, per design.md §10 — never a round number
@@ -111,8 +154,9 @@ of epochs where weighting decides.
   a candidate conformance test.
 - **RAIM / ARAIM** — the closest published relative of the geometry score's
   subset reasoning; independent-fault model, not a coordinated adversary.
-  Our planned course-correction track (tracks/TRACK_D.md) is weighted RAIM
-  by name.
+  Our course-correction track (tracks/TRACK_D.md, `backend/correction/`)
+  is weighted RAIM by name: slope-form protection level, fault exclusion
+  via trust weights, alert limit as the actionability gate.
 - **Chen, Dai, Adang, Gao, Schwager — CONVERGE (Stanford)** — Fisher
   Information Gain reduced to a tractable surrogate for active view
   selection. Different domain, same mathematics: the rank-one determinant
@@ -163,7 +207,18 @@ Stated properly, not softened:
    `docs/stream_provenance.md`; it is a seam, and seams are where bugs
    live.
 9. **No live OSNMA verification; anchor distribution assumed.**
-10. **26 hours.**
+10. **The corrected fix is only as good as the exclusion.** A
+    self-consistent majority spoof passes the residual test; only the
+    continuity and cross-constellation checks stand in the way, and
+    continuity on this replay is trivially satisfied by a static receiver.
+11. **Single-fault PL is a lower bound on multi-fault exposure** (PL_k for
+    k simultaneous faults is emitted alongside: median 15.4 m at k=6 under
+    the carry-off), and it carries no nominal-noise term — 14 clean epochs
+    show fault-free error above PL.
+12. **Acting on the corrected fix inside the alert limit is a policy
+    choice made explicit, not a proof that acting is safe.** It is the
+    same choice aviation makes with RAIM.
+13. **26 hours.**
 
 ## Philosophy
 
@@ -179,5 +234,5 @@ gets withdrawn. (Epictetus, tr. Carter 1758; Marcus Aurelius, tr. Long
 - `docs/design.md` — the authoritative technical document
 - `docs/stream_provenance.md` — what is measured, what is injected, what is
   scripted, per stream field
-- `tracks/TRACK_{A,B,C,D}.md` — per-person work packets (D is the deferred
-  weighted-RAIM course-correction track)
+- `tracks/TRACK_{A,B,C,D}.md` — per-person work packets (D is the
+  weighted-RAIM course-correction track, built as `backend/correction/`)
