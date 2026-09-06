@@ -43,16 +43,19 @@
   .hero h1{font-family:var(--display);font-weight:900;font-stretch:condensed;text-transform:uppercase;
     font-size:clamp(52px,7.4vw,112px);line-height:.92;letter-spacing:-.015em;margin:0}
   .hero .sub{margin:26px 0 0;max-width:560px;font-size:15px;line-height:1.55;color:#D2D9E2}
-  .hero .acro{margin:18px 0 0;font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:#AEB8C4;text-transform:uppercase}
   .hero .clock{position:absolute;left:28px;bottom:34px;z-index:2;font-family:var(--mono);font-size:13px;letter-spacing:.2em;color:#C8D0DA;line-height:1.9}
   .hero .down{position:absolute;right:26%;top:50%;z-index:2;width:74px;height:74px;border:1px solid #E6EAF0;display:flex;align-items:center;
     justify-content:center;font-size:30px;color:#fff;cursor:pointer;transform:translateY(-50%);background:rgba(0,0,0,.12)}
   .hero .down:hover{background:rgba(255,255,255,.08)}
-  .hero .spec{position:absolute;right:28px;bottom:34px;z-index:2;font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:#D2D9E2;
-    text-transform:uppercase;min-width:440px;text-shadow:0 1px 3px #000}
-  .hero .spec .row{display:flex;justify-content:space-between;gap:24px;line-height:1.6}
+  /* Text-only over a bright ground: the halo carries legibility so the block
+     never needs a panel behind it, which would cover the render it sits on. */
+  .hero .spec{position:absolute;right:28px;bottom:34px;z-index:2;font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:#E8EDF3;
+    text-transform:uppercase;min-width:440px;text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 14px rgba(0,0,0,.8)}
+  .hero .spec .row{display:flex;justify-content:space-between;gap:24px;line-height:1.95;cursor:default;transition:color .15s}
   .hero .spec .row b{font-weight:500;color:#fff}
-  .hero .spec .src{font-size:9.5px;letter-spacing:.06em;color:#7C8794;text-transform:none;margin:-2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px}
+  /* Provenance rides in the row's title (same idiom as the console strip), so the
+     hero keeps its headline numbers without a second line of grey over the render. */
+  .hero .spec .row:hover span{color:#fff}
   .hero .cap{position:absolute;right:28px;top:calc(var(--nav) + 18px);z-index:2;font-family:var(--mono);font-size:10px;letter-spacing:.16em;
     color:#8794A2;text-transform:uppercase;text-shadow:0 1px 2px #000}
   /* ---- missions ---- */
@@ -129,7 +132,6 @@
   <div class="copy">
     <h1>Signal quality<br>is not provenance</h1>
     <p class="sub">A trust layer between a GNSS receiver and an autonomy stack. It detects spoofed positioning, scores confidence continuously, and degrades the vehicle's authority in stages — full autonomy, coast, finish the leg, hold — instead of one binary trust decision.</p>
-    <p class="acro">Authenticated Ranging · Bounded Integrity · Tiered Execution Rights</p>
   </div>
   <div class="down" id="down" title="missions">↓</div>
   <div class="clock" id="clock">--.---.----<br>--:--:-- ZULU</div>
@@ -157,7 +159,7 @@
   <ol>
     <li>The attacks are synthetic: the injector writes them into real RINEX observables from a static reference station. The route, the vehicles and the environments are a presentation frame; only the measured displacement between believed and true position separates the tracks.</li>
     <li>One station, one day, one injector, open sky. Thresholds are measured separation points for USN8 on 2026-08-20 and generalise no further than that sentence.</li>
-    <li>Headline numbers above are computed from the streams on disk at server start and carry their source. Where a stream is missing the value is blank, never typed in.</li>
+    <li>Headline numbers above are computed from the streams on disk at server start and carry their source on hover. Where a stream is missing the value is blank, never typed in.</li>
     <li>Operator takeover moves a vehicle in the presentation frame under a human's command; ARBITRAS itself never commands motion. Automatic corrections act on the corrected fix and are gated by its protection level.</li>
   </ol>
   <div class="fine">Built at DNHacks, 5–6 September 2026 · Vehicle: 4x4 UGV, own CAD · Sky and ground: Poly Haven, CC0 · No imagery anywhere on this page</div>
@@ -209,7 +211,8 @@
   // ---------------------------------------------------------------- numbers (sourced)
   fetch('/numbers').then(r => r.json()).then(n => {
     const el = document.getElementById('spec');
-    el.innerHTML = n.rows.map(r => `<div class="row"><span>${r.label}</span><b>${r.value == null ? '—' : r.value}${r.unit ? ' ' + r.unit : ''}</b></div><div class="src">${r.source}</div>`).join('');
+    const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    el.innerHTML = n.rows.map(r => `<div class="row" title="${esc(r.source)}"><span>${r.label}</span><b>${r.value == null ? '—' : r.value}${r.unit ? ' ' + r.unit : ''}</b></div>`).join('');
   }).catch(() => {});
 
   // ---------------------------------------------------------------- vehicle model (shared)
