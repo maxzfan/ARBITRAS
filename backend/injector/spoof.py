@@ -52,8 +52,17 @@ class Spoof:
 
     name: str
     power_db: float                  # §7 power advantage, dB
-    walk_off_mps: float              # §7 equivalent range drift, m/s
+    # Ruling of 2026-09-05: what the walk rate MEANS depends on the domain.
+    #   walk_mode "clock"    -> m/s of range offset applied uniformly (the
+    #                           clock-domain attack: it corrupts time, and the
+    #                           solver absorbs it into a constellation clock)
+    #   walk_mode "position" -> m/s of POSITION displacement along `bearing_deg`;
+    #                           per-SV range rates are its projections and are
+    #                           each <= this figure.
+    walk_off_mps: float              # see walk_mode for the domain
     onset: datetime                  # first epoch of the attack
+    walk_mode: str = "clock"
+    bearing_deg: float | None = None  # position mode: degrees CW from ENU north
     svs: object = "all"              # "all", a constellation letter, or a list
     # Target selection, resolved ONCE at the capture epoch and held fixed for
     # the run -- a real spoofer commits to a channel set; it does not re-plan
@@ -103,7 +112,9 @@ class Spoof:
     def stage(self, t: datetime) -> tuple[str, float]:
         """(stage, seconds since onset) for an epoch time."""
         dt = (t - self.onset).total_seconds()
-        if dt < 0 or (self.duration_s is not None and dt > self.duration_s):
+        # Half-open [onset, onset+duration): dt == duration_s is the first
+        # CLEAN epoch after the attack, not its last attack epoch.
+        if dt < 0 or (self.duration_s is not None and dt >= self.duration_s):
             return CLEAN, dt
         if dt < self.capture_s:
             return CAPTURE, dt
@@ -111,13 +122,69 @@ class Spoof:
             return LOCKED, dt
         return WALK, dt
 
-    def range_offset_m(self, t: datetime) -> float:
-        """Range error the spoofer has walked the receiver out to, in metres."""
+    def walked_s(self, t: datetime) -> float:
+        """Seconds of walk-off elapsed at epoch time t."""
         st, dt = self.stage(t)
         if st == CLEAN:
             return 0.0
-        walked = max(0.0, dt - self.capture_s - self.liftoff_delay_s)
-        return self.common_bias_m + self.walk_off_mps * walked
+        return max(0.0, dt - self.capture_s - self.liftoff_delay_s)
+
+    def range_offset_m(self, t: datetime) -> float:
+        """Uniform range offset in metres (clock-domain scenarios).
+
+        In position mode this is the common bias only: the walk is not a
+        uniform range offset there, it is a displacement whose per-satellite
+        projections inject() computes epoch by epoch."""
+        st, _ = self.stage(t)
+        if st == CLEAN:
+            return 0.0
+        if self.walk_mode == "position":
+            return self.common_bias_m
+        return self.common_bias_m + self.walk_off_mps * self.walked_s(t)
+
+    def displacement_m(self, t: datetime) -> float:
+        """Commanded horizontal displacement magnitude, metres (position mode)."""
+        if self.walk_mode != "position":
+            return 0.0
+        return self.walk_off_mps * self.walked_s(t)
+
+
+# --- displacement geometry ----------------------------------------------------
+
+# The eight swept bearings, 45 degrees apart from local ENU north. Fixed set,
+# and deliberately not derived from the detector or from H: the injector must
+# not be a function of the thing it is attacking.
+SWEEP_BEARINGS_DEG = tuple(range(0, 360, 45))
+EAST_BEARING_DEG = 90.0          # demo pin: cross-corridor east
+
+# Demo pin for the code/carrier divergence rate, ruled by hand 2026-09-05 from
+# the printed arithmetic at k = 2 sigma, t = 30 s: 2 * 0.204 / 30 = 0.0136 m/s.
+# Chosen for demo legibility, not as a physical claim; the reported
+# displacement bound is measured at carrier_rate_error = 0.
+DEMO_CARRIER_RATE_ERROR = 0.0136  # m/s
+
+
+def enu_basis(sta_ecef) -> np.ndarray:
+    """Rows (east, north, up) as ECEF unit vectors at a station."""
+    from ..detection.emit import ecef_to_lla
+    lla = ecef_to_lla(*np.asarray(sta_ecef, dtype=float))
+    lat, lon = np.radians(lla["lat"]), np.radians(lla["lon"])
+    sl, cl, sp, cp = np.sin(lon), np.cos(lon), np.sin(lat), np.cos(lat)
+    return np.array([[-sl, cl, 0.0],
+                     [-sp * cl, -sp * sl, cp],
+                     [cp * cl, cp * sl, sp]])
+
+
+def bearing_unit_ecef(bearing_deg: float, sta_ecef) -> np.ndarray:
+    """Unit ECEF vector for a horizontal bearing (degrees CW from ENU north).
+
+    HORIZONTAL ONLY, by ruling: the up component is identically zero. VDOP is
+    the weak axis, so an unconstrained sweep would find "up" and inflate the
+    headline displacement with a direction no road-bound vehicle can be walked
+    along."""
+    e, n, _ = enu_basis(sta_ecef)
+    b = np.radians(bearing_deg)
+    return np.sin(b) * e + np.cos(b) * n
 
 
 # --- target selection rules ---------------------------------------------------
@@ -160,32 +227,65 @@ def SIMPLISTIC(onset: datetime, **kw) -> Spoof:
     """
     return replace(Spoof(name="simplistic", power_db=15.0, walk_off_mps=0.0,
                          onset=onset, svs="all", liftoff_delay_s=0.0,
-                         common_bias_m=250.0,
+                         walk_mode="clock", common_bias_m=250.0,
                          # Carries the pre-ruling assumption forward: 2 sigma of
                          # measured clean CMC noise per 30 s epoch = 0.014 m/s.
                          # Stated, not derived. Pipeline validation only.
                          carrier_rate_error=0.014), **kw)
 
 
-def CARRY_OFF(onset: datetime, carrier_rate_error: float,
-              target_svs="all_gps", **kw) -> Spoof:
-    """§7 row 2 — sophisticated. Capture, then gradual walk-off on an SV subset.
+def CLOCK_CARRY_OFF(onset: datetime, carrier_rate_error: float,
+                    target_svs="all_gps", **kw) -> Spoof:
+    """§7 row 2, clock domain — a range offset applied uniformly to the
+    captured set.
 
-    The primary demo (TRACK_A.md §2). 2 dB is the midpoint of the §7 1-3 dB
-    range; against the measured C/N0 floor that is a few sigma, which is the
-    whole design point of a low-power spoofer.
+    Kept as its own named scenario by ruling, because it is a genuinely
+    different attack from the position walk and its result is worth reporting:
+    a uniform offset across one constellation is indistinguishable from that
+    constellation's clock, so the least-squares absorbs all of it and the
+    believed position never moves (measured: 0.0 m under a 300 m bias). It
+    corrupts TIME, not position. That makes it the scenario the inter-system
+    clock channels of feature 4 exist to catch, and a reminder that "the
+    position looks fine" is not the same as "nothing is wrong".
 
-    `carrier_rate_error` has NO default: the demo pin is picked by hand from
-    the printed arithmetic (ruling of 2026-09-05) and has not been given yet.
-    Tests pass an explicit test value; the demo config carries none until the
-    number arrives.
-
-    `target_svs` names the captured subset: an explicit SV list, "all_gps"
-    (the demo default), or `top_n_by_elevation(n)`. Whatever the rule, it is
-    evaluated once at the capture epoch and held fixed. The walk-off rate is
-    specified at ~1 m/s (§7) and is not a target parameter.
+    `walk_off_mps` here is m/s of uniform range drift, the §7 figure read in
+    the range domain.
     """
-    return replace(Spoof(name="carry_off", power_db=2.0, walk_off_mps=1.0,
+    return replace(Spoof(name="clock_carry_off", power_db=2.0,
+                         walk_mode="clock", walk_off_mps=1.0,
+                         onset=onset, svs="G", target=target_svs,
+                         carrier_rate_error=carrier_rate_error,
+                         liftoff_delay_s=0.0), **kw)
+
+
+def CARRY_OFF(onset: datetime, carrier_rate_error: float,
+              bearing_deg: float = EAST_BEARING_DEG,
+              target_svs="all_gps", **kw) -> Spoof:
+    """§7 row 2, position domain — the primary demo (TRACK_A.md §2).
+
+    Capture, then walk the receiver's believed POSITION along a fixed
+    horizontal bearing. Per-satellite offset is `-e_sv . dp` for commanded
+    displacement `dp`, which is the linearised range change a receiver
+    genuinely displaced by dp would see; injecting it is what makes the
+    solution move rather than the clock.
+
+    Ruled parameters (2026-09-05):
+      - **1 m/s is the POSITION displacement rate** along the bearing, not a
+        range drift. Each satellite's range rate is `e_sv . v_hat` times that,
+        so every per-SV rate is <= 1 m/s and the ones near the horizon
+        perpendicular to the walk barely move at all.
+      - **Horizontal only.** dp has no vertical component, by construction.
+      - **Bearing is swept, never derived.** Eight bearings 45 degrees apart
+        (SWEEP_BEARINGS_DEG); the demo pin is cross-corridor east, 90 degrees.
+        The injector is not permitted to choose its direction from the
+        detector's response or from H.
+
+    `carrier_rate_error` still has no default -- that pin is separate and
+    remains pending.
+    """
+    return replace(Spoof(name="carry_off", power_db=2.0,
+                         walk_mode="position", walk_off_mps=1.0,
+                         bearing_deg=bearing_deg,
                          onset=onset, svs="G", target=target_svs,
                          carrier_rate_error=carrier_rate_error,
                          liftoff_delay_s=0.0), **kw)
@@ -209,6 +309,7 @@ def MEACONING(onset: datetime, **kw) -> Spoof:
     not derived. Both are swept in §10.
     """
     return replace(Spoof(name="meaconing", power_db=8.0, walk_off_mps=0.0,
+                         walk_mode="clock",
                          onset=onset, svs="G", common_bias_m=300.0,
                          capture_jitter_sigma=1.0,
                          carrier_rate_error=0.0,
@@ -216,4 +317,7 @@ def MEACONING(onset: datetime, **kw) -> Spoof:
 
 
 SCENARIOS = {"simplistic": SIMPLISTIC, "carry_off": CARRY_OFF,
-             "meaconing": MEACONING}
+             "clock_carry_off": CLOCK_CARRY_OFF, "meaconing": MEACONING}
+
+# Scenarios whose walk-off rate is a position rate rather than a range rate.
+POSITION_DOMAIN = ("carry_off",)

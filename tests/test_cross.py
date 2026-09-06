@@ -139,3 +139,34 @@ def test_all_sky_bias_is_the_stated_blind_spot(window, floor, xcal, nav):
     v = scores(inj, xcal, nav)
     clean = scores(window, xcal, nav)
     assert v[v.index >= ONSET].mean() < clean.quantile(0.99)
+
+
+# -- residual bookkeeping the sweep depends on --------------------------------
+
+def test_solver_per_sv_residuals_reproduce_its_own_rms(day, nav):
+    """The sweep partitions these; a second implementation would drift."""
+    ep = next(e for e in day if e.time == ONSET)
+    sol = solve(ep, nav=nav)
+    per = np.array(list(sol["resid_m"].values()))
+    assert set(sol["resid_m"]) == set(sol["svs_used"])
+    assert np.sqrt(np.mean(per ** 2)) == pytest.approx(sol["resid_rms_m"],
+                                                       rel=1e-9)
+
+
+def test_spoofed_constellation_only_solve_absorbs_a_coordinated_walk(
+        window, floor, nav):
+    """The §10 rationale, measured: a coordinated walk lies in the position
+    columns of H, so a single-constellation solve takes it into its own
+    position estimate and its residual does not grow. Any residual in the
+    all-in-view solution is cross-constellation disagreement."""
+    from backend.injector import CARRY_OFF as POS_CARRY_OFF
+    sp = POS_CARRY_OFF(onset=ONSET, carrier_rate_error=0.0, bearing_deg=90.0)
+    inj, truth = inject(window, sp, floor, nav=nav)
+    walk = np.flatnonzero((truth["stage"] == "WALK").to_numpy())
+    g_only, all_in = [], []
+    for i in (walk[1], walk[10], walk[30]):
+        g_only.append(solve(inj[i], systems="G", nav=nav)["resid_rms_m"])
+        all_in.append(solve(inj[i], nav=nav)["resid_rms_m"])
+    # GPS-only residual stays flat while the walk grows; all-in-view does not
+    assert max(g_only) / min(g_only) < 2.0
+    assert all_in[-1] > 3 * all_in[0]

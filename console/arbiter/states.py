@@ -20,20 +20,39 @@ class TrustState(IntEnum):
 
 
 # Lower bound of confidence required to be IN each state.
-# design.md §8: "These thresholds are placeholders. Replace with measured
-# separation points Saturday evening. Round numbers without a reason are the
-# most attackable thing in the project."
+# MEASURED (design.md §10 step 4), 2026-09-05, from the regenerated streams
+# with the cross-constellation feature and live geometry blocks wired in
+# (out/clean.jsonl, out/carryoff.jsonl; python -m backend.demo, top6 subset):
+#
+#   clean day, 2880 epochs:  min 0.6591  p1 0.7315  p50 0.8679
+#   attack window, 90 epochs: p95 0.6268  p75 0.5478  p50 0.5338  p25 0.5182
+#
+#   NOMINAL     0.643 = midpoint of the zero-overlap band [attack p95 0.6268,
+#               clean min 0.6591]: 0 of 2880 clean epochs fall below it
+#               (FSR contribution 0 on this day) and >=95% of attack epochs
+#               fall under it. The only attack epochs above it are the first
+#               ~4 of the onset ramp (range offset <= 110 m, displacement
+#               <= ~7 m) — they set time-to-alert, not the threshold.
+#   DEGRADED    0.548 = attack p75  } raised INTO the attack distribution so
+#   RESTRICTED  0.518 = attack p25  } the state machine traverses the full
+#               staircase on signal alone (team decision 2026-09-05); the
+#               deep-attack quartile (conf < p25) reads SURRENDERED.
+#
+# Separation clean-vs-attack: d' = 7.18. Not round numbers, on purpose.
 THRESHOLDS = {
-    TrustState.NOMINAL: 0.75,
-    TrustState.DEGRADED: 0.50,
-    TrustState.RESTRICTED: 0.25,
+    TrustState.NOMINAL: 0.643,
+    TrustState.DEGRADED: 0.548,
+    TrustState.RESTRICTED: 0.518,
     # SURRENDERED is everything below RESTRICTED's bound.
 }
 
 # Surfaced in the console and stamped into every emitted decision, so a
 # placeholder threshold cannot reach the submission video unnoticed.
-# Set to "measured" (with the procedure + separation) once §10 step 4 is done.
-THRESHOLD_PROVENANCE = "PLACEHOLDER"
+THRESHOLD_PROVENANCE = (
+    "measured 2026-09-05: NOMINAL 0.643 = mid of zero-overlap band "
+    "[attack p95 0.6268, clean min 0.6591] (0/2880 clean epochs below); "
+    "DEGRADED 0.548 = attack p75; RESTRICTED 0.518 = attack p25; d' 7.18"
+)
 
 # Hysteresis (invariant 2). Also placeholders, but of a different kind: these
 # are policy, not fitted to data, and are defensible as stated in §8.

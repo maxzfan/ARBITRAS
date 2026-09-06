@@ -35,7 +35,9 @@ import pandas as pd
 
 from ..rinex.loader import Epoch
 from ..rinex.noise import NoiseFloor
-from .spoof import CLEAN, CAPTURE, LOCKED, WALK, Spoof
+from .spoof import (CLEAN, CAPTURE, LOCKED, WALK, Spoof, bearing_unit_ecef)
+
+C_LIGHT = 299_792_458.0
 
 
 def epoch_interval_s(epochs) -> float:
@@ -44,9 +46,27 @@ def epoch_interval_s(epochs) -> float:
     return float(t.diff().dt.total_seconds().median())
 
 
-def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2)):
-    """Return (injected_epochs, truth_frame)."""
+def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2),
+           nav=None, sta_ecef=None):
+    """Return (injected_epochs, truth_frame).
+
+    `nav` is required for position-domain scenarios (line-of-sight vectors);
+    it is loaded on demand if not supplied. `sta_ecef` is the true receiver
+    position the displacement is commanded from — the injector knows truth,
+    the detector never does."""
     rng = np.random.default_rng(spoof.seed)
+    position_mode = spoof.walk_mode == "position"
+    if position_mode:
+        from ..detection.emit import USN8_ECEF
+        from ..rinex import ephemeris
+        sta = np.asarray(sta_ecef if sta_ecef is not None else USN8_ECEF,
+                         dtype=float)
+        if nav is None:
+            nav = ephemeris.load_nav()
+        if spoof.bearing_deg is None:
+            raise ValueError("position-domain walk needs a bearing_deg")
+        v_hat = bearing_unit_ecef(spoof.bearing_deg, sta)
+
     out, rows, liftoff_done = [], [], False
     frozen = None                    # target set, resolved once at capture
     for ep in epochs:
@@ -63,8 +83,29 @@ def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2)):
         n = int(mask.sum())
 
         offset = spoof.range_offset_m(ep.time)
-        walked_s = max(0.0, since - spoof.capture_s - spoof.liftoff_delay_s)
+        walked_s = spoof.walked_s(ep.time)
         divergence = spoof.carrier_rate_error * walked_s
+
+        # Position domain: the uniform part is the common bias only; the walk
+        # itself is a per-satellite projection of the commanded displacement.
+        per_sv_offset = None
+        commanded_m = 0.0
+        if position_mode and n:
+            commanded_m = spoof.displacement_m(ep.time)
+            dp = commanded_m * v_hat
+            svs = list(df.index[mask])
+            pr = df.loc[svs, "code_1"]
+            sat = ephemeris.positions_at(
+                ep.time, svs, nav,
+                tx_delay_s={sv: pr[sv] / C_LIGHT for sv in svs
+                            if np.isfinite(pr[sv])})
+            los = sat[["x", "y", "z"]].to_numpy() - sta
+            los /= np.linalg.norm(los, axis=1, keepdims=True)
+            # A receiver truly displaced by dp sees its range change by
+            # -e_sv . dp; injecting that is what walks the solution.
+            per_sv_offset = pd.Series(offset - los @ dp, index=sat.index)
+            # Satellites without usable ephemeris keep the common bias alone.
+            per_sv_offset = per_sv_offset.reindex(svs).fillna(offset)
 
         if n:
             if (stage == WALK and not liftoff_done
@@ -78,18 +119,26 @@ def inject(epochs, spoof: Spoof, floor: NoiseFloor, bands=(1, 2)):
             jitter = (rng.normal(0.0, spoof.capture_jitter_sigma * floor.cn0_sigma, n)
                       if stage == CAPTURE else 0.0)
 
+            off = offset if per_sv_offset is None else per_sv_offset.to_numpy()
             for b in bands:
                 cn0, code, ph_m, lam = (f"cn0_{b}", f"code_{b}",
                                         f"phase_m_{b}", f"lam_{b}")
                 df.loc[mask, cn0] = df.loc[mask, cn0] + spoof.power_db + jitter
-                df.loc[mask, code] = df.loc[mask, code] + offset
-                df.loc[mask, ph_m] = df.loc[mask, ph_m] + offset - divergence
+                df.loc[mask, code] = df.loc[mask, code] + off
+                df.loc[mask, ph_m] = df.loc[mask, ph_m] + off - divergence
                 df.loc[mask, f"phase_{b}"] = df.loc[mask, ph_m] / df.loc[mask, lam]
 
         out.append(Epoch(time=ep.time, df=df))
         rows.append({
             "time": ep.time, "stage": stage, "scenario": spoof.name,
-            "n_spoofed": n, "range_offset_m": offset if n else 0.0,
+            "walk_mode": spoof.walk_mode, "n_spoofed": n,
+            "range_offset_m": offset if n else 0.0,
+            # Commanded displacement. What the attack ASKED for; the achieved
+            # figure comes from the solved position and is measured, never
+            # assumed equal to this (see backend/measurement).
+            "commanded_displacement_m": commanded_m,
+            "bearing_deg": (spoof.bearing_deg
+                            if position_mode and n else float("nan")),
             "power_db": spoof.power_db if n else 0.0,
             "cmc_divergence_m": divergence if n else 0.0,
             "spoofed_sv": ",".join(df.index[mask]) if n else "",
@@ -104,7 +153,13 @@ def summarise(truth: pd.DataFrame) -> str:
     if active.empty:
         return "no attack epochs in this replay"
     stages = active["stage"].value_counts().to_dict()
-    return (f"{active['scenario'].iloc[0]}: {len(active)} attack epochs "
-            f"{stages}, {active['n_spoofed'].max()} SV at peak, "
-            f"max range offset {active['range_offset_m'].max():.1f} m, "
-            f"max code-carrier divergence {active['cmc_divergence_m'].max():.2f} m")
+    mode = active["walk_mode"].iloc[0]
+    walk = (f"max commanded displacement "
+            f"{active['commanded_displacement_m'].max():.1f} m "
+            f"on bearing {active['bearing_deg'].iloc[-1]:.0f} deg"
+            if mode == "position" else
+            f"max uniform range offset {active['range_offset_m'].max():.1f} m")
+    return (f"{active['scenario'].iloc[0]} ({mode} domain): {len(active)} "
+            f"attack epochs {stages}, {active['n_spoofed'].max()} SV at peak, "
+            f"{walk}, max code-carrier divergence "
+            f"{active['cmc_divergence_m'].max():.2f} m")

@@ -133,8 +133,15 @@ def solve(epoch, systems: str = SOLVABLE, nav: pd.DataFrame | None = None,
         if np.linalg.norm(dx[:3]) < 1e-4:
             break
     resid = dy - h @ dx
+    used = [sv for sv, u in zip(svs, use) if u]
     return {"pos": x, "clock_m": clocks, "n_used": int(use.sum()),
-            "svs_used": [sv for sv, u in zip(svs, use) if u],
+            "svs_used": used,
+            # Post-fit residual per satellite, from the solver's own final
+            # iteration. Exposed so nothing downstream reconstructs it: a
+            # second implementation silently drifts (an early version of the
+            # sweep omitted the Sagnac rotation and read 19 m where the
+            # solver read 4 m).
+            "resid_m": dict(zip(used, map(float, resid))),
             "resid_rms_m": float(np.sqrt(np.mean(resid ** 2))),
             "systems": "".join(sorted(set(sys_of[use])))}
 
@@ -159,3 +166,47 @@ def solve_per_constellation(epoch, nav: pd.DataFrame | None = None,
         if one:
             out[sysc] = one
     return out
+
+
+def residual_panel(epochs, nav=None, systems: str = SOLVABLE,
+                   use_cache: bool = True):
+    """(time x sv) panel of all-in-view post-fit pseudorange residuals, metres.
+
+    The calibration source for the post-fit residual feature, and the slow
+    part of it: one solve per epoch. Cached, keyed on the replay span.
+    """
+    import hashlib
+    import pickle
+    from pathlib import Path as _Path
+
+    import pandas as _pd
+
+    key = None
+    if use_cache:
+        # The span alone is NOT a safe key: a clean replay and an injected one
+        # cover the same span with the same epoch count, so they would collide.
+        # Fingerprint the observables themselves.
+        fp = hashlib.sha1()
+        for ep in epochs[:: max(1, len(epochs) // 50)]:
+            fp.update(np.ascontiguousarray(
+                ep.df["code_1"].to_numpy(dtype=float)).tobytes())
+        raw = (f"resid2|{epochs[0].time}|{epochs[-1].time}|{len(epochs)}"
+               f"|{systems}|{fp.hexdigest()[:16]}")
+        key = _Path(".cache/rinex") / ("res_" + hashlib.sha1(
+            raw.encode()).hexdigest()[:16] + ".pkl")
+        if key.exists():
+            with key.open("rb") as fh:
+                return pickle.load(fh)
+
+    nav = ephemeris.load_nav() if nav is None else nav
+    rows = {}
+    for ep in epochs:
+        sol = solve(ep, systems=systems, nav=nav)
+        if sol is not None:
+            rows[ep.time] = _pd.Series(sol["resid_m"])
+    panel = _pd.DataFrame(rows).T.sort_index()
+    if key:
+        key.parent.mkdir(parents=True, exist_ok=True)
+        with key.open("wb") as fh:
+            pickle.dump(panel, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    return panel

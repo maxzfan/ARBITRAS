@@ -8,8 +8,9 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from backend.injector import (CAPTURE, CLEAN, WALK, CARRY_OFF, MEACONING,
-                              SIMPLISTIC, epoch_interval_s, inject)
+from backend.injector import (CAPTURE, CLEAN, WALK, CARRY_OFF,
+                              CLOCK_CARRY_OFF, MEACONING, SIMPLISTIC,
+                              enu_basis, epoch_interval_s, inject)
 from backend.rinex import noise
 from backend.rinex.loader import load_obs
 
@@ -36,8 +37,20 @@ def floor(day):
     return noise.measure(day)
 
 
+@pytest.fixture(scope="module")
+def nav():
+    from backend.rinex import ephemeris
+    return ephemeris.load_nav()
+
+
 def cmc(ep, sv, band=1):
     return ep.df.at[sv, f"code_{band}"] - ep.df.at[sv, f"phase_m_{band}"]
+
+
+def walk_index(truth, offset: int = 10) -> int:
+    """Index of a WALK epoch `offset` epochs into the walk."""
+    walk = np.flatnonzero((truth["stage"] == WALK).to_numpy())
+    return int(walk[offset])
 
 
 def gps_sv(window):
@@ -78,8 +91,9 @@ def test_carry_off_power_is_a_few_sigma_of_the_measured_floor(floor):
     assert 2.0 <= CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE).power_db / 0.5 <= 6.0
 
 
-def test_walk_off_matches_the_specified_rate(window, floor):
-    sp = CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE)
+def test_clock_domain_walk_off_matches_the_specified_rate(window, floor):
+    """Clock domain: the rate is m/s of UNIFORM range drift."""
+    sp = CLOCK_CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE)
     dt = epoch_interval_s(window)
     inj, truth = inject(window, sp, floor)
     walk = truth[truth["stage"] == WALK]["range_offset_m"]
@@ -126,8 +140,8 @@ def test_simplistic_moves_every_tracked_satellite(window, floor):
 def test_code_carrier_divergence_is_linear_at_the_specified_rate(window, floor):
     """Divergence is carrier_rate_error * t after lift-off: linear, not a
     random walk, not noise inflation (ruling of 2026-09-05)."""
-    sp = CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE,
-                   liftoff_transient_sigma=0.0)
+    sp = CLOCK_CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE,
+                         liftoff_transient_sigma=0.0)
     dt = epoch_interval_s(window)
     inj, truth = inject(window, sp, floor)
     sv = gps_sv(window)
@@ -147,13 +161,13 @@ def test_zero_rate_spoofer_is_invisible_to_code_minus_carrier(window, floor):
     """carrier_rate_error = 0.0 is a supported case: a fully carrier-coherent
     spoofer. Code and carrier stay coherent through the ENTIRE walk-off --
     including no lift-off transient -- while the walk-off itself continues."""
-    sp = CARRY_OFF(onset=ONSET, carrier_rate_error=0.0)
+    sp = CLOCK_CARRY_OFF(onset=ONSET, carrier_rate_error=0.0)
     inj, truth = inject(window, sp, floor)
     sv = gps_sv(window)
     for a, b, t in zip(window, inj, truth.itertuples()):
         assert cmc(b, sv) - cmc(a, sv) == pytest.approx(0.0, abs=1e-9)
     walk = truth[truth["stage"] == WALK]["range_offset_m"]
-    assert walk.iloc[-1] > 0          # the attack is still moving the position
+    assert walk.iloc[-1] > 0          # the attack is still walking
 
 
 def test_phase_stays_consistent_with_phase_in_metres(window, floor):
@@ -215,8 +229,12 @@ def test_walk_off_rate_unchanged_by_target_selection(window, floor):
     from backend.injector import top_n_by_elevation
     dt = epoch_interval_s(window)
     for target in ("all_gps", ["G05", "G21"], top_n_by_elevation(4)):
-        sp = CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE, target_svs=target)
-        assert sp.walk_off_mps == 1.0
+        for maker in (CARRY_OFF, CLOCK_CARRY_OFF):
+            sp = maker(onset=ONSET, carrier_rate_error=TEST_RATE,
+                       target_svs=target)
+            assert sp.walk_off_mps == 1.0
+        sp = CLOCK_CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE,
+                             target_svs=target)
         _, truth = inject(window, sp, floor)
         walk = truth[truth["stage"] == WALK]["range_offset_m"].to_numpy()
         assert np.allclose(np.diff(walk), sp.walk_off_mps * dt)
@@ -244,3 +262,104 @@ def test_ephemeris_ranges_are_consistent_with_pseudoranges(day):
     rng = np.linalg.norm(pos.to_numpy() - np.array(USN8_ECEF), axis=1)
     diff = np.abs(ep.df.loc[pos.index, "code_1"].to_numpy() - rng)
     assert diff.max() < 1_000e3
+
+
+def test_attack_window_is_half_open(window, floor):
+    """dt == duration_s is the first CLEAN epoch after the attack, not its
+    last attack epoch."""
+    dt = epoch_interval_s(window)
+    sp = CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE,
+                   duration_s=10 * dt)
+    _, truth = inject(window, sp, floor)
+    active = truth[truth["stage"] != CLEAN]
+    assert len(active) == 10
+    last = active.index[-1]
+    assert (last - ONSET).total_seconds() == (10 - 1) * dt
+
+
+# -- position-domain walk (ruling of 2026-09-05) -------------------------------
+
+def test_commanded_displacement_is_exactly_horizontal(window, floor, nav):
+    """Ruled constraint: dp has no vertical component, by construction. Tested
+    on the injected observables, not on the intent -- reconstruct dp from the
+    per-satellite offsets and check its up component."""
+    from backend.detection.emit import USN8_ECEF
+    from backend.rinex import ephemeris
+    sta = np.array(USN8_ECEF)
+    _, _, up = enu_basis(sta)
+    sp = CARRY_OFF(onset=ONSET, carrier_rate_error=0.0, bearing_deg=90.0)
+    inj, truth = inject(window, sp, floor, nav=nav)
+    i = walk_index(truth)
+    a, b, t = window[i], inj[i], truth.iloc[i]
+    assert t["stage"] == WALK and t["commanded_displacement_m"] > 0
+    svs = [sv for sv in a.df.index if sv in t["spoofed_sv"].split(",")]
+    pr = a.df.loc[svs, "code_1"]
+    sat = ephemeris.positions_at(a.time, svs, nav,
+                                 tx_delay_s={sv: pr[sv] / 299792458.0
+                                             for sv in svs})
+    los = sat[["x", "y", "z"]].to_numpy() - sta
+    los /= np.linalg.norm(los, axis=1, keepdims=True)
+    dy = (b.df.loc[sat.index, "code_1"] - a.df.loc[sat.index, "code_1"]).to_numpy()
+    dp, *_ = np.linalg.lstsq(-los, dy, rcond=None)      # recover dp
+    assert abs(dp @ up) < 1e-6 * np.linalg.norm(dp)
+    assert np.linalg.norm(dp) == pytest.approx(t["commanded_displacement_m"],
+                                               rel=1e-6)
+
+
+def test_bearing_selects_the_commanded_direction(window, floor, nav):
+    from backend.detection.emit import USN8_ECEF
+    east, north, _ = enu_basis(np.array(USN8_ECEF))
+    from backend.injector.spoof import bearing_unit_ecef
+    for bearing, axis, other in ((90.0, east, north), (0.0, north, east)):
+        v = bearing_unit_ecef(bearing, USN8_ECEF)
+        assert v @ axis == pytest.approx(1.0, abs=1e-9)
+        assert v @ other == pytest.approx(0.0, abs=1e-9)
+
+
+def test_per_sv_range_rates_never_exceed_the_position_rate(window, floor, nav):
+    """The ruling's arithmetic: each satellite's range rate is e_sv . v_hat
+    times the position rate, so all of them are <= 1 m/s."""
+    dt = epoch_interval_s(window)
+    sp = CARRY_OFF(onset=ONSET, carrier_rate_error=0.0)
+    inj, truth = inject(window, sp, floor, nav=nav)
+    i = walk_index(truth)
+    prev, cur = inj[i - 1], inj[i]
+    common = [sv for sv in cur.df.index if sv in prev.df.index
+              and sv in truth.iloc[i]["spoofed_sv"].split(",")]
+    dclean = (window[i].df.loc[common, "code_1"]
+              - window[i - 1].df.loc[common, "code_1"])
+    dspoof = cur.df.loc[common, "code_1"] - prev.df.loc[common, "code_1"]
+    rate = ((dspoof - dclean) / dt).abs()
+    assert rate.max() <= sp.walk_off_mps + 1e-6
+    assert rate.min() < sp.walk_off_mps          # geometry spreads them out
+
+
+def test_position_walk_moves_the_solved_position(window, floor, nav):
+    """The whole point of the split: the believed position actually moves."""
+    from backend.rinex.solve import solve
+    sp = CARRY_OFF(onset=ONSET, carrier_rate_error=0.0)
+    inj, truth = inject(window, sp, floor, nav=nav)
+    i = walk_index(truth, offset=30)
+    a, b = solve(window[i], nav=nav), solve(inj[i], nav=nav)
+    moved = np.linalg.norm(b["pos"] - a["pos"])
+    assert moved > 5.0
+    assert moved < truth.iloc[i]["commanded_displacement_m"]   # authentic pull-back
+
+
+def test_clock_walk_leaves_the_solved_position_alone_while_the_set_holds(
+        window, floor, nav):
+    """The clock-domain attack corrupts time, not position -- for as long as the
+    spoofed set is the whole constellation. Once the frozen channel set decays
+    (satellites rise that the spoofer never captured) GPS is a MIX of spoofed
+    and authentic ranges, the offset stops being uniform, and the position does
+    move. Checked early, before the set has turned over."""
+    from backend.rinex.solve import solve
+    sp = CLOCK_CARRY_OFF(onset=ONSET, carrier_rate_error=0.0)
+    inj, truth = inject(window, sp, floor, nav=nav)
+    for off in (2, 5, 10):
+        i = walk_index(truth, offset=off)
+        gps_now = {sv for sv in window[i].df.index if sv.startswith("G")}
+        if gps_now != set(truth.iloc[i]["spoofed_sv"].split(",")):
+            continue                       # set already turned over
+        a, b = solve(window[i], nav=nav), solve(inj[i], nav=nav)
+        assert np.linalg.norm(b["pos"] - a["pos"]) < 5.0

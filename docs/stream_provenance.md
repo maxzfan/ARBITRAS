@@ -14,20 +14,60 @@ calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_a
 | Field | Class | Source |
 |---|---|---|
 | `timestamp` | measured | RINEX epoch, GPS time, never rewritten |
-| `features.*` (3) | measured / injected | Track A `FeatureExtractor`, calibrated on the clean day. On attack epochs the observables were modified by the injector before scoring |
-| `confidence` | derived | `1 - anomaly` with equal placeholder weights, beta forced to 1 (no geometry half yet). `score_detail.weights_tuned` is false |
+| `features.*` (3 of 4) | measured / injected | Track A `FeatureExtractor` (C/N0, pseudorange residual, code-minus-carrier), calibrated on the clean day. On attack epochs the observables were modified by the injector before scoring |
+| `features.cross_constellation` | derived | §6a.4 streaming scorer (`backend/detection/cross.py`) fed by **Eric's absolute per-constellation WLS** (`backend/rinex/solve.py`): per-constellation position disagreement + inter-system clock channels, calibrated on the clean day, `xc.reset()` before each replay |
+| `confidence` | derived | `1 - (beta*anomaly + (1-beta)*(1-information_ratio))` with equal placeholder weights and placeholder beta 0.5. `score_detail.weights_tuned` is false |
 | `satellites_tracked` | measured | count of SVs with code or C/N0 on band 1 |
 | `position` | **solved** (`wls_differential`, 100.0% of demo epochs) | weighted least-squares single-point fix from the receiver's own band-1 pseudoranges as the receiver saw them (injected on attack epochs), G+E, one clock per constellation, Sagnac and SV-clock corrected, no atmosphere model — `backend/geometry/solve.py`. Epochs without a fix fall back to the surveyed point, flagged `position_source: "surveyed"` |
 | `_truth` | replay metadata | the SAME solver on the CLEAN pseudoranges at the same epoch, same satellites, same weights. Atmosphere and ephemeris error are common to both fixes and cancel in the difference, so `position − _truth` is exactly the injector's effect on the fix. On clean epochs it is 0.0000 m |
 | `_solution` | replay metadata | n_sv, k, DOPs, residual RMS, per-constellation clock bias, `displacement_m` — the fix's own quality figures |
-| `geometry.sky[]` | propagated | real az/el from `backend/geometry/skyview.py` (gnss-lib-py, G+E only, 10° mask). **A second, pseudorange-validated propagator with BeiDou exists in `backend/rinex/ephemeris.py` (Track A); convergence is an 18:30 checkpoint item.** |
+| `geometry.sky[]` | propagated | real az/el from Track C's engine (`backend/geometry/engine.py`, own Keplerian propagator, 10° mask); trusted flags consistent with `excluded_sv` by construction |
 | `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `pseudorange_residual` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day 52.7% of epochs have ≥1 excluded SV |
-| `geometry.information_ratio`, `displacement_bound_m`, `next_best_observation` | **null, awaiting Track C** | not fabricated |
-| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (120 epochs = T_int 60 × d 2) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last 1.3 s at the 15 epochs/s demo rate; tuned to 60 × 2 so every credential state holds ≥ 8 s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. **Threshold dependency for beat 4:** in the 45 epochs (3 s) before PENDING begins, confidence min 0.653 / median 0.744; 26 of 45 sit below the placeholder NOMINAL threshold 0.75. Whether the vehicle is steadily NOMINAL when the credential lapses depends on the 21:00 threshold pick, not on this stream. |
+| `geometry.information_ratio` | derived | Track C's normalised D-optimality ratio `det(H'H)^(1/(3+k))` on trusted vs full H (`backend/geometry/information.py`). No free parameter |
+| `geometry.displacement_bound_m` | derived from a **measured** input | analytic chi-square bound `sigma_UERE * sqrt(T * lambda_max)`; sigma_UERE = **1.934 m**, the MEASURED clean-day post-fit residual RMS (1646 residuals, every 30th epoch — `backend/measurement/sigma_uere.py`, cached with provenance in `out/sigma_uere.json`) |
+| `geometry.next_best_observation` | derived | rank-one determinant update over visible-but-untrusted groups (CONVERGE identity) |
+| `features.by_sv` | derived | Track D contract extension 1 (`backend/detection/features.py by_sv_scores`): per-SV max of the three per-SV features, each normalised by its calibrated saturation and clipped to [0, 1]. Cross-constellation is solution-level and does not enter |
+| `geometry.correction` | derived from **measured** thresholds | Track D weighted-RAIM block (`backend/correction/emit.py`): trusted-subset WLS re-solve (binary weights from `excluded_sv`), slope-form protection level with tau fit on the clean day (p99.9 per-SV residual, `backend.correction.validate`), five-check gate with 10-epoch grant / 1-epoch revoke hysteresis. Fail-closed: `correction_ok: false` with null position whenever the solve or any evaluated check cannot stand |
+| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (120 epochs = T_int 60 × d 2) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last 1.3 s at the 15 epochs/s demo rate; tuned to 60 × 2 so every credential state holds ≥ 8 s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. **Threshold dependency for beat 4:** in the 45 epochs (3 s) before PENDING begins, confidence min 0.691 / median 0.778; 12 of 45 sit below the placeholder NOMINAL threshold 0.75. Whether the vehicle is steadily NOMINAL when the credential lapses depends on the 21:00 threshold pick, not on this stream. |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 
 No record carries `_synthetic`.
+
+## Solver layering — which number comes from which solver
+
+Two position solvers and one geometry engine coexist on purpose (18:30
+checkpoint item 2); they answer different questions and none is redundant:
+
+1. **Absolute per-constellation WLS** — `backend/rinex/solve.py` (Eric).
+   Iono-free dual-frequency code, Saastamoinen troposphere, 5° mask; solves
+   all-in-view plus each constellation alone (3.9–12.3 m from the surveyed
+   marker). **Feeds:** `features.cross_constellation` — the per-constellation
+   position-disagreement and inter-system clock channels are differences of
+   ITS solutions. (In `backend.replay` streams it also supplies the believed
+   `position`, `position_source: "solution"`; in these demo streams it does
+   not — see 2.)
+2. **Differential WLS** — `backend/geometry/solve.py` (Track B). Single-band,
+   G+E, no atmosphere model, 0.73 m median horizontal
+   vs the surveyed marker; the clean and injected fixes share one satellite
+   set and one weight vector so everything unmodelled cancels in the
+   difference. **Feeds:** the stream's `position`
+   (`position_source: "wls_differential"`), `_truth`,
+   `_solution.displacement_m` (the EMPIRICAL displacement on screen), and the
+   **sigma_UERE measurement** (1.934 m clean post-fit
+   residual RMS, `backend/measurement/sigma_uere.py`).
+3. **Geometry engine** — `backend/geometry/` (Track C). Fisher information
+   over the line-of-sight matrix H. **Feeds:** `geometry.information_ratio`
+   (normalised D-optimality ratio), `geometry.displacement_bound_m` (the
+   ANALYTIC bound, taking sigma_UERE measured from solver 2 as its only
+   empirical input), `geometry.next_best_observation`, and `geometry.sky`.
+
+So: the cross-constellation feature comes from solver 1; the believed
+position and the measured displacement come from solver 2; the information
+ratio and the displacement *bound* come from the geometry engine, calibrated
+by solver 2's residuals. The empirical displacement (2) and the analytic
+bound (3) are independent derivations that the §10 empirical-vs-bound check
+plots on one axis.
 
 ## Windows
 

@@ -100,7 +100,6 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
   "confidence": 0.42,
   "credential_status": "VALID",
   "position": { "lat": 38.9207, "lon": -77.0669, "alt": 58.3 },
-  "position_source": "surveyed",
   "features": {
     "cn0_anomaly": 0.71,
     "pseudorange_residual": 0.15,
@@ -113,17 +112,7 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
     "displacement_bound_m": 41.2,
     "next_best_observation": "E"
   },
-  "satellites_tracked": 11,
-  "score_detail": {
-    "feature_score": 0.29,
-    "geometry_deficit": 0.42,
-    "beta": 0.5,
-    "geometry_available": true,
-    "weights_tuned": false,
-    "weights": { "cn0_anomaly": 0.25, "pseudorange_residual": 0.25,
-                 "code_carrier_divergence": 0.25, "cross_constellation": 0.25 },
-    "weight_sensitive_fraction": 0.5
-  }
+  "satellites_tracked": 11
 }
 ```
 
@@ -132,19 +121,6 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
   - `PENDING` is normal and transient: MAC received, key not yet disclosed. Lasts exactly the disclosure lag.
 - `position` — what the receiver *believes*. Under attack this is the spoofed position. That is the point.
 - `features` — each [0,1], higher = more anomalous. **Always emitted alongside the composite**, so the explanation layer can name which signal diverged and so we never report a single number alone.
-- `position_source` — `"solution"` | `"surveyed"` *(added 5 Sep)*. Until the
-  position solution exists the backend reports the station's surveyed position
-  flagged `"surveyed"`, so a displacement read off it is visibly zero by
-  construction rather than quietly wrong. The console may render either; it
-  must not compute displacement from a `"surveyed"` position.
-- `score_detail` — *(added 5 Sep)* the decomposition of `confidence`:
-  `feature_score` (the tuned half), `geometry_deficit` (1 − information ratio),
-  `beta` (the blend actually applied; forced to 1 when `geometry` is null),
-  `geometry_available`, `weights_tuned` (**false until the threshold session —
-  any number produced while false is a placeholder**), `weights`, and
-  `weight_sensitive_fraction` (the share of the composite a re-weighting can
-  move; the answer to the arXiv 2607.05415 objection). Additive: the composite
-  is never shipped without the parts that made it.
 - `geometry` — the weight-independent half of the score. `information_ratio` ∈ [0,1] is the determinant ratio of the trusted-subset information matrix against the full solution. `excluded_sv` is which satellites the detector stopped trusting and therefore which rows came out. `displacement_bound_m` is the analytic bound at this epoch. `next_best_observation` is the observation that would recover the most information — consumed by the console in `DEGRADED`, ignored elsewhere.
 
 **Transport:** JSON Lines appended to a file; console tails it.
@@ -209,18 +185,10 @@ From Rothmaier et al., ION GNSS+ 2021.
 | Scenario | Power | Behaviour | Purpose |
 |---|---|---|---|
 | Simplistic | 10–20 dB | Abrupt offset, all SVs at once | Pipeline validation |
-| Intermediate carry-off (position) | 1–3 dB | Capture, then walk the believed **position** along a swept horizontal bearing; per-SV offsets are `−e_sv · dp` | **Primary demo** |
-| Intermediate carry-off (clock) | 1–3 dB | Capture, then uniform range drift across the captured set — absorbed by the constellation clock, position unmoved | Separates the clock domain from the position domain; exercises feature 4's clock channels |
+| Intermediate carry-off | 1–3 dB | Capture, then gradual walk-off on an SV subset | **Primary demo** |
 | Meaconing | rebroadcast | Common bias across one constellation | Exercises cross-constellation |
 
-**Walk-off rate:** ~1 m/s. *(Revised 5 Sep — the original wording, "~1 m/s equivalent range drift", was written for a range-domain model and is wrong for the primary demo.)* The rate is now read in whichever domain the scenario attacks:
-
-- **Position domain** (`carry_off`, the primary demo): **1 m/s is the rate of the commanded horizontal position displacement** along a fixed bearing. Per-satellite offsets are the projections `−e_sv · dp`, so every satellite's range rate is `e_sv · v̂ × 1 m/s` and is *at most* 1 m/s — satellites near the horizon perpendicular to the walk barely move. Horizontal only, by ruling: no vertical component, because VDOP is the weak axis and an unconstrained sweep would find "up" and inflate the headline number with a direction no road-bound vehicle can be walked along. Bearing is a swept parameter (8 bearings, 45° apart from local ENU north); the demo pin is cross-corridor east. **The bearing is never derived from detector response or from H** — the injector must not be a function of the thing it attacks.
-- **Clock domain** (`clock_carry_off`, `meaconing`, `simplistic`): 1 m/s of *uniform* range drift across the captured set. Kept as its own scenario because it is a different attack, not a worse version of the same one — see the table note below.
-
-Slow enough to stay inside tracking loop bandwidth, fast enough to displace within the demo window. Tune at the venue and be ready to justify.
-
-> **Measured, and it is why the two domains are separate scenarios:** a range offset applied *uniformly* to every satellite of one constellation is indistinguishable from that constellation's clock. The least-squares absorbs all of it and **the believed position does not move at all** (0.0 m under a 300 m meaconing bias). A clock-domain attack corrupts *time*; only a position-domain walk moves the vehicle's believed position. "The position looks fine" is not the same as "nothing is wrong."
+**Walk-off rate:** ~1 m/s equivalent range drift as a starting point. Slow enough to stay inside tracking loop bandwidth, fast enough to displace within the demo window. Tune at the venue and be ready to justify.
 
 ---
 
@@ -609,7 +577,7 @@ georinex emits a FutureWarning per epoch from xarray. Harmless. Suppress with `2
 ## Repo layout — create at the venue, not before
 
 ```
-HOLDFAST/
+dnhacks-pnt/
 ├── CLAUDE.md
 ├── docs/design.md
 ├── data/                   ← gitignored

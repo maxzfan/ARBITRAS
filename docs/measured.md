@@ -238,3 +238,387 @@ composite d′ 4.52.
 
 Carry-off is not in this table: the demo pin for `carrier_rate_error` is
 pending and `backend.replay` skips it by design until the pin is given.
+
+
+---
+
+# Feature 2's residual is not a solution residual — stated before the sweep
+
+Asked and answered before the position-walk injector was written, because it
+changes what the sweep output means.
+
+**Neither all-in-view nor per-constellation. There is no position solution in
+feature 2 at all.** `backend/detection/features.py` computes
+`pseudorange_residual` as the deviation of **code-minus-carrier** from its own
+per-satellite trailing baseline: `(C1 - lambda*L1)` against a 40-epoch median,
+one satellite at a time, no receiver position and no H matrix anywhere in it.
+Feature 3 is the epoch-to-epoch rate of the same quantity. This is documented
+in that module already ("two statistics of one observable, not two independent
+observables") and it is the honest reason feature 2 has never needed the nav
+file.
+
+The consequence for a coordinated position walk is sharper than "they go
+quiet", and the precise statement matters:
+
+> **At `carrier_rate_error > 0`, features 2 and 3 respond to the spoofer's
+> incoherence at magnitude `carrier_rate_error x t` — a quantity that is
+> INDEPENDENT of how far the vehicle has been displaced. They detect
+> ADVERSARY ERROR, not ATTACK EFFECT.**
+
+Two consequences that follow directly, and they are the ones to say out loud:
+
+- **A coherent spoofer displacing the vehicle 500 m is invisible to them.**
+- **A clumsy one displacing it 2 m is not.**
+
+The feature magnitude is a measure of how badly the attacker built their
+transmitter, not of how much danger the vehicle is in. Nothing in features 1-3
+is a function of the displacement:
+
+| feature | responds to | function of displacement? |
+|---|---|---|
+| 1 C/N₀ anomaly | the capture power step, fading over `cn0_window` | no |
+| 2 residual (as built) | code-minus-carrier level = `rate x t` | **no** |
+| 3 divergence | code-minus-carrier rate = `rate` | **no** |
+| 4 cross-constellation | authentic E/C disagreeing with spoofed G | yes |
+
+A per-constellation solution residual would go to zero for a coordinated
+GPS-only walk because the walk lies in the position columns of H — that is a
+geometric blindness. Features 2 and 3 have a *different* and broader
+blindness: they never see geometry at all, at any rate.
+
+This is why §10 must record residuals on the spoofed and authentic subsets
+separately: the residual that appears under a coordinated walk is
+cross-constellation disagreement, not GPS-internal inconsistency.
+
+# `excluded_sv`: SUPERSEDED -- see the ExclusionRule section at the end
+
+`detection.flagged_sv` names the satellites whose worst per-SV score reaches
+`k x` its calibrated saturation. `k` has **no default**; unset, the list is
+empty. Measured on the clean day, the cost of each candidate:
+
+| rule | clean epochs flagging >= 1 SV | mean SV flagged |
+|---|---|---|
+| k = 1.0 | **78.9%** | 1.77 |
+| k = 1.5 | 34.6% | 0.43 |
+| k = 2.0 | 12.7% | 0.14 |
+| k = 3.0 | 2.7% | 0.03 |
+| k = 5.0 | 0.5% | 0.00 |
+
+Every one of those is a false exclusion on a clean sky: a satellite the console
+paints as distrusted during demo beat 1, and a row removed from Track C's H.
+The heavy tail is the same low-elevation multipath structure the C/N0 section
+describes. Numbers printed; `k` is a threshold-session decision and is not
+chosen here.
+
+
+---
+
+# Sweep harness — three axes, both domains. BUILT, GATED, NOT RUN.
+
+`python -m backend.measurement.sweep` refuses without `--run`. Grid:
+
+| axis | values |
+|---|---|
+| domain | position, clock |
+| subset size | 12 / 8 / 6 / 4 (top-N by elevation at capture, frozen) |
+| `carrier_rate_error` | 0.0 / 0.005 / 0.01 / 0.02 / 0.05 / 0.1 m/s |
+| bearing | 8 directions 45° apart (position domain only) |
+
+## Verified on a 2-cell x 6-epoch build check, not the sweep
+
+The numbers below come from a deliberately tiny configuration written to the
+scratchpad, run to prove the machinery executes and the recorded quantities
+mean what the field names say. **The sweep itself has not been run.**
+
+| commanded | achieved | resid all | resid spoofed | resid authentic | **resid G-only** |
+|---|---|---|---|---|---|
+| 0 m | 0.00 m | 3.98 | 5.39 | 2.98 | **5.35** |
+| 20 m | 8.18 m | 6.49 | 8.56 | 5.08 | **5.00** |
+| 50 m | 20.47 m | 14.79 | 19.32 | 11.73 | **4.73** |
+| 80 m | 32.75 m | 22.94 | 30.11 | 18.06 | **5.31** |
+| 110 m | 45.05 m | 30.86 | 40.43 | 24.35 | **4.77** |
+| 140 m | 57.35 m | 40.01 | 52.42 | 31.58 | **4.85** |
+
+Three things this establishes:
+
+1. **Achieved is 0.41 x commanded**, steady. The authentic E and C
+   observations pull the least-squares back toward truth, so a spoofer that
+   commands 140 m of displacement achieves 57 m. That factor is what the
+   third constellation buys, and it is why §10 must measure achieved from the
+   solved position and never report commanded.
+2. **A spoofed-constellation-only solve is blind to its own walk.** Its
+   residual sits at 4.7–5.4 m across the whole range while commanded goes
+   0 → 140 m. The walk lies in the position columns of H, so a GPS-only
+   solution absorbs it into its own position estimate. **Every metre of
+   residual in the all-in-view solution is cross-constellation
+   disagreement**, not GPS-internal inconsistency — which is the same
+   conclusion the feature-2 note reaches from the other direction.
+3. **The clock domain achieves 0.0 m**, as its own scenario should.
+
+## A bug the consistency check caught
+
+The first version of the residual split recomputed post-fit residuals inside
+the sweep instead of taking the solver's. It omitted the Sagnac rotation and
+read **19 m where the solver read 4 m** — and the partitioned numbers were
+inconsistent with the pooled RMS they were supposed to decompose, which is
+what made it visible. `solve()` now returns `resid_m` per satellite from its
+own final iteration and the duplicate implementation is deleted. Two
+implementations of one quantity is a bug factory; there is now one.
+
+
+---
+
+# `carrier_rate_error` demo pin: 0.0136 m/s
+
+Ruled by hand from the printed arithmetic at k = 2σ, t = 30 s:
+2 × 0.204 / 30 = **0.0136 m/s**. Written into
+`backend.injector.DEMO_CARRIER_RATE_ERROR` and the default of
+`backend.replay --carrier-rate-error`.
+
+**Chosen for demo legibility, not as a physical claim. The reported
+displacement bound is measured at `carrier_rate_error = 0`.**
+
+At the pin, the divergence reaches 2σ of the measured clean code-minus-carrier
+noise by the first observable epoch after lift-off, which is what makes the
+step visible on screen. It says nothing about how coherent a real spoofer's
+carrier would be — and by the finding above, the feature magnitude it produces
+measures the adversary's workmanship, not the vehicle's exposure.
+
+
+---
+
+# Item 1 investigation: are features 2 and 3 the same channel?
+
+Asked by hand, measured before anything was changed. Regenerate with the
+script under the session scratchpad.
+
+## What each computes today
+
+| | formula | statistic |
+|---|---|---|
+| feature 2 `pseudorange_residual` | `\|cmc(t) − mean(trailing 40)\| / σ_cmc` | **level** of code-minus-carrier |
+| feature 3 `code_carrier_divergence` | `\|cmc(t) − cmc(t−1)\| / (σ_cmc·√2)` | **rate** of code-minus-carrier |
+
+`cmc = C1 − λL1`. **Same observable, same channel; one integrated, one
+differenced.** Feature 2 is not the post-fit pseudorange residual §6a.2
+specifies — there is no position solution in it.
+
+## Correlation of the two feature series
+
+| replay | Pearson | Spearman |
+|---|---|---|
+| clean full day | **+0.113** | +0.093 |
+| carry-off, rate 0.0136 | **+0.424** | +0.347 |
+| carry-off, rate 0 | +0.113 | +0.093 |
+| meaconing | +0.113 | +0.093 |
+
+## Composite d′ with feature 2 removed entirely
+
+| scenario | d′ (4 features) | d′ (no feature 2) | change |
+|---|---|---|---|
+| carry-off, rate 0.0136 | 5.23 | 5.42 | **+0.19** |
+| carry-off, rate 0 | 5.09 | 5.21 | **+0.12** |
+| meaconing | 5.04 | 5.07 | **+0.03** |
+
+## Per-feature d′, attack window vs clean
+
+| scenario | C/N₀ | residual | divergence | **cross-const** |
+|---|---|---|---|---|
+| carry-off, rate 0.0136 | 0.03 | 2.04 | 0.57 | **6.01** |
+| carry-off, rate 0 | 0.03 | 0.77 | 0.01 | **6.01** |
+| meaconing | 0.15 | 0.77 | 0.01 | **6.18** |
+
+## What this shows — and the hypothesis it does *not* support
+
+**The 5.04 was not counting one channel twice.** The two features are drawn
+from the same observable but they are nearly uncorrelated (+0.11 on clean
+data), because a level and its own first difference are close to orthogonal
+for a drifting signal. Removing feature 2 does not cut the composite; it
+raises it slightly. So the redundancy framing is not what the numbers say.
+
+**What they say instead is dilution.** The composite d′ of 5.04 is *lower than
+its own best feature*: cross-constellation alone reads 6.18. Three features
+that barely move (0.15, 0.77, 0.01) are averaged with equal weight against one
+that separates cleanly, and the average drags the good one down. That is a
+weighting result, and it is a direct input to the threshold session — it says
+the equal-weight placeholder is actively costing separation, not merely
+untuned.
+
+**Feature 2 as built earns nothing on the scenarios that matter**: d′ 0.77
+against both meaconing and a coherent walk, rising to 2.04 only when the
+spoofer is incoherent — which by the finding above is a measure of adversary
+workmanship, not attack effect. It is the weakest feature in the set and it is
+blind to geometry.
+
+So the case for reimplementing it as the post-fit residual from `solve()`
+stands, but on the original reason rather than on redundancy: **nothing in
+features 1–3 carries geometry, so nothing in features 1–3 can see a
+coordinated position walk.** Feature 4 is currently the only channel that can,
+and a single channel carrying the entire detection is a fragile place to be.
+
+
+---
+
+# Item 1 fix: feature 2 reimplemented as the post-fit residual
+
+`pseudorange_residual` is now the per-satellite post-fit residual of the
+all-in-view least-squares solution (`solve()['resid_m']`) against its own
+trailing median, normalised by a per-satellite sigma measured on the clean day
+(median **0.51 m**). This is what §6a.2 specified. Saturating |z| moved from
+12.7 to 8.4.
+
+## Per-feature d′, before and after
+
+| scenario | feature 2 before | feature 2 after |
+|---|---|---|
+| carry-off, incoherence pin | 2.04 | **8.59** |
+| carry-off, **coherent (rate 0)** | 0.77 | **8.59** |
+| meaconing (clock domain) | 0.77 | **0.02** |
+
+The middle row is the whole point: **8.59 at `carrier_rate_error = 0`.** The
+old feature 2 could only see the spoofer's incoherence, so it read 0.77
+against a coherent walk however far the vehicle moved. The post-fit residual
+sees the *displacement*, so a perfectly coherent spoofer no longer hides from
+it. Detection of a position walk no longer rests on feature 4 alone.
+
+## Composite d′, before and after
+
+| scenario | before | after | without feature 2 |
+|---|---|---|---|
+| carry-off, pin | 5.23 | **8.48** | 5.42 |
+| carry-off, coherent | 5.09 | **8.32** | 5.21 |
+| meaconing | 5.04 | **3.84** | 5.07 |
+
+Feature 2 went from dead weight to load-bearing on the position walk:
+removing it now costs 3.07 of d′ where before it gained 0.19.
+
+**And the meaconing row got worse, which is correct and worth stating.** A
+uniform clock-domain bias is absorbed by the constellation clock unknown, so
+the post-fit residual is ~zero by construction — feature 2 correctly sees
+nothing (d′ 0.02). But under equal weights its silence is averaged in, and the
+meaconing composite falls 5.04 → 3.84. Dropping feature 2 would restore it to
+5.07.
+
+So the dilution finding from the investigation now cuts both ways: **the same
+feature is the strongest signal on one scenario and pure dilution on another.**
+No single fixed weight vector is right for both. That is the sharpest input
+this track can hand the threshold session, and it is an argument for the
+§10 Dirichlet sweep being reported per scenario rather than pooled.
+
+Clean composite confidence with the new feature 2: mean **0.768**, σ 0.061,
+p1 0.598. Correlation between features 2 and 3 fell to +0.098 (clean) and
++0.001 under a coherent walk — they are now genuinely different channels.
+
+## Dependency taken on, stated
+
+Feature 2 now needs satellite positions, so it needs the nav file. §6b warned
+one file failure costs two components; it now costs three. The fallback is
+explicit rather than silent: with no residual supplied, feature 2 is **not
+scored at all** (NaN, excluded from the aggregate) rather than quietly reading
+zero, and the calibration prints `resid sigma UNSET (feature 2 not scored)`.
+
+## A cache-collision hazard closed while doing this
+
+`residual_panel` was keyed on the replay span and epoch count. A clean replay
+and an injected one cover the same span with the same count, so the second
+would have silently received the first's residuals — calibrating an attack
+against its own injected data. The key now fingerprints the observables
+themselves. Nothing shipped with the collision; it is recorded because the
+class of bug (span-keyed caches over mutated data) applies to the other caches
+in the loader too.
+
+
+---
+
+# Item 4: exclusion rate with the right denominator, and the elevation floor
+
+Both requested measurements, taken on the clean full day **after** feature 2
+became the post-fit residual (the earlier table was computed with the old
+feature and is superseded).
+
+## P(at least one SV excluded in an epoch)
+
+Per epoch is the denominator that matters, because it is epochs that lose H
+rows. The per-SV-epoch rate is given for scale and is ~40x smaller, since the
+station tracks 39.9 satellites per epoch.
+
+| k | **P(≥1 SV excluded)** | mean SV excluded | P(per SV-epoch) |
+|---|---|---|---|
+| 1.0 | **61.1%** | 0.92 | 2.30% |
+| 1.5 | **22.6%** | 0.25 | 0.63% |
+| 2.0 | **9.5%** | 0.10 | 0.25% |
+| 3.0 | **2.2%** | 0.02 | 0.06% |
+| 5.0 | **0.3%** | 0.00 | 0.01% |
+
+To be precise about the earlier figures: they were **already** per-epoch, not
+per-SV — the 78.9% quoted before was P(≥1 SV excluded per epoch) with the old
+feature 2. Replacing that feature cut the rate by roughly a fifth at every k
+(78.9% → 61.1% at k=1.0, 2.7% → 2.2% at k=3.0) as a side effect.
+
+## Is the floor elevation-driven? Yes, essentially entirely.
+
+Exclusion rate binned by satellite elevation, sampled every 8th epoch (359
+epochs, 10,177 SV-epochs with ephemeris):
+
+| elevation bin | n | excl% (k=3) | share of exclusions (k=3) | excl% (k=5) |
+|---|---|---|---|---|
+| 0–15° | 2640 | **0.08%** | **100.0%** | 0.00% |
+| 15–30° | 2359 | 0.00% | 0.0% | 0.00% |
+| 30–60° | 3386 | 0.00% | 0.0% | 0.00% |
+| 60–90° | 1792 | 0.00% | 0.0% | 0.00% |
+
+At k=3 the surviving exclusions sit at a **median elevation of 0.4°** (p90
+0.8°, max 0.9°) — they are satellites on the horizon, not satellites being
+spoofed. Above 15° the clean rate is zero in every bin at both k values.
+
+**Caveat:** elevations come from Keplerian broadcast ephemeris, which covers
+G/E/C only. GLONASS and SBAS — about a quarter of the tracked sky — are absent
+from the bin table. The k-rate table above covers all five constellations.
+
+## Implemented
+
+`detection.ExclusionRule`:
+
+- **`MASKED_K3`** — the ruled rule, `k = 3.0` plus a low-elevation mask, with
+  the cutoff **UNSET**. `armed` is False and it emits nothing until a cutoff
+  is given. This is the default in `backend.replay`.
+- **`FLAT_K5`** — the configured fallback, `k = 5.0`, no mask, usable without
+  elevations.
+
+A satellite below the mask cutoff is **not** excluded: the mask means "this
+satellite's score is not trustworthy evidence of spoofing", which is the
+opposite of "this satellite is spoofed". Whether a low-elevation satellite
+should be dropped from H for its own noise is a separate question and Track
+C's.
+
+The elevation-binned distribution is printed above. **The cutoff is not
+chosen here.**
+
+
+---
+
+# STALENESS WARNING for the README results section
+
+The README (added on `track_b`/`track_c`) publishes §10 numbers computed
+against the **previous** feature 2 — maximum adversarial displacement 3.67 m
+vs a 14.0 m bound, FSR 0.0000, and the derived thresholds NOMINAL 0.643 /
+DEGRADED 0.548 / RESTRICTED 0.518, with clean confidence min 0.6591 and attack
+p95 0.6268.
+
+Feature 2 is now the post-fit residual, which changes the composite it is
+derived from:
+
+- clean composite mean 0.751 → **0.768**, σ 0.061, p1 0.598
+- coherent carry-off composite d′ 5.09 → **8.32**
+- meaconing composite d′ 5.04 → **3.84**
+
+**Every threshold, FSR figure and displacement number in the README was fitted
+to the old distribution and needs regenerating before it is quoted anywhere.**
+The direction of change is favourable for the carry-off demo (better
+separation) and unfavourable for meaconing, so this is not a uniform shift
+that leaves the thresholds valid.
+
+Not edited here: those numbers and that section belong to the tracks that
+produced them, and silently rewriting another track's published results is
+worse than flagging them. Regeneration is a threshold-session task, since
+step 4 of the §10 procedure has to be redone on the new distributions.

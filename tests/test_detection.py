@@ -31,18 +31,48 @@ def floor(day):
 
 
 @pytest.fixture(scope="module")
-def cal(day, floor):
-    return fit(day, floor)
+def nav():
+    from backend.rinex import ephemeris
+    return ephemeris.load_nav()
 
 
 @pytest.fixture(scope="module")
-def clean_features(day, cal):
-    return frame(FeatureExtractor(cal).run(day), [e.time for e in day])
+def resid(day, nav):
+    from backend.rinex.solve import residual_panel
+    return residual_panel(day, nav)
 
 
-def attacked(day, cal, floor, spoof):
-    inj, truth = inject(day, spoof, floor)
-    return frame(FeatureExtractor(cal).run(inj), [e.time for e in inj]), truth
+@pytest.fixture(scope="module")
+def cal(day, floor, resid):
+    return fit(day, floor, resid_panel=resid)
+
+
+@pytest.fixture(scope="module")
+def win(day):
+    return [e for e in day
+            if datetime(2026, 8, 20, 12, 0) <= e.time < datetime(2026, 8, 20, 14, 0)]
+
+
+@pytest.fixture(scope="module")
+def win_clean_features(win, cal, nav):
+    from backend.rinex.solve import residual_panel
+    rp = residual_panel(win, nav)
+    return frame(FeatureExtractor(cal).run(win, resid_panel=rp),
+                 [e.time for e in win])
+
+
+@pytest.fixture(scope="module")
+def clean_features(day, cal, resid):
+    return frame(FeatureExtractor(cal).run(day, resid_panel=resid),
+                 [e.time for e in day])
+
+
+def attacked(day, cal, floor, spoof, nav=None):
+    from backend.rinex.solve import residual_panel
+    inj, truth = inject(day, spoof, floor, nav=nav)
+    rp = residual_panel(inj, nav, use_cache=False) if nav is not None else None
+    return frame(FeatureExtractor(cal).run(inj, resid_panel=rp),
+                 [e.time for e in inj]), truth
 
 
 # -- shape -------------------------------------------------------------------
@@ -102,14 +132,15 @@ def test_cn0_fires_at_onset_then_fades(day, cal, floor):
     assert onset["cn0_anomaly"].mean() > 3 * later["cn0_anomaly"].mean()
 
 
-def test_pseudorange_residual_stays_elevated_after_cn0_fades(day, cal, floor,
-                                                             clean_features):
-    """§6a.2's stated role. This is the feature that carries the sustained
-    detection once the C/N0 signal is gone."""
-    got, _ = attacked(day, cal, floor, CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE))
-    later = got[(got.index >= ONSET + timedelta(minutes=30))
-                & (got.index < ONSET + timedelta(minutes=90))]
-    assert later["pseudorange_residual"].mean() > clean_features[
+def test_post_fit_residual_sees_a_coordinated_position_walk(
+        win, cal, floor, nav, win_clean_features):
+    """The reason feature 2 was reimplemented: the post-fit residual carries
+    geometry, so it responds to the displacement itself -- even when the
+    spoofer is perfectly coherent and features 1 and 3 see nothing."""
+    got, _ = attacked(win, cal, floor,
+                      CARRY_OFF(onset=ONSET, carrier_rate_error=0.0), nav=nav)
+    later = got[got.index >= ONSET + timedelta(minutes=15)]
+    assert later["pseudorange_residual"].mean() > win_clean_features[
         "pseudorange_residual"].quantile(0.99)
 
 
@@ -126,27 +157,29 @@ def test_meaconing_is_invisible_to_the_code_carrier_features(day, cal, floor,
         assert later[f].mean() <= clean_features[f].quantile(0.99)
 
 
-def test_zero_rate_spoofer_is_invisible_to_features_2_and_3(day, cal, floor,
-                                                            clean_features):
-    """The ruling's stated consequence, asserted at the feature level: with a
-    fully carrier-coherent spoofer the residual and divergence features see
-    nothing, sustained."""
-    got, _ = attacked(day, cal, floor,
-                      CARRY_OFF(onset=ONSET, carrier_rate_error=0.0))
-    later = got[(got.index >= ONSET + timedelta(minutes=30))
-                & (got.index < ONSET + timedelta(minutes=90))]
-    for f in ("pseudorange_residual", "code_carrier_divergence"):
-        assert later[f].mean() <= clean_features[f].quantile(0.99)
+def test_coherent_spoofer_is_invisible_to_the_divergence_feature(
+        win, cal, floor, nav, win_clean_features):
+    """Feature 3 responds to carrier_rate_error * t, which is independent of
+    displacement: a perfectly coherent spoofer is invisible to it however far
+    it moves the vehicle. Feature 2 is deliberately NOT in this list any more
+    -- that is what the reimplementation bought."""
+    got, _ = attacked(win, cal, floor,
+                      CARRY_OFF(onset=ONSET, carrier_rate_error=0.0), nav=nav)
+    later = got[got.index >= ONSET + timedelta(minutes=15)]
+    f = "code_carrier_divergence"
+    assert later[f].mean() <= win_clean_features[f].quantile(0.99)
 
 
-def test_carry_off_separates_from_the_clean_day(day, cal, floor, clean_features):
-    """The primary demo (§7 row 2) has to be detectable. d' over the sustained
-    window, against the clean distribution of the same feature."""
-    got, _ = attacked(day, cal, floor, CARRY_OFF(onset=ONSET, carrier_rate_error=TEST_RATE))
-    att = got[(got.index >= ONSET) & (got.index < ONSET + timedelta(minutes=90))]
+def test_carry_off_separates_from_the_clean_day(win, cal, floor, nav,
+                                                win_clean_features):
+    """The primary demo (§7 row 2) has to be detectable on the post-fit
+    residual alone, with a coherent spoofer."""
+    got, _ = attacked(win, cal, floor,
+                      CARRY_OFF(onset=ONSET, carrier_rate_error=0.0), nav=nav)
+    att = got[got.index >= ONSET]
     f = "pseudorange_residual"
-    d = abs(att[f].mean() - clean_features[f].mean()) / np.sqrt(
-        (att[f].var() + clean_features[f].var()) / 2)
+    d = abs(att[f].mean() - win_clean_features[f].mean()) / np.sqrt(
+        (att[f].var() + win_clean_features[f].var()) / 2)
     assert d > 4.0
 
 
@@ -216,3 +249,113 @@ def test_composite_is_never_emitted_without_its_parts():
     assert set(r["features"]) == set(FEATURE_NAMES)
     assert "geometry" in r and "score_detail" in r
     assert r["score_detail"]["weights_tuned"] is False
+
+
+# -- excluded_sv ---------------------------------------------------------------
+
+def test_ruled_exclusion_rule_is_disarmed_until_its_mask_is_set(day, cal):
+    """MASKED_K3 emits nothing while the mask cutoff is unset."""
+    from backend.detection import MASKED_K3, flagged_sv
+    per_sv = FeatureExtractor(cal).run(day[:60])[-1]["per_sv"]
+    assert MASKED_K3.armed is False
+    assert flagged_sv(per_sv, cal.z_sat, MASKED_K3) == []
+    assert flagged_sv(per_sv, cal.z_sat, None) == []
+
+
+def test_flat_fallback_is_armed_without_a_mask(day, cal):
+    from backend.detection import FLAT_K5, flagged_sv
+    per_sv = FeatureExtractor(cal).run(day[:200])[-1]["per_sv"]
+    assert FLAT_K5.armed is True
+    got = flagged_sv(per_sv, cal.z_sat, FLAT_K5)
+    norm = (per_sv / pd.Series(cal.z_sat)).max(axis=1).dropna()
+    assert got == sorted(norm.index[norm >= 5.0])
+
+
+def test_exclusion_rule_names_only_saturated_satellites(day, cal):
+    from backend.detection import flagged_sv
+    per_sv = FeatureExtractor(cal).run(day[:200])[-1]["per_sv"]
+    for k in (1.0, 2.0, 3.0):
+        got = flagged_sv(per_sv, cal.z_sat, k)
+        norm = (per_sv / pd.Series(cal.z_sat)).max(axis=1).dropna()
+        assert got == sorted(norm.index[norm >= k])
+        assert set(got) <= set(per_sv.index)
+
+
+def test_armed_mask_needs_elevations_and_drops_low_satellites(day, cal):
+    from dataclasses import replace as _replace
+
+    from backend.detection import MASKED_K3, flagged_sv
+    per_sv = FeatureExtractor(cal).run(day[:200])[-1]["per_sv"]
+    rule = _replace(MASKED_K3, k=1.0, elevation_mask_deg=30.0)
+    assert rule.armed is True
+    with pytest.raises(ValueError):
+        flagged_sv(per_sv, cal.z_sat, rule)
+    unmasked = flagged_sv(per_sv, cal.z_sat, 1.0)
+    el = pd.Series({sv: (90.0 if i % 2 else 1.0)
+                    for i, sv in enumerate(per_sv.index)})
+    masked = flagged_sv(per_sv, cal.z_sat, rule, elevations=el)
+    assert set(masked) <= set(unmasked)
+    assert all(el[sv] >= 30.0 for sv in masked)
+
+
+def test_replay_emits_detector_derived_excluded_sv(day, cal, nav):
+    """The list must come from per-SV scores, not from what the injector did --
+    and it must be an INPUT to Track C's geometry block, so the information
+    ratio and the exclusion list describe the same satellite set."""
+    from backend.geometry.engine import geometry_for as track_c
+    from backend.replay import run
+
+    seen_lists = []
+
+    def spy(ep, excluded_sv=None):
+        seen_lists.append(list(excluded_sv or []))
+        return track_c(ep, excluded_sv=excluded_sv)
+
+    recs = run(day[:150], cal, geometry_for=spy, nav=nav, exclusion=1.0)
+    # the rule fires on clean sky at k=1.0, and whatever it named was handed
+    # to the geometry provider rather than written on top of its output
+    assert any(seen_lists)
+    for r, handed in zip(recs, seen_lists):
+        assert r["geometry"]["excluded_sv"] == handed
+
+    off = run(day[:150], cal)
+    assert all(r["geometry"] is None for r in off)
+
+
+# -- the §5 contract doc must match the emitted shape ------------------------
+
+def test_contract_doc_and_fixture_match_the_emitted_record():
+    """Open across three sessions. Asserted now so it cannot drift again:
+    the JSON block in design.md §5, fixtures/epoch.json and a live record must
+    agree on every key path. `geometry` subkeys are exempt while the block is
+    null -- that is Track C's, not ours to fill."""
+    import json
+    import pathlib
+    import re
+
+    doc = pathlib.Path("docs/design.md").read_text()
+    spec = json.loads(re.search(
+        r"# 5\. INTERFACE CONTRACT.*?```json\n(.*?)\n```", doc, re.S).group(1))
+    fixture = json.loads(pathlib.Path("fixtures/epoch.json").read_text())
+
+    feats = {n: 0.3 for n in FEATURE_NAMES}
+    live = record(datetime(2026, 8, 20, 0, 0), feats, score(feats, None),
+                  n_sv=11)
+
+    def paths(o, p=""):
+        out = set()
+        if isinstance(o, dict):
+            for k, v in o.items():
+                out.add(p + k)
+                out |= paths(v, p + k + ".")
+        return out
+
+    # features.by_sv (TRACK_D.md contract extension 1) is additive and
+    # optional — emitted only when the caller passes it — and its per-SV
+    # keys are data, not schema. Exempt like the geometry subkeys.
+    geom = lambda ps: {x for x in ps if not x.startswith("geometry.")
+                       and not x.startswith("features.by_sv")}
+    assert geom(paths(spec)) == geom(paths(live))
+    assert geom(paths(spec)) == geom(paths(fixture))
+    assert set(spec["features"]) == set(FEATURE_NAMES)
+    assert set(fixture["features"]) - {"by_sv"} == set(FEATURE_NAMES)

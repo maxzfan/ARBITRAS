@@ -57,15 +57,21 @@ def test_sky_is_real_and_trusted_flags_match_excluded(demo):
         assert dark == set(g["excluded_sv"]) & svs
         for s in g["sky"]:
             assert 10.0 <= s["el"] <= 90.0 and 0.0 <= s["az"] < 360.0
-            assert s["sv"][0] in "GE"
+            # Track C's engine propagates its own Kepler ephemeris for
+            # GPS, Galileo and BeiDou — same set as the H matrix.
+            assert s["sv"][0] in "GEC"
 
 
-def test_track_c_fields_are_null_not_fabricated(demo):
+def test_track_c_fields_are_live_and_sane(demo):
+    """Pre-integration these were asserted null-not-fabricated; Track C's
+    engine now fills them from the real H matrix and the MEASURED
+    sigma_UERE, so fabricated would be null."""
     for r in demo:
         g = r["geometry"]
-        assert g["information_ratio"] is None
-        assert g["displacement_bound_m"] is None
-        assert g["next_best_observation"] is None
+        assert 0.0 <= g["information_ratio"] <= 1.0
+        # Bound may be None only when the trusted set is not overdetermined.
+        if g["displacement_bound_m"] is not None:
+            assert g["displacement_bound_m"] > 0.0
 
 
 def test_credential_schedule_is_ordered_with_the_tesla_lag(demo):
