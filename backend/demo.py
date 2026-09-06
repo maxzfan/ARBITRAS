@@ -224,7 +224,10 @@ def solve_positions(clean, injected, nav: NavTables) -> tuple[dict, dict]:
 def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
                  label: str = "", positions: dict | None = None,
                  xc: CrossConstellation | None = None, nav_xc=None,
-                 corrector=None, terrain=None, weights=None) -> list[dict]:
+                 corrector=None, terrain=None, weights=None,
+                 exclude=None) -> list[dict]:
+    """`exclude(per_sv, cal, xc_result, ep) -> list[str]` is Track F's seam for
+    the distrust rule (backend/missions.py); None = the k=1 rule below."""
     fx, w, out = FeatureExtractor(cal), (weights or Weights()), []
     n = len(epochs)
     for i, ep in enumerate(epochs):
@@ -236,12 +239,15 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
         sols = solve_per_constellation(ep, nav_xc) if nav_xc is not None else {}
         res = fx.step(ep, resid=(sols.get("all") or {}).get("resid_m"))
         feats = res["features"]
+        xc_result = None
         if xc is not None and nav_xc is not None:
             # §6a.4: Eric's absolute per-constellation WLS (backend/rinex/solve.py)
             # feeds the streaming cross-constellation scorer. The caller must
             # xc.reset() before each replay so no state leaks across runs.
-            feats["cross_constellation"] = xc.score(ep, sols)["value"]
-        excluded = distrusted(res["per_sv"], cal)
+            xc_result = xc.score(ep, sols)
+            feats["cross_constellation"] = xc_result["value"]
+        excluded = (distrusted(res["per_sv"], cal) if exclude is None
+                    else exclude(res["per_sv"], cal, xc_result, ep))
         geom = geometry_block(ep.time, excluded, list(ep.df.index))
         sol = positions.get(ep.time) if positions else None
         solved = sol is not None and sol["believed"] is not None
@@ -284,6 +290,9 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
                 "n_spoofed": int(row["n_spoofed"]),
                 "range_offset_m": round(float(row["range_offset_m"]), 2),
                 "cmc_divergence_m": round(float(row["cmc_divergence_m"]), 3),
+                "commanded_displacement_m": round(float(row.get("commanded_displacement_m", 0.0)), 2),
+                "bearing_deg": (None if not np.isfinite(row.get("bearing_deg", float("nan")))
+                                else round(float(row["bearing_deg"]), 1)),
             }
         out.append(rec)
         if i % 500 == 0:
