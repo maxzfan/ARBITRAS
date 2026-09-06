@@ -34,3 +34,59 @@ SCRIPTED, `_attack` the injector's truth log). Differences for this stream:
 
 Attack epochs by stage: {'WALK': 59, 'CAPTURE': 1}.
 State timeline: `python -m console.replay out/casevac.jsonl`.
+
+## Route-constrained terrain fix (terrain.route_fix)
+
+Added by `backend/missions_casevac.py` (post-pass registered on the runner;
+this section written by `python -m backend.missions_casevac` from the stream on
+disk). One-dimensional terrain-referenced navigation along the known route:
+the signed OSM pre-map walked at 1 m of arc length gives a schedule of
+class transitions; a SUSTAINED change in the (SIMULATED) wheel sensor's class
+pins arc length to the schedule's nearest matching transition; odometry carries
+the pin between transitions. Frame: the console's presentation frame (TRUE =
+route_point(s_frame), s_frame advancing speed × gain[state], the state from
+`console.replay.arbitrate`; BELIEVED = TRUE + D). Every number below is
+measured on `out/casevac.jsonl` as generated.
+
+- **Sensor:** `sim-confusion-v0`, source **simulated**, confusion diagonal 0.85, re-simulated at
+  the frame's true point with the channel's seed (the channel's own sensor sits at the antenna, which
+  in this frame is the aid station and never crosses a boundary). Unlabelled (UNKNOWN) cells on the
+  route: 66%, held at the last labelled class — the absorption rule `rastermap.py`
+  applies to the extent; a real schedule needs a route survey.
+- **Boundaries on the route:** 14 labelled transitions on the 960.0 m loop,
+  **6 on the outbound leg** (s ≤ 420.0 m, the CCP).
+- **N = 3** consecutive identical readings to declare a transition — smallest N with zero
+  false transitions on the 60-epoch clean lead-in and an analytic expectation (k−1)((1−d)/(k−1))^N × 300
+  below 0.1 false pins per replay (N=2 would expect ≈1.12; N=3 ≈0.028).
+- **Search window:** the map's `consistent_extent_m` at the believed point when it exists, else
+  W0 = 35.0 m (half the minimum spacing between two schedule transitions of the same class
+  pair). Reference: the odometry-propagated pin once pinned, else s_believed.
+- **K = 57 epochs** pin freshness for the arrival gate (longest gap between scheduled transitions
+  before the CCP at route speed, plus N). `at_ccp` = fix within the 25.0 m ring AND fresh.
+- **Odometry** is exact in the presentation frame; in reality it drifts with distance and each pin re-zeroes it.
+- **Halt:** the frame halts the vehicle in SURRENDERED (`gain`), so during epochs 62–149 the true point
+  is fixed and the fix is carried by zero odometry while the believed pin runs to the CCP.
+
+### Measured
+
+| quantity | value |
+|---|---|
+| pins observed (epochs) | [62, 158, 181, 199, 235, 282, 294] |
+| pins on the clean lead-in / false pins there (\|correction\| > 2 cells) | 0 / 0 |
+| first epoch with a fix (`available`) | 62 |
+| `_error_vs_truth_m` after the first pin: median / max (n) | 2.25 / 5.63 m (237) |
+| largest \|correction_m\| on the stream | -282.5 m |
+| believed pin first inside the CCP ring (frame) | epoch 84 |
+| `at_ccp` first true / epochs true | 264 / 22 |
+
+| pin epoch | transition | s_k (m) | s_believed (m) | correction (m) | window (m) | error vs truth (m) |
+|---|---|---|---|---|---|---|
+| 62 | paved → tree_cover | 135 | 156.2 | -16.7 | 246 (consistent_extent_m) | 2.2 |
+| 158 | tree_cover → building | 149 | 157.5 | -2.9 | 246 (consistent_extent_m) | 2.9 |
+| 181 | building → paved | 198 | 209.2 | -3.4 | 35 (default) | 3.4 |
+| 199 | paved → building | 234 | 249.8 | -5.6 | 267 (consistent_extent_m) | 5.6 |
+| 235 | building → paved | 319 | 330.8 | -0.5 | 35 (default) | 0.5 |
+| 282 | paved → building | 432 | 436.5 | +0.0 | 83 (consistent_extent_m) | 0.0 |
+| 294 | building → tree_cover | 459 | 463.5 | +0.0 | 35 (default) | 0.0 |
+
+`_error_vs_truth_m`, `_s_frame_m` are replay metadata (underscored, out of contract).

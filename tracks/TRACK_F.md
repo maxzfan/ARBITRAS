@@ -105,12 +105,24 @@ out, ratio 0.80, Galileo fix valid PL 7.4 m, believed 118 m out) /
 RESTRICTED 84 / DEGRADED 94 / NOMINAL 104; COMBAT SURRENDERED 60 (12 GPS
 out, Galileo fix valid) / 86 / 96 / NOMINAL 106.
 
-In progress (agents): RECON stationary-deduction post-pass + overlay;
-CASEVAC route-constrained terrain fix + overlay. Not done: props by kind in
-the console (rings, phase lines, posts), the corrected third track in the
-console's scene, `/` → home, README section, F-0b threshold session (the
-RECON/COMBAT onset confidence of 0.49 sits below RESTRICTED because three
-features saturate while the derived half still stands behind a valid fix).
+Landed after that: RECON stationary deduction (`backend/missions_recon.py`,
+`console/web/overlays/recon.js`; anchor agrees with the Galileo fix to
+0.46 m median, emitter bearing 85°, path delay 259 m vs 300 injected);
+CASEVAC route-constrained terrain fix (`backend/missions_casevac.py`,
+`console/web/overlays/casevac.js`; 7 pins, 2.25 m median fix error, terrain
+confirms arrival at 264 while the believed pin claimed it at 84; sensor
+SIMULATED); props by kind and the corrected third track in the console;
+selector accordion; `/` → home, `/console` → console; README Missions
+section. Two runner bugs fixed on the way: `python -m backend.missions` ran
+as a second module copy so augments never registered; the emitter cast a
+nested feature dict to float.
+
+Not done: F-0b threshold session (RECON/COMBAT onset confidence 0.49 sits
+below RESTRICTED because three features saturate while the derived half
+still stands behind a valid fix, so both automatic missions halt at onset
+and resume one step later; CASEVAC likewise). A real-GPU pass on exposure
+and reflections for the four environments. The eased accordion motion was
+verified only at its endpoints headless.
 
 ## Prerequisites found while scoping -- fix before any mission (F-0)
 
