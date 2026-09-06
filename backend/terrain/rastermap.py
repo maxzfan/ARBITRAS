@@ -97,12 +97,36 @@ class RasterMap:
                         minlength=len(self.classes)).astype(float)
         return q / q.sum()
 
+    # Per-class caches: the label map and the "other class" cell lists depend
+    # only on the class under the query point, so a replay of thousands of
+    # epochs pays for each once. Keyed on the grid's identity so collapse()
+    # (which copies the grid) never shares a cache with its parent.
+    def _cache(self) -> dict:
+        c = self.__dict__.get("_cache_store")
+        if c is None or c.get("grid_id") != id(self.grid):
+            c = {"grid_id": id(self.grid), "labels": {}, "other": {}}
+            self.__dict__["_cache_store"] = c
+        return c
+
+    def _labels_for(self, c0: int) -> np.ndarray:
+        cache = self._cache()["labels"]
+        if c0 not in cache:
+            mask = (self.grid == c0) | (self.grid == UNKNOWN)
+            cache[c0], _ = ndimage.label(mask)
+        return cache[c0]
+
+    def _other_for(self, c0: int) -> tuple[np.ndarray, np.ndarray]:
+        cache = self._cache()["other"]
+        if c0 not in cache:
+            other = (self.grid != c0) & (self.grid != UNKNOWN)
+            cache[c0] = np.nonzero(other)
+        return cache[c0]
+
     def _component(self, i0: int, j0: int) -> np.ndarray | None:
         c0 = int(self.grid[i0, j0])
         if c0 == UNKNOWN:
             return None
-        mask = (self.grid == c0) | (self.grid == UNKNOWN)
-        labels, _ = ndimage.label(mask)
+        labels = self._labels_for(c0)
         return labels == labels[i0, j0]
 
     def consistent_extent_m(self, e: float, n: float) -> float | None:
@@ -125,10 +149,9 @@ class RasterMap:
         c0 = int(self.grid[idx])
         if c0 == UNKNOWN:
             return None
-        other = (self.grid != c0) & (self.grid != UNKNOWN)
-        if not other.any():
+        ii, jj = self._other_for(c0)
+        if len(ii) == 0:
             return None
-        ii, jj = np.nonzero(other)
         ce, cn = self.cell_centres(ii, jj)
         d = np.hypot(ce - e, cn - n)
         k = int(np.argmin(d))
