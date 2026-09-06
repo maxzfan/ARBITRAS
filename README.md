@@ -203,6 +203,52 @@ the arbiter stays NOMINAL through the carry-off, and the §10 check reads
 channel. The results section above predates those streams. Terrain neither
 causes nor fixes this; the terrain pipeline inherits it.
 
+## Missions (Track F) — one arbiter, four theatres
+
+`python -m console.server` now opens a routing page at `/`: a hero that
+says what ARBITER is (every headline number computed from the streams on
+disk at server start, with its source), a four-way mission selector whose
+tiles render each mission's own environment from one WebGL renderer, and
+the console itself at `/console?mission=<name>` in the third section.
+Scope, decisions and measured numbers: `tracks/TRACK_F.md` and the four
+`tracks/TRACK_F_<MISSION>.md` files.
+
+| Mission | Attack (design.md §7) | Correction | Measured on the stream |
+|---|---|---|---|
+| **LOGISTICS** | Intermediate carry-off, cross-corridor, six GPS SVs, 0.2 m/s | **Operator takeover** without a trusted fix: corridor breach withdraws autonomy, a person drives the convoy (keyboard / gamepad / touch; a scripted stand-in when nobody is at the controls, labelled), hand-back at DEGRADED | DEGRADED 65, SURRENDERED 67, staircase 180/190/200, credential lapse 390 |
+| **RECON** | Repeater at a 300 m standoff re-radiating all GPS (offset meaconing) | **Automatic, stationary deduction**: GPS is the odd constellation out and is dropped wholesale; the scout keeps a Galileo fix; at an observation point the drag of the believed fix while stationary is the spoof and points at the emitter | 12 GPS out at onset, information ratio 0.80, Galileo fix within 1 m with PL 7.4 m while the believed fix is 118 m out; nothing excluded once the repeater stops |
+| **CASEVAC** | Carrier-coherent carry-off along the route toward the collection point | **Automatic, terrain-referenced**: Track E's signed pre-map and simulated class sensor; each class boundary the sensor crosses pins arc length along the known route | SURRENDERED 62 (code−carrier blind, residual + geometry catch it), staircase 150/160/170 |
+| **COMBAT** | Crude 15 dB step on all GPS, 250 m commanded (98 m achieved: Galileo anchors the joint fix) | **Operator takeover on the corrected fix**: autonomy withdrawn (three features saturate), the operator drives on the Galileo fix ARBITER stands behind; fire-control input marked conditional | SURRENDERED 60 (two states skipped), 12 GPS out, PL 7.4 m, staircase 86/96/106 |
+
+Every mission stream is real USN8 observables with the attack injected in
+the measurement domain: `python -m backend.missions --mission all`
+regenerates `out/<name>.jsonl` and `docs/stream_provenance_<name>.md`.
+The route, props, motion, halts and environments are a presentation frame
+under the measured displacement; the receiver never moved.
+
+Two mechanisms landed on the way and apply to everything above:
+
+- **Feature 2 was unscored in every demo stream** (`backend/demo.py`
+  never fed the post-fit residual to the extractor; fixed 2026-09-05
+  late). The regenerated demo now transitions on signal at epoch 61/62.
+  The shipped thresholds pre-date that change: clean-day FSR at 0.643 is
+  now 0.041 (5 events), and a crude attack saturating three features
+  reads 0.49 at onset even while the derived half stands behind a valid
+  fix. The §10 threshold session has to be redone on the wired pipeline.
+- **Constellation-first exclusion** (`backend/missions.py`): when the
+  cross-constellation feature is saturated and both channels touching one
+  constellation are beyond their clean-day scale while the third is inside
+  half of it, that constellation is excluded and nothing else (0 fires on
+  2,880 clean epochs). The per-SV residual rule cascades onto authentic
+  satellites under a subset carry-off (LOGISTICS, CASEVAC): detection, not
+  fault isolation — RAIM exclusion by solution separation is the roadmap.
+
+Environments are modules (`console/web/env/`, contract in `CONTRACT.md`,
+preview at `/env/preview.html?env=<name>`), rendered, never imagery; assets
+are Poly Haven CC0, fetched by `bootstrap.sh`. Headless screenshots must be
+judged with `?post=0&shadow=0&envmap=0` (software GL renders the composer
+and float environment maps near-black).
+
 ## How the thresholds were set
 
 By hand, from distributions, per design.md §10 — never a round number

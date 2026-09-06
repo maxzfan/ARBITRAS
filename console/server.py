@@ -237,7 +237,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
-        if u.path in ("/", "/index.html"):
+        if u.path == "/":
+            # Track F: the routing page is the front door; the console lives at
+            # /console (and /index.html) and is what the page's third section hosts.
+            home = WEB / "home.html"
+            return self._file(home if home.exists() else WEB / "index.html", "text/html; charset=utf-8")
+        if u.path in ("/console", "/index.html"):
             return self._file(WEB / "index.html", "text/html; charset=utf-8")
         if u.path == "/route.js":
             # Our own kinematics module (mirrors console/mission.py); not vendor.
@@ -265,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             # straight from the .npz; nothing from backend/ is imported.
             t = terrain_map()
             return self._json(t) if t else self.send_error(404, "no terrain map in data/")
-        if u.path == "/home":
+        if u.path == "/home":                       # kept as an alias
             return self._file(WEB / "home.html", "text/html; charset=utf-8")
         if u.path.startswith("/overlays/"):
             name = Path(u.path[10:]).name

@@ -432,7 +432,7 @@
     // LOGISTICS console (its own frame over its own data), labelled as such,
     // never another mission's frame over logistics data.
     const target = ms.built ? name : 'logistics';
-    const url = `/?mission=${encodeURIComponent(target)}`;
+    const url = `/console?mission=${encodeURIComponent(target)}`;
     right.innerHTML = (ms.built ? '' : `<span class="badge">stream pending · logistics console shown</span>`)
       + `<span class="badge ${cls}">${label}</span><a class="badge link" href="${url}" target="_blank">open console ↗</a>`;
     const fr = document.getElementById('consoleFrame'); fr.style.display = 'block'; document.getElementById('consoleEmpty').style.display = 'none';
