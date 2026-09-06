@@ -44,6 +44,8 @@ VENDOR_MIME = {
     ".glb": "model/gltf-binary", ".gltf": "model/gltf+json",
     ".wasm": "application/wasm",
 }
+ICON_MIME = {"/favicon.svg": "image/svg+xml", "/favicon.ico": "image/x-icon",
+             "/apple-touch-icon.png": "image/png"}
 DEFAULT_SOURCE = Path("out/demo.jsonl")   # real USN8 data (backend/demo.py); fixture retired
 
 
@@ -271,6 +273,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(home if home.exists() else WEB / "index.html", "text/html; charset=utf-8")
         if u.path in ("/console", "/index.html"):
             return self._file(WEB / "index.html", "text/html; charset=utf-8")
+        if u.path in ICON_MIME:
+            # Without these the browser probes /favicon.ico, is handed the page
+            # instead, and falls back to its own default glyph.
+            return self._file(WEB / u.path[1:], ICON_MIME[u.path])
         if u.path == "/route.js":
             # Our own kinematics module (mirrors console/mission.py); not vendor.
             return self._file(WEB / "route.js", "application/javascript")
