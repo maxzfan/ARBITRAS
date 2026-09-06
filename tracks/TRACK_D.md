@@ -255,3 +255,39 @@ exactly that much." Then the credential close, as before.
 
 If the RC car exists: the OFF car hits the wall; the ON car slows, wobbles,
 and finishes the corridor.
+
+# TRACK RESOLUTION (written 2026-09-05, after the fit)
+
+Built as specified, D1 through D5; refs are commits on main.
+
+1. **D1-D3 landed** (0dbf0fa): weighted solve on Track C's H as-is (LOS
+   columns negated internally, `corrected_position = x_lin + dx[0:3]`),
+   slope-form PL, five-check gate with 10-grant/1-revoke hysteresis. One
+   acceptance criterion was false as written: PL is NOT monotone
+   non-increasing as any weight → 0 (information loss inflates the other
+   slopes; G18 sweep moved PL 1.09 → 1.50 m/m). The true form — the
+   downweighted SV's own slope → 0 — is asserted, counterexample pinned in
+   `test_protection.py`.
+2. **D4 landed** (3ad9bfc): `geometry.correction` and `features.by_sv` flow
+   through `backend.replay` and `backend.demo`; the extended fixture
+   round-trips `console.replay` with zero verifier-banner fires. Weights are
+   the binary fallback (theta_low == theta_high) from `excluded_sv`, with
+   `{sv: w==0} == excluded_sv` asserted.
+3. **Thresholds fit, PLACEHOLDER retired** (590962d): tau 5.187 m, chi-square
+   cutoff 7.703 m², DR drift bound 20.672 m — all p99.9 of the clean day
+   (`python -m backend.correction.validate`, distributions in
+   out/correction_thresholds.json). ALERT_LIMIT_M 15.0 still carries
+   PLACEHOLDER provenance pending team sign-off.
+4. **Cut rule: passed.** Corrected fix on the antenna horizontally — p50
+   0.95 m, max 3.97 m over 2,880 clean epochs. The 3D error (p50 15.2 m) is
+   the unmodelled single-frequency vertical atmosphere, stated in the README.
+5. **§10-style integrity check run: zero violations in all four scenarios**
+   (correction_ok true while attack-induced displacement > PL). Carry-off
+   revokes 1 epoch after onset. Uniform offsets (simplistic, meaconing)
+   displace the corrected fix 0.000 m — absorbed exactly by the clock
+   columns; timing attacks, not position attacks.
+6. **Known holes, stated:** the demo distrust rule never fires under any
+   scenario (the residual test does all the revoking — saturation threshold
+   deserves a look); 14 clean epochs show fault-free error > PL (no K·sigma
+   nominal term — README limitation 11); check 5 (cross-constellation
+   per-solution overlap) remains a None seam.
