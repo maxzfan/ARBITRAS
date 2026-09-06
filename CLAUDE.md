@@ -1,4 +1,4 @@
-# ARBITER
+# ARBITRAS
 
 Authenticated Ranging, Bounded Integrity, Tiered Execution Rights.
 

@@ -7,7 +7,7 @@ whether the vehicle may drive on it. **You never decide state.** The console
 decides what to do with `correction_ok`; you only say whether the math holds.
 
 Read first, in this order: design.md §5, §6b, §8, §10; TRACK_C.md (GOTCHA 2 is
-load-bearing for you); TRACK_B.md "Decisions made" (the arbiter is pure Python
+load-bearing for you); TRACK_B.md "Decisions made" (the arbitras is pure Python
 and you must not break that).
 
 ## Why this track exists
@@ -25,7 +25,7 @@ only inside the alert limit.** That is a threshold with a derivation, not a
 policy bolt-on.
 
 ## Setup (~10 min, unattended)
-    git clone https://github.com/maxzfan/ARBITER.git && cd ARBITER
+    git clone https://github.com/maxzfan/ARBITRAS.git && cd ARBITRAS
     bash bootstrap.sh
     source .venv/bin/activate
     python -m pytest console/tests -q      # must be green before you start
@@ -141,7 +141,7 @@ when it looks clean. Put both facts on screen; they explain the decision.
 5. `cross_constellation`: single-constellation fixes overlap the corrected fix
    within their own covariances. `null` until Track A's fourth feature exists.
 
-Hysteresis, matching the arbiter's asymmetry: `correction_ok` turns **on** only
+Hysteresis, matching the arbitras's asymmetry: `correction_ok` turns **on** only
 after 10 consecutive epochs of all checks passing, turns **off** on the first
 failing epoch. One epoch can revoke, no single epoch can grant.
 
@@ -180,7 +180,7 @@ Property test: PL is monotone non-increasing when a satellite's w goes to 0.
 **D3 -- gate + hysteresis** (`backend/correction/gate.py`)
 Inputs: the five check inputs, epoch history. Outputs: `checks`, `correction_ok`,
 `speed_scale`. Pure, deterministic, no wall clock -- Track C's Dirichlet sweep
-replays it and Track B's arbiter rule applies: **no time inside the gate.**
+replays it and Track B's arbitras rule applies: **no time inside the gate.**
 Acceptance: 10-epoch grant, 1-epoch revoke, verified in tests the way Track B
 verified invariant 2.
 

@@ -11,7 +11,7 @@ renders a loud SYNTHETIC banner whenever it sees that flag. design.md §11b:
 "Only what actually ran. No mockups, no fake data." This file exists to be
 replaced by Track A's real output before anything is recorded.
 
-The numbers here are shaped to exercise every branch of the arbiter. They are
+The numbers here are shaped to exercise every branch of the arbitras. They are
 not measurements and no number from this file may appear in the video, the
 README, or the slides.
 
@@ -106,7 +106,7 @@ def generate(path: Path):
                          "alt": ALT0},
             "features": {k: round(max(0.0, min(1.0, v)), 4) for k, v in features.items()},
             "geometry": geometry,
-            # A receiver tracks what it sees; trust is the arbiter's business.
+            # A receiver tracks what it sees; trust is the arbitras's business.
             # §5 says this field is receiver output, so it is the visible count.
             "satellites_tracked": len(sky),
             # Out-of-contract replay metadata. A real vehicle does not have this;

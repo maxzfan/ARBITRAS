@@ -193,7 +193,7 @@ def test_determinism_two_gates_identical():
 
 
 def test_no_wall_clock_in_gate_source():
-    """TRACK_B.md arbiter purity, applied here: no time inside the gate."""
+    """TRACK_B.md arbitras purity, applied here: no time inside the gate."""
     import inspect
     import backend.correction.gate as gate_mod
     src = inspect.getsource(gate_mod)

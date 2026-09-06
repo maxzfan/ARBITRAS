@@ -1,7 +1,7 @@
 """The extended contract fixture round-trips through the console.
 
 D4 acceptance (TRACK_D.md): after fixtures/epoch.json grew
-`geometry.correction` and `features.by_sv`, the arbiter must still ingest
+`geometry.correction` and `features.by_sv`, the arbitras must still ingest
 it, explain() must still produce only verifiable claims (design.md §14 —
 verify() failing is what fires the console banner), and nothing in the
 fixture may read as synthetic.
@@ -9,7 +9,7 @@ fixture may read as synthetic.
 import json
 from pathlib import Path
 
-from console.arbiter.explain import explain, verify
+from console.arbitras.explain import explain, verify
 from console.replay import arbitrate
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "epoch.json"

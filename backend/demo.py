@@ -111,7 +111,7 @@ ATTACK_EPOCHS = 90       # beats 2/3: 12:30:00 -> 13:14:30
 # right knob. PENDING is always derived from T_int x d; never a literal.
 T_INT_EPOCHS, DISCLOSURE_LAG_INTERVALS = 60, 2
 PENDING_EPOCHS = T_INT_EPOCHS * DISCLOSURE_LAG_INTERVALS
-# Tail composition. VALID must outlast the arbiter's recovery from RESTRICTED
+# Tail composition. VALID must outlast the arbitras's recovery from RESTRICTED
 # (~40 epochs under the placeholder thresholds) and hold >= LEGIBLE_EPOCHS;
 # EXPIRED holds SURRENDERED-under-a-clean-sky >= LEGIBLE_EPOCHS.
 POST_VALID_EPOCHS = 120   # 13:15:00 -> 14:14:30

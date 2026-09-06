@@ -6,9 +6,9 @@ import random
 
 import pytest
 
-from console.arbiter.explain import explain, verify
-from console.arbiter.machine import Arbiter
-from console.arbiter.states import (
+from console.arbitras.explain import explain, verify
+from console.arbitras.machine import Arbitras
+from console.arbitras.states import (
     MIN_DWELL_EPOCHS,
     RECOVERY_EPOCHS,
     STALE_GRACE_TICKS,
@@ -38,7 +38,7 @@ def drive(arb, confidence, n, credential="VALID", **kw):
 # ---------------------------------------------------------------- invariant 1
 
 def test_downgrade_is_immediate_and_may_skip_states():
-    arb = Arbiter()
+    arb = Arbitras()
     assert arb.state is TrustState.NOMINAL
     d = arb.step(epoch(0.10))
     assert d.state is TrustState.SURRENDERED, "hard failure must skip straight down"
@@ -48,7 +48,7 @@ def test_downgrade_is_immediate_and_may_skip_states():
 def test_authority_never_rises_more_than_one_state_in_an_epoch():
     """Property test over a random walk. Invariant 1 + 2 together."""
     rng = random.Random(20260905)
-    arb = Arbiter(initial=TrustState.SURRENDERED)
+    arb = Arbitras(initial=TrustState.SURRENDERED)
     prev = arb.state
     for _ in range(4000):
         d = arb.step(epoch(rng.random(), rng.choice(["VALID", "VALID", "PENDING"])))
@@ -59,14 +59,14 @@ def test_authority_never_rises_more_than_one_state_in_an_epoch():
 # ---------------------------------------------------------------- invariant 2
 
 def test_no_single_epoch_restores_authority():
-    arb = Arbiter(initial=TrustState.SURRENDERED)
+    arb = Arbitras(initial=TrustState.SURRENDERED)
     d = arb.step(epoch(1.0))
     assert d.state is TrustState.SURRENDERED
     assert d.reason == "recovery_gated"
 
 
 def test_recovery_walks_up_one_state_at_a_time():
-    arb = Arbiter(initial=TrustState.SURRENDERED)
+    arb = Arbitras(initial=TrustState.SURRENDERED)
     drive(arb, 0.95, RECOVERY_EPOCHS - 1)
     assert arb.state is TrustState.SURRENDERED, "must not upgrade early"
     drive(arb, 0.95, 1)
@@ -78,7 +78,7 @@ def test_recovery_walks_up_one_state_at_a_time():
 
 
 def test_recovery_run_resets_on_a_single_bad_epoch():
-    arb = Arbiter(initial=TrustState.RESTRICTED)
+    arb = Arbitras(initial=TrustState.RESTRICTED)
     drive(arb, 0.95, RECOVERY_EPOCHS - 1)
     arb.step(epoch(0.60))          # implies DEGRADED == no, implies same-or-lower
     drive(arb, 0.95, RECOVERY_EPOCHS - 1)
@@ -96,7 +96,7 @@ def test_minimum_dwell_is_enforced():
 @pytest.mark.parametrize("status", ["REVOKED", "EXPIRED"])
 def test_credential_failure_forces_surrender_at_perfect_confidence(status):
     """The whole pitch: a clean sky does not buy authority. design.md §11a beat 4."""
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(epoch(1.0, status))
     assert d.state is TrustState.SURRENDERED
     assert d.reason == "credential_force"
@@ -104,7 +104,7 @@ def test_credential_failure_forces_surrender_at_perfect_confidence(status):
 
 
 def test_unverified_credential_caps_at_degraded():
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(epoch(1.0, "UNVERIFIED"))
     assert d.state is TrustState.DEGRADED
     assert d.reason == "credential_cap"
@@ -112,7 +112,7 @@ def test_unverified_credential_caps_at_degraded():
 
 @pytest.mark.parametrize("status", ["VALID", "PENDING"])
 def test_pending_and_valid_do_not_override(status):
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(epoch(0.90, status))
     assert d.state is TrustState.NOMINAL
     assert d.reason == "hold"
@@ -120,7 +120,7 @@ def test_pending_and_valid_do_not_override(status):
 
 def test_credential_cap_does_not_raise_authority():
     """UNVERIFIED caps; it must never lift a lower state up to the cap."""
-    arb = Arbiter(initial=TrustState.SURRENDERED)
+    arb = Arbitras(initial=TrustState.SURRENDERED)
     d = arb.step(epoch(0.10, "UNVERIFIED"))
     assert d.state is TrustState.SURRENDERED
 
@@ -128,7 +128,7 @@ def test_credential_cap_does_not_raise_authority():
 def test_credential_force_stays_the_stated_reason_while_it_binds():
     """Video beat 4: SURRENDERED held ~25 s at confidence ~0.93. Every epoch of
     that hold must say the authorisation lapsed -- not that confidence is low."""
-    arb = Arbiter()
+    arb = Arbitras()
     arb.step(epoch(0.93, "EXPIRED"))
     for _ in range(20):
         d = arb.step(epoch(0.93, "EXPIRED"))
@@ -140,7 +140,7 @@ def test_credential_force_stays_the_stated_reason_while_it_binds():
 
 
 def test_credential_cap_stays_the_stated_reason_while_it_binds():
-    arb = Arbiter()
+    arb = Arbitras()
     arb.step(epoch(0.95, "UNVERIFIED"))
     d = arb.step(epoch(0.95, "UNVERIFIED"))
     assert d.state is TrustState.DEGRADED
@@ -150,7 +150,7 @@ def test_credential_cap_stays_the_stated_reason_while_it_binds():
 def test_recovery_explanation_does_not_claim_low_confidence():
     """Seen on screen: DEGRADED at confidence 0.95 with 'confidence is below the
     trusted range'. The state is right (invariant 2); the sentence was false."""
-    arb = Arbiter(initial=TrustState.RESTRICTED)
+    arb = Arbitras(initial=TrustState.RESTRICTED)
     d = arb.step(epoch(0.95))
     assert d.state is TrustState.RESTRICTED and d.reason == "recovery_gated"
     ex = explain(d)
@@ -162,7 +162,7 @@ def test_recovery_explanation_does_not_claim_low_confidence():
 # ---------------------------------------------------------------- invariant 4
 
 def test_clock_and_credential_gates_close_below_nominal():
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(epoch(0.90))
     assert d.clock_discipline and d.accepting_credentials
     d = arb.step(epoch(0.60))
@@ -174,7 +174,7 @@ def test_clock_and_credential_gates_close_below_nominal():
 # ---------------------------------------------------------------- invariant 5
 
 def test_degraded_pursues_the_next_best_observation():
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(epoch(0.60, geometry={"next_best_observation": "E"}))
     assert d.state is TrustState.DEGRADED
     assert d.pursuing == "E"
@@ -182,7 +182,7 @@ def test_degraded_pursues_the_next_best_observation():
 
 
 def test_other_states_ignore_next_best_observation():
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(epoch(0.90, geometry={"next_best_observation": "E"}))
     assert d.state is TrustState.NOMINAL
     assert d.pursuing is None
@@ -191,7 +191,7 @@ def test_other_states_ignore_next_best_observation():
 # ------------------------------------------------------- stale epochs / §5
 
 def test_silence_steps_authority_down():
-    arb = Arbiter()
+    arb = Arbitras()
     for _ in range(STALE_GRACE_TICKS - 1):
         d = arb.step(None)
         assert d.state is TrustState.NOMINAL, "grace period holds"
@@ -201,7 +201,7 @@ def test_silence_steps_authority_down():
 
 
 def test_malformed_epoch_counts_as_silence():
-    arb = Arbiter()
+    arb = Arbitras()
     for _ in range(STALE_GRACE_TICKS):
         d = arb.step({"timestamp": "x", "confidence": "not-a-number",
                       "credential_status": "VALID"})
@@ -209,7 +209,7 @@ def test_malformed_epoch_counts_as_silence():
 
 
 def test_unknown_credential_status_is_not_trusted():
-    arb = Arbiter()
+    arb = Arbitras()
     for _ in range(STALE_GRACE_TICKS):
         d = arb.step(epoch(0.99, "TOTALLY_FINE_HONEST"))
     assert d.state is TrustState.DEGRADED
@@ -218,7 +218,7 @@ def test_unknown_credential_status_is_not_trusted():
 # ------------------------------------------------- freeze rule / §9
 
 def test_geometry_divergence_reported_against_last_nominal_epoch():
-    arb = Arbiter()
+    arb = Arbitras()
     arb.step(epoch(0.90, geometry={"information_ratio": 0.90, "excluded_sv": []}))
     d = arb.step(epoch(0.60, geometry={"information_ratio": 0.50,
                                        "excluded_sv": ["G07", "G13"]}))
@@ -230,7 +230,7 @@ def test_geometry_divergence_reported_against_last_nominal_epoch():
 
 
 def test_frozen_geometry_does_not_refresh_below_nominal():
-    arb = Arbiter()
+    arb = Arbitras()
     arb.step(epoch(0.90, geometry={"information_ratio": 0.90, "excluded_sv": []}))
     arb.step(epoch(0.60, geometry={"information_ratio": 0.50, "excluded_sv": ["G07"]}))
     d = arb.step(epoch(0.60, geometry={"information_ratio": 0.40, "excluded_sv": ["G07"]}))
@@ -242,7 +242,7 @@ def test_frozen_geometry_does_not_refresh_below_nominal():
 # ------------------------------------------------- explanation layer / §14
 
 def test_explanation_uses_operator_language():
-    arb = Arbiter()
+    arb = Arbitras()
     e = epoch(0.60, features={"cn0_anomaly": 0.71},
               geometry={"displacement_bound_m": 41.2, "excluded_sv": ["G07"]})
     ex = explain(arb.step(e))
@@ -253,7 +253,7 @@ def test_explanation_uses_operator_language():
 
 
 def test_explanation_claims_verify_against_the_epoch():
-    arb = Arbiter()
+    arb = Arbitras()
     e = epoch(0.60, features={"cn0_anomaly": 0.71},
               geometry={"displacement_bound_m": 41.2, "excluded_sv": ["G07", "G13"]})
     ex = explain(arb.step(e))
@@ -263,7 +263,7 @@ def test_explanation_claims_verify_against_the_epoch():
 
 
 def test_verifier_catches_a_fabricated_number():
-    arb = Arbiter()
+    arb = Arbitras()
     e = epoch(0.60, geometry={"displacement_bound_m": 41.2})
     ex = explain(arb.step(e))
     ex["claims"].append({"text": "900 m", "value": 900.0,

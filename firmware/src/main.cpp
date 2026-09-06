@@ -1,4 +1,4 @@
-// ARBITER demo car firmware. Spec: tracks/TRACK_E.md (FROZEN).
+// ARBITRAS demo car firmware. Spec: tracks/TRACK_E.md (FROZEN).
 // The car is a dumb actuator: (throttle, steer) over UDP -> two DRV8833
 // channels. No localization, no state machine, no GNSS knowledge.
 

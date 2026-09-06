@@ -1,4 +1,4 @@
-"""The trust arbiter: confidence + credential state -> positional authority.
+"""The trust arbitras: confidence + credential state -> positional authority.
 
 Consumes the §5 interface contract. Touches no observable, ever.
 Pure and synchronous, so Track C's Dirichlet sweep (§10) can replay a whole
@@ -79,7 +79,7 @@ def _valid(epoch: Any) -> bool:
     return epoch.get("credential_status") in CREDENTIAL_STATUSES
 
 
-class Arbiter:
+class Arbitras:
     """Stateful across epochs. One instance per replay."""
 
     def __init__(self, initial: TrustState = TrustState.NOMINAL):

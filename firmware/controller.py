@@ -9,21 +9,21 @@ Architecture (see tracks/TRACK_E.md for the car side):
                                                  |-- motion loop --UDP--> car
                                                  `-- fan-out ----SSE--> browsers
 
-The console server spawns a fresh Arbiter per /events connection, so a browser
+The console server spawns a fresh Arbitras per /events connection, so a browser
 and a controller connecting separately would ride desynced replays. This
 process therefore opens ONE upstream /events stream per run (keypress g) and
 tees every payload to (a) the motion loop and (b) any browsers attached to
 :8421. Point the projected console at http://localhost:8421 — all other paths
 are proxied to :8420 verbatim.
 
-The arbiter/console product never commands motion (CLAUDE.md: advisory only).
+The arbitras/console product never commands motion (CLAUDE.md: advisory only).
 This file is the demo harness that CONSUMES the §5 contract, the same way a
 real autonomy stack would; all command authority lives here and in the car.
 
 Keys:  g = start run   o = layer-off pre-run   r = reset (stop, zero pose)
        q = quit (zeros the car first)
 
-State -> motion policy (arbiter owns all hysteresis; none is added here):
+State -> motion policy (arbitras owns all hysteresis; none is added here):
 
   NOMINAL                     track believed position       speed cap 1.0
   DEGRADED + correction_ok    track corrected_position      cap speed_scale
@@ -436,7 +436,7 @@ class Controller:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="ARBITER demo car controller")
+    ap = argparse.ArgumentParser(description="ARBITRAS demo car controller")
     ap.add_argument("--car-ip", help="car IP from the READY line")
     ap.add_argument("--id", type=int, default=10, help="CAR_ID (default 10)")
     ap.add_argument("--rate", type=float, default=DEMO_RATE_EPS)

@@ -4,7 +4,7 @@ You own `backend/rinex/`, `backend/injector/`, `backend/detection/`.
 You produce `confidence` and `features`. You never touch state names.
 
 ## Setup (~10 min, unattended)
-    git clone https://github.com/maxzfan/ARBITER.git && cd ARBITER
+    git clone https://github.com/maxzfan/ARBITRAS.git && cd ARBITRAS
     bash bootstrap.sh
     source .venv/bin/activate
 

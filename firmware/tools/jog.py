@@ -1,4 +1,4 @@
-"""Keyboard jogger for the ARBITER demo car. Spec: tracks/TRACK_E.md.
+"""Keyboard jogger for the ARBITRAS demo car. Spec: tracks/TRACK_E.md.
 
     python -m firmware.tools.jog --ip 172.20.10.4 --id 10
 
@@ -96,7 +96,7 @@ def read_key(timeout: float = 0.1) -> str | None:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="ARBITER demo car jogger")
+    ap = argparse.ArgumentParser(description="ARBITRAS demo car jogger")
     ap.add_argument("--ip", required=True, help="car IP from the READY line")
     ap.add_argument("--id", type=int, required=True, help="CAR_ID (10 or 11)")
     args = ap.parse_args()

@@ -2,7 +2,7 @@
 
 Decides whether the vehicle may drive on the corrected fix. Pure and
 deterministic — no I/O, no wall clock — so Track C's Dirichlet sweep replays
-it per weight draw and Track B's arbiter rule holds: no time inside the gate
+it per weight draw and Track B's arbitras rule holds: no time inside the gate
 (TRACK_B.md "Decisions made"). This module never decides state; the console
 consumes `correction_ok` and must never recompute it (design.md §5 extension,
 TRACK_D.md "CONTRACT EXTENSION REQUESTED").
@@ -10,7 +10,7 @@ TRACK_D.md "CONTRACT EXTENSION REQUESTED").
 Check semantics (TRACK_D.md "The gate — five checks, then hysteresis"):
 each check returns True, False, or None (not evaluated). An epoch passes iff
 every non-null check is True AND at least one check was evaluated. Hysteresis
-matches the arbiter's asymmetry (design.md §8 invariant 2): correction_ok
+matches the arbitras's asymmetry (design.md §8 invariant 2): correction_ok
 turns ON only after GRANT_EPOCHS consecutive passing epochs, OFF on the first
 non-passing epoch. One epoch can revoke, no single epoch can grant.
 """
@@ -26,8 +26,8 @@ import math
 ALERT_LIMIT_M = 15.0
 ALERT_LIMIT_PROVENANCE = "PLACEHOLDER"  # -> "agreed" once the team signs off
 
-# Hysteresis grant window. Matches the arbiter's RECOVERY_EPOCHS asymmetry
-# (console/arbiter/states.py). TRACK_D.md: "One epoch can revoke, no single
+# Hysteresis grant window. Matches the arbitras's RECOVERY_EPOCHS asymmetry
+# (console/arbitras/states.py). TRACK_D.md: "One epoch can revoke, no single
 # epoch can grant." Policy, not fitted to data — defensible as stated in §8.
 GRANT_EPOCHS = 10
 
@@ -194,7 +194,7 @@ class GateDecision:
 
 class Gate:
     """Epoch-history hysteresis over the check dict. Stateful across epochs,
-    one instance per replay — same shape as console/arbiter Arbiter.
+    one instance per replay — same shape as console/arbitras Arbitras.
 
     Pass: every non-null check True and at least one check non-null. An
     all-None dict is NOT a pass — nothing was evaluated, no grant progress —

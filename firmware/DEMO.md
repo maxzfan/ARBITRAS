@@ -1,4 +1,4 @@
-# ARBITER physical demo — 2-minute runbook
+# ARBITRAS physical demo — 2-minute runbook
 
 One ESP32 car enacts `out/demo.jsonl` (510 epochs at 4.25 eps = 120.0 s) on a
 taped floor course while the console is projected beside it. The Track D
@@ -6,7 +6,7 @@ course correction is the centerpiece; the credential close is the closer.
 
 All epoch numbers below are **verified** against the regenerated stream
 (commit `8b5d88c`) by replaying it through the real
-`console.arbiter.machine.Arbiter`. If `out/demo.jsonl` is ever regenerated,
+`console.arbitras.machine.Arbitras`. If `out/demo.jsonl` is ever regenerated,
 re-verify before trusting this table (script pattern: replay + print state
 transitions, correction_ok ranges, DEGRADED∧correction_ok window).
 
@@ -110,7 +110,7 @@ protection level 2.8→2.7 m.
 
 ## 8. Motion policy (for whoever narrates)
 
-The arbiter owns all hysteresis; the controller adds none. Only DEGRADED
+The arbitras owns all hysteresis; the controller adds none. Only DEGRADED
 consults the correction block (the Track D law).
 
 | state | correction_ok | nav source | cap | behaviour |

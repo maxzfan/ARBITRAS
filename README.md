@@ -1,11 +1,11 @@
-# ARBITER
+# ARBITRAS
 
 **A**uthenticated **R**anging, **B**ounded **I**ntegrity, **T**iered **E**xecution **R**ights.
 
 Spoof detection is solved. What happens in the ninety seconds after detection
 is not.
 
-ARBITER sits between a GNSS receiver and an autonomy stack and continuously
+ARBITRAS sits between a GNSS receiver and an autonomy stack and continuously
 scores positional trust, then degrades the vehicle's authority in stages —
 full autonomy, coast on inertial, finish the leg, hold position — rather than
 making one binary trust decision.
@@ -40,7 +40,7 @@ flagged, and it was never beaten while the system still trusted the signal
 ![empirical vs bound](docs/plots/displacement_empirical_vs_bound.png)
 
 **Continuity — false surrender rate: 0.0000** (0 of 2,880 clean epochs below
-NOMINAL through the arbiter, hysteresis included). Reported per convention as
+NOMINAL through the arbitras, hysteresis included). Reported per convention as
 a distribution over 1,000 Dirichlet draws of the four feature weights and the
 feature/geometry blend, never a point: raw-confidence FSR min/median/max
 **0.000 / 0.000 / 0.282**; arbitrated FSR median **0.0000**, max 0.460 in the
@@ -137,7 +137,7 @@ without a reason.
    deep-attack quartile reads SURRENDERED.
 
 The provenance string is stamped into every emitted decision
-(`console/arbiter/states.py` is the single swap point). The Dirichlet sweep
+(`console/arbitras/states.py` is the single swap point). The Dirichlet sweep
 above is the answer to "you picked the weights that make this work":
 arXiv 2607.05415 showed composite PNT scores flip winners in up to 22% of
 re-weighting draws; we report the whole distribution and the exact fraction
@@ -226,7 +226,7 @@ Stated properly, not softened:
 
 The Stoics distinguish the impression (*phantasia*) from the assent
 (*sunkatathesis*). A spoofed vehicle's error is not in perceiving — the
-spoofed signal is genuinely there — but in assenting to it. ARBITER is a
+spoofed signal is genuinely there — but in assenting to it. ARBITRAS is a
 discipline of assent: perception continues under attack; authority is what
 gets withdrawn. (Epictetus, tr. Carter 1758; Marcus Aurelius, tr. Long
 1877 — both public domain.)
