@@ -1,7 +1,5 @@
 # ARBITRAS
 
-**A**uthenticated **R**anging, **B**ounded **I**ntegrity, **T**iered **E**xecution **R**ights.
-
 Spoof detection is solved. What happens in the ninety seconds after detection
 is not.
 
