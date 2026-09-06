@@ -409,3 +409,78 @@ stop: the raster is the risk, not the maths.
 4. Does an operator want a terrain prediction on screen ("expect water 38 m
    north-east") or only the verdict? Mentor question 3 in design.md §16 asks
    the same thing about the lateral offset advisory; the answer applies here.
+
+# TRACK RESOLUTION (written 2026-09-05, after the build)
+
+Built as specified, E1 through E5, on branch `track_b`; refs are commits on
+that branch. Plan: `docs/superpowers/plans/2026-09-05-terrain-channel.md`.
+Nothing here ran for the submission video. Every terrain record is stamped
+`sensor.source: "simulated"`.
+
+1. **E1 landed** (e820799, 3565c14): `backend/terrain/rastermap.py` —
+   footprint posterior, class-consistent extent (flood fill, unlabelled cells
+   absorbed, None at the window edge), nearest boundary, ray-march boundary
+   distance, class collapse, checksum, npz round-trip. Acceptance on the
+   hand-drawn 20×20 fixture (`fixtures/terrain_fixture.json`): extent
+   127.28 + 7.07 m by hand, boundaries 35/80/85/100 m on the four cardinal
+   rays, all matched. Metres-per-degree pinned equal to `console/mission.py`.
+2. **E2 landed** (1eb3c4a): confusion-matrix sensor, seeded, Bayes posterior
+   over the drawn column. Identity sensor is one-hot; reset replays the draw
+   sequence, so clean and injected replays differ only through the believed
+   position.
+3. **E3 landed** (09dbb91, 38d12d8, 34ddf0f): `OPTIONAL_FEATURE_NAMES`,
+   weights renormalised over scored features, `score_detail.features_scored`
+   (design.md §5 updated), `record(terrain=)`, the channel, calibration
+   (saturation = clean p99 of the windowed mismatch, gate floor = clean p0.1
+   of L), the min bound rule with `bound_source`. An epoch with no map lookup
+   makes **no claim** (feature absent) rather than repeating the last value —
+   found on the first real run, where a stale 0 read as agreement after the
+   walk left the map. Sensorless records are byte-identical apart from the
+   additive `features_scored`.
+4. **Consumers landed** (9fb9b6d, acfaa91): `extra_checks` hook so check 6
+   enters the correction gate before hysteresis; `Decision.terrain`
+   passthrough; DEGRADED advisory sentence with an eight-point compass;
+   explanation phrase and a verifiable `terrain.match_likelihood` claim.
+5. **Signed map** (1294586): Ed25519 via `cryptography` (added to
+   `bootstrap.sh`); unsigned or tampered maps are not consulted.
+6. **The raster is OpenStreetMap, not WorldCover** (931b885): no GeoTIFF
+   reader in the environment. `backend/terrain/fetch_map.py` rasterises
+   1,936 OSM elements within 600 m of the antenna at 5 m (7 classes,
+   priority order, buffered highways; relation inner rings ignored). Cut
+   rule passed: antenna cell labelled (*building*), boundary distance
+   12.5–72.5 m on all eight bearings. **37.7% of cells are unlabelled**, and
+   the conservative treatment makes the extent at the antenna 268 m — the
+   map-derived bound never binds against a 10–16 m residual bound. Map
+   completeness is the lever, not sensor quality.
+7. **The sensor is simulated at the static antenna**, not on the route
+   presentation frame (assumption 2 revised): the route lives in the
+   console and never enters the channel; the real replay's believed fix is
+   looked up on the map and that is all the channel sees.
+8. **E5 measured** (`python -m backend.terrain.validate`, rescoring the
+   shipped streams; `out/terrain_validation.json`, four README-bound plots).
+   Terrain first fires at attack epoch 2–3 (31 m at bearing 80°, predicted
+   2.7 epochs on the 90° ray). At W = 1 the clean-day fire rate is the
+   misread rate (0.40 → 0.01 across diag 0.6 → 0.99); attack fire rate
+   0.85–0.92 over the 58% of attack epochs the channel could score (the walk
+   leaves the map, and passes over a second *building* — the class-collision
+   blind spot, as predicted); d′ 1.2 → 3.9 at W = 1, 4.6 at W = 4, diag 0.99.
+   Gate check 6 stays true through the attack (2,879/2,880 carry-off epochs):
+   the corrected fix is on the antenna and the sensor agrees with it while
+   disagreeing with the believed fix — the signature of a good correction.
+   With single-epoch L and a symmetric confusion sensor the check cannot read
+   false (floor = misread level); a windowed check is the next iteration.
+9. **Composite effect is bounded by the untuned weights**: a saturated
+   terrain feature moves confidence by ≤ 0.1 at equal weights over five
+   features, β 0.5. Its weight is the threshold session's call; d′ is the
+   input to that call.
+10. **Pre-existing state exposed, not caused**: the shipped `out/*.jsonl`
+    (21:08) carry `pseudorange_residual = 0.0` throughout — `backend/demo.py`
+    calls the extractor without the post-fit residual panel that
+    `backend/replay.py` supplies — so nothing is excluded, the arbiter never
+    leaves NOMINAL under the carry-off, and `backend.measurement.displacement`
+    reads 2,792/2,880 FAIL against the residual bound with or without
+    terrain. README §Results predates those streams. Track A/B seam; left
+    untouched by this track.
+11. **Not built**: web console rendering of the terrain block (not in E1–E5);
+    the map-resolution sweep at 10 m; the trajectory (particle-filter) form;
+    the CUSUM sequential test. All remain roadmap.

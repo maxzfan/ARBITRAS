@@ -238,8 +238,8 @@ def plot_sensor_quality(rows: list[dict], out: Path) -> None:
     for ax in axes:
         ax.set_xlabel("confusion diagonal of the SIMULATED sensor"); ax.grid(alpha=0.3)
         ax.legend(fontsize=7)
-    fig.suptitle("Sensor quality sweep — the terrain channel alone, rescored over the shipped "
-                 "streams; SIMULATED sensor, fire level = half the clean-run p99", fontsize=10)
+    fig.suptitle("Terrain channel alone, rescored over the shipped streams — SIMULATED sensor; "
+                 "fire level = half the clean-run p99", fontsize=10, y=1.02)
     fig.tight_layout(); fig.savefig(out, dpi=150); plt.close(fig)
 
 
