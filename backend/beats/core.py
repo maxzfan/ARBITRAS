@@ -31,7 +31,8 @@ from ..detection import (CrossConstellation, FeatureExtractor, Weights, fit,
                          fit_cross, flagged_sv, record, score)
 from ..detection.emit import USN8_ECEF, ecef_to_lla
 from ..detection import RULED_K3
-from ..injector import CARRY_OFF, enu_basis, inject
+from ..injector import (CARRY_OFF, CLOCK_CARRY_OFF, MEACONING, SIMPLISTIC,
+                        enu_basis, inject)
 from ..rinex import ephemeris, noise
 from ..rinex.loader import load_obs
 from ..rinex.solve import (EL_MASK_DEG, masked_epoch, residual_panel,
@@ -74,9 +75,31 @@ def _clean_day_uncached(obs: str, nav):
     return day, floor, cal, xcal
 
 
+SCENARIOS = {
+    "carry_off": CARRY_OFF,
+    "clock_carry_off": CLOCK_CARRY_OFF,
+    "meaconing": MEACONING,
+    "simplistic": SIMPLISTIC,
+}
+
+
+def _spoof(name: str, onset: datetime, carrier_rate_error: float,
+           transients: bool):
+    """Build one scenario. Only the position walk takes a bearing."""
+    maker = SCENARIOS[name]
+    kw = dict(onset=onset, transients=transients)
+    if name in ("carry_off", "clock_carry_off"):
+        kw["carrier_rate_error"] = carrier_rate_error
+    if name == "carry_off":
+        kw["bearing_deg"] = cfg.BEARING_DEG
+    return maker(**kw)
+
+
 def build(obs: str = cfg.OBS, window=cfg.WINDOW, onset: datetime = cfg.ONSET,
           layer_on: bool = True, credential_for=None,
-          geometry: bool = True) -> Beat:
+          geometry: bool = True, scenario: str = "carry_off",
+          carrier_rate_error: float | None = None,
+          transients: bool | None = None) -> Beat:
     """Build one beat's streams. `layer_on=False` still emits records, but with
     confidence pinned at 1.0 and no geometry -- the trust layer switched off is
     a vehicle that computes a position and asks no questions of it."""
@@ -87,10 +110,10 @@ def build(obs: str = cfg.OBS, window=cfg.WINDOW, onset: datetime = cfg.ONSET,
 
     day, floor, cal, xcal = _clean_day(obs, nav)
 
-    spoof = CARRY_OFF(onset=onset,
-                      carrier_rate_error=cfg.CARRIER_RATE_ERROR,
-                      bearing_deg=cfg.BEARING_DEG,
-                      transients=cfg.TRANSIENTS)
+    rate = (cfg.CARRIER_RATE_ERROR if carrier_rate_error is None
+            else carrier_rate_error)
+    tr = cfg.TRANSIENTS if transients is None else transients
+    spoof = _spoof(scenario, onset, rate, tr)
     injected_all, truth_log = inject(day, spoof, floor, nav=nav)
     injected_all = [masked_epoch(e, nav) for e in injected_all]
 
@@ -150,10 +173,10 @@ def build(obs: str = cfg.OBS, window=cfg.WINDOW, onset: datetime = cfg.ONSET,
     enu = np.asarray(enu, dtype=float)
     onset_index = int(np.searchsorted([t for t in times], onset))
     attacked = w0 <= onset < w1
-    attack = (f"carry-off position walk bearing {cfg.BEARING_DEG:g} deg, "
-              f"rate {spoof.walk_off_mps:g} m/s, carrier_rate_error "
-              f"{cfg.CARRIER_RATE_ERROR:g} m/s, transients "
-              f"{'ON' if cfg.TRANSIENTS else 'OFF'}, onset {onset:%H:%M}"
+    attack = (f"{spoof.name} ({spoof.walk_mode} domain), rate "
+              f"{spoof.walk_off_mps:g} m/s, carrier_rate_error "
+              f"{spoof.carrier_rate_error:g} m/s, transients "
+              f"{'ON' if tr else 'OFF'}, onset {onset:%H:%M}"
               if attacked else
               "NO ATTACK — clean observables throughout")
     prov = (f"USN8 {w0:%Y-%m-%d %H:%M}-{w1:%H:%M} | {attack} | "
