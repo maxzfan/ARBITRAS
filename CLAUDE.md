@@ -1,7 +1,5 @@
 # ARBITRAS
 
-Authenticated Ranging, Bounded Integrity, Tiered Execution Rights.
-
 Trust layer between a GNSS receiver and an autonomy stack. Detects spoofed
 positioning, scores confidence continuously, and degrades the vehicle's
 authority in stages as confidence falls. Credential state can override
