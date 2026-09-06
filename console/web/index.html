@@ -320,12 +320,12 @@ setTimeout(function () {
 <script src="/overlays/casevac.js" onerror="this.remove()"></script>
 <!-- The dialogue box (console/web/DIALOGUE.md §4): a classic script like the
      overlays, registering window.ARBITRAS_DIALOGUE against the React global above.
-     onerror keeps a missing file from being fatal -- the console then runs with no
-     box, and, because there would be no way to click past a gate, never holds. -->
+     onerror keeps a missing file from being fatal -- the console then runs with
+     no box, and the replay is unaffected: nothing ever waited on it. -->
 <script src="/dialogue.js" onerror="this.remove()"></script>
 <script type="module">
 import htmMod from '/vendor/htm.js';
-const {useState, useEffect, useRef, useCallback} = React;
+const {useState, useEffect, useRef} = React;
 const html = htmMod.bind(React.createElement);
 
 const QS = new URLSearchParams(window.location.search);
@@ -349,16 +349,16 @@ const LOCK = QS.get('lock') === '1';     // ?lock=1: no user camera input (video
 const DISPLAY_HZ_DEFAULT = 3;
 const DISPLAY_HZ = QS.has('hz') && Number.isFinite(+QS.get('hz')) ? +QS.get('hz') : DISPLAY_HZ_DEFAULT;
 const R = window.Route;                   // console/web/route.js -- mirrors console/mission.py
-// The dialogue box, console/web/DIALOGUE.md §4. Absent (404, or a file still being
-// written) means no box AND no gate: the epoch queue never holds, and the console
-// is exactly what it was minus the bottom text.
+// The dialogue box, console/web/DIALOGUE.md §4. Absent (404, or a file still
+// being written) means no box; the replay is unaffected, and the console is
+// exactly what it was minus the bottom text.
 const DIALOGUE_BOX = (window.ARBITRAS_DIALOGUE || {}).Box || null;
 const NO_LINES = [];                      // stable identity: `lines=[]` must not
-                                          // look like a new gate on every render
-// Seed for the epoch consumer's cadence. ?rate= is passed to /events verbatim, so
-// when it is present it IS the server's rate; the server's own default is 5/s
-// (console/server.py --rate, design.md §5). Only a seed -- the real interval
-// is measured below.
+                                          // look like new lines on every render
+// Replay rate, epochs/s (design.md §5; server default 5, console/server.py
+// --rate). ?rate= is passed to /events verbatim, so when present it IS the
+// server's rate. The box uses it to size a line's dwell against the epochs
+// until the next checkpoint (DIALOGUE.md, Revision 2).
 const STREAM_HZ = QS.has('rate') && +QS.get('rate') > 0 ? +QS.get('rate') : 5;
 
 const COLOR = {NOMINAL:'var(--nominal)', DEGRADED:'var(--degraded)',
@@ -1945,12 +1945,10 @@ function App() {
   const [envStatus, setEnvStatus] = useState({note:'loading vehicle model · loading sky'});
   const mapRef = useRef(null);
   const mapSize = useSize(mapRef);
-  // The gate the operator is reading, or null while the replay free-runs
-  // (console/web/DIALOGUE.md §5). Held state lives in a ref as well because the
-  // consumer below is a timer closure and must read it without re-subscribing.
-  const [gate, setGate] = useState(null);
-  const heldRef = useRef(false);
-  const closeGate = useCallback(() => { heldRef.current = false; setGate(null); }, []);
+  // The checkpoint the guide is currently speaking (console/web/DIALOGUE.md,
+  // Revision 2). The box auto-advances through its lines and NEVER holds the
+  // replay, so there is no gate, no held ref and nothing to click past.
+  const [dlg, setDlg] = useState(null);
 
   useEffect(() => {
     // Track F: ?mission=<name> selects a registry mission (console/missions);
@@ -1964,82 +1962,41 @@ function App() {
       }).catch(() => {});
   }, []);
 
-  // The stream is SERVER-paced (console/server.py `_events`: time.sleep(1/rate)),
-  // so a gate cannot stop the server -- the client buffers. `onmessage` enqueues;
-  // a consumer applies ONE epoch per stream interval; an epoch carrying
-  // dialogue.gate opens the gate and the consumer holds; the box's onDone closes
-  // it and the backlog drains at the normal rate (console/web/DIALOGUE.md §5).
+  // The stream is SERVER-paced (console/server.py `_events`: time.sleep(1/rate))
+  // and, since Revision 2 of console/web/DIALOGUE.md, nothing on the client
+  // ever holds it: the guide auto-advances alongside the replay. So each epoch
+  // is applied as it arrives, which is what this console did before the gate
+  // existed. No queue, no consumer cadence to measure, no epoch deferred.
   //
   // NO EPOCH IS EVER SKIPPED. The 3D scene lerps between consecutive epochs and
-  // the arbitras's state machine is a sequence: dropping one corrupts both. This is
-  // a replay, so lagging wall-clock is the right trade and the queue is bounded by
-  // the file (a few thousand epochs).
-  //
-  // Only the epoch stream is paused. The WebGL loop and the takeover overlay's
-  // tick are requestAnimationFrame-driven inside EnvScene and keep running: a
-  // held replay looks paused, not hung.
+  // the arbitras's state machine is a sequence: dropping one corrupts both.
   useEffect(() => {
-    const q = [];                  // pending: {m} epoch payloads, {dl} guide tails
-    let ended = false;             // server sent `end`; the backlog may still drain
-    let timer = null, lastAt = 0;
-    // Consumer cadence, MEASURED from inter-arrival time rather than assumed. The
-    // server sleeps 1/rate between writes, so the gap between arrivals IS the
-    // stream interval -- and it stays right when the server was started with
-    // --rate N and the URL carries no ?rate, and in --tail mode where the pace is
-    // the producer's, neither of which the query string knows. Seeded from ?rate
-    // (server default 15/s) so the first epochs already move at the right speed;
-    // median of the first 12 gaps, then frozen, so one scheduling hiccup or a
-    // bunched pair of arrivals cannot skew it.
-    const gaps = []; let iv = 1000 / STREAM_HZ;
-    const measure = g => {
-      if (!(g > 4 && g < 4000) || gaps.length >= 12) return;
-      gaps.push(g);
-      if (gaps.length >= 5) {
-        const a = gaps.slice().sort((x, y) => x - y);
-        iv = Math.min(2000, Math.max(16, a[a.length >> 1]));
-      }
-    };
-    const openGate = dl => {
-      // No box mounted means no way to click past a gate: never hold.
-      const lines = (DIALOGUE_BOX && dl && dl.lines) || NO_LINES;
-      if (!lines.length) return;
-      heldRef.current = true;
-      setGate({lines, reason: dl.gate_reason || null, verified: dl.verified !== false});
-    };
-    const apply = it => {
-      if (it.dl) return openGate(it.dl);          // the guide's closing lines
-      const m = it.m;
+    const src = new EventSource('/events' + window.location.search);
+    src.onopen = () => setConn('live');
+    src.onmessage = e => {
+      const m = JSON.parse(e.data);
       setD(m);
       // Trail keeps only what the frame math needs: epoch index (-> s along the
       // route) and the believed/true pair (-> measured displacement D).
       if (m.position) setTrail(t => [...t.slice(-2400),
         {i:m.epoch_index, ep:{position:m.position, _truth:m._truth}}]);
-      if (m.dialogue && m.dialogue.gate) openGate(m.dialogue);   // absent/null: free-run
+      // A checkpoint with no lines is not a checkpoint: leave the box on the
+      // one it is still speaking. Absent `dialogue` (older stream, ?layer=off)
+      // leaves it alone too.
+      if (m.dialogue && m.dialogue.lines && m.dialogue.lines.length) setDlg(m.dialogue);
     };
-    const tick = () => {
-      timer = setTimeout(tick, Math.max(16, iv));
-      if (heldRef.current) return;
-      if (q.length) return apply(q.shift());
-      // `end` arrives while the backlog is still draining, so 'replay complete'
-      // waits for the queue to empty and for the last gate to be clicked past.
-      if (ended) setConn(c => (c === 'live' || c === 'connecting') ? 'ended' : c);
-    };
-    timer = setTimeout(tick, Math.max(16, iv));
-
-    const src = new EventSource('/events' + window.location.search);
-    src.onopen = () => setConn('live');
-    src.onmessage = e => {
-      const now = performance.now();
-      if (lastAt) measure(now - lastAt);
-      lastAt = now;
-      q.push({m: JSON.parse(e.data)});
-    };
-    // The guide's `end` lines belong to no epoch, so they arrive on their own
-    // event and queue BEHIND the backlog rather than jumping it.
-    src.addEventListener('dialogue', e => { try { q.push({dl: JSON.parse(e.data)}); } catch (_) {} });
-    src.addEventListener('end', () => { ended = true; src.close(); });
+    // The guide's closing lines belong to no epoch, so they arrive on their own
+    // event after the last one.
+    src.addEventListener('dialogue', e => {
+      try { const dl = JSON.parse(e.data);
+            if (dl && dl.lines && dl.lines.length) setDlg(dl); } catch (_) {}
+    });
+    src.addEventListener('end', () => {
+      src.close();
+      setConn(c => (c === 'live' || c === 'connecting') ? 'ended' : c);
+    });
     src.onerror = () => setConn(src.readyState === 2 ? 'lost' : 'connecting');
-    return () => { src.close(); clearTimeout(timer); };
+    return () => src.close();
   }, []);
 
   useEffect(() => {
@@ -2174,7 +2131,7 @@ function App() {
       <div className=${'layer kbox' + (layerOn ? '' : ' off')}>
         Trust layer <b>${layerOn ? 'ON' : 'OFF'}</b></div>
       <div className="hint">
-        ${conn === 'ended' ? 'replay complete · ' : ''}${conn === 'connecting' ? 'connecting · ' : ''}${gate ? 'paused · ' : ''}${orbitHint}press R to reset
+        ${conn === 'ended' ? 'replay complete · ' : ''}${conn === 'connecting' ? 'connecting · ' : ''}${orbitHint}press R to reset
       </div>
     </div>
 
@@ -2184,15 +2141,15 @@ function App() {
          the band is one fixed-height element as before and nothing above it moved.
          payload.explanation is still on the wire (server.py decide()) and still
          feeds the verification banner above -- only its RENDERING is gone.
-         `lines` empty is the free-running state: the box holds its last line,
-         dimmed. A payload with no `dialogue` at all (an older stream, or
-         ?layer=off) simply never gates. Without /dialogue.js there is no box and
-         no gate: the fallback band keeps the geometry and the key. */ null}
+         The box auto-advances and never holds the replay. A payload with no
+         `dialogue` at all (an older stream, or ?layer=off) leaves the box on
+         whatever it last spoke. Without /dialogue.js there is no box: the
+         fallback band keeps the geometry and the key. */ null}
     ${DIALOGUE_BOX
-      ? html`<${DIALOGUE_BOX} lines=${gate ? gate.lines : NO_LINES}
-                              gateReason=${gate ? gate.reason : null}
-                              verified=${gate ? gate.verified : true}
-                              state=${state} onDone=${closeGate} aside=${sceneKey}/>`
+      ? html`<${DIALOGUE_BOX} lines=${dlg ? dlg.lines : NO_LINES}
+                              checkpoint=${dlg ? dlg.checkpoint : null}
+                              verified=${!dlg || dlg.verified !== false}
+                              rate=${STREAM_HZ} state=${state} aside=${sceneKey}/>`
       : html`<div className=${'dock' + (showEnv ? ' env' : '')}>${sceneKey}</div>`}`;
 }
 

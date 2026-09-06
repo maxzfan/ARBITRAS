@@ -435,8 +435,8 @@ def main():
     p.add_argument("--rate", type=float, default=5.0,
                    help="epochs/sec (design.md §5). 10-20 is the DEVELOPMENT "
                         "range; the demo replays at 5 because the guide dialogue "
-                        "(console/web/DIALOGUE.md) gates the replay and has to "
-                        "be read")
+                        "(console/web/DIALOGUE.md) runs alongside it and has "
+                        "to stay readable at that pace")
     p.add_argument("--tail", action="store_true", help="follow a growing file")
     p.add_argument("--stale-after", type=float, default=2.0, dest="stale_after",
                    help="seconds of silence before an epoch counts as missing "

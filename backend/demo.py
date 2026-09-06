@@ -89,8 +89,8 @@ DEFAULT_TARGET = "top6"
 
 EPOCH_S = 30
 # §5: 10-20 epochs/s is the DEVELOPMENT range; the demo replays at 5 because
-# the guide dialogue (console/web/DIALOGUE.md) gates the replay and has to be
-# read. console/server.py --rate, backend/stream.py and the console consumer
+# the guide dialogue (console/web/DIALOGUE.md) runs alongside it and has to
+# stay readable at that pace. console/server.py --rate, backend/stream.py and the console consumer
 # seed carry the same number and must not drift. Purely a reporting constant
 # here: it converts epoch counts to on-screen seconds in the provenance
 # tables and changes no emitted data.
