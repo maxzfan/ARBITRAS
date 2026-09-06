@@ -68,6 +68,50 @@ backend/demo.py, docs/stream_provenance.md; then the four mission files.
    (F-0b stands). `/numbers` serves the hero's headline figures from the
    streams on disk with their sources.
 
+## Build status, 2026-09-06 ~00:00
+
+Built and committed on `track_f`:
+
+- **F-0a** residual wiring; streams regenerated; `/numbers` live.
+- **Registry** (`console/missions/`), `/mission?name=`, `/missions`,
+  `/terrain`, `/env/`, `/overlays/`, `/numbers`, `/events?mission=`.
+- **Stream runner** `backend/missions.py`: four streams in `out/`, provenance
+  per stream in `docs/stream_provenance_<name>.md`. Constellation-first
+  exclusion (0 clean-day false fires; residual rule suspended one window
+  after a constellation exclusion clears). Injector: `step_displacement_m`,
+  `SIMPLISTIC_POSITION`, `REPEATER_OFFSET`.
+- **Environments**: contract, helpers, preview harness; `logistics.js`
+  (reference), `recon.js`, `casevac.js` (renders the signed pre-map's
+  classes as ground), `combat.js`, each verified headless; assets fetched by
+  `bootstrap.sh` from `console/web/env/ASSETS.txt`.
+- **Routing page** `console/web/home.html` at `/home`: hero (logistics
+  environment, UGV fleet, sourced numbers, clock), four live tiles from one
+  scissored renderer on their own environments, console section hosting
+  `/?mission=<name>` in an iframe, deep link `?mission=`.
+- **Console hooks** (`index.html`, uncommitted -- the file is under
+  concurrent editing by the console's owner): `/mission?name=`,
+  environment module per mission, terrain grid fetch, overlay mount /
+  epoch / tick / drive, MISSION strip cell, per-state progress gain.
+- **Operator takeover overlay** (`console/web/overlays/takeover.js`):
+  verified headless on LOGISTICS -- forced at SURRENDERED with the scripted
+  stand-in and "drive by view, fix unverified", hand-back at DEGRADED with
+  "corrected fix, PL 2.7 m".
+
+Measured timelines of the four streams (`python -m console.replay
+out/<name>.jsonl`): LOGISTICS DEGRADED 65 / SURRENDERED 67 / RESTRICTED
+180 / DEGRADED 190 / NOMINAL 200 / credential SURRENDERED 390; CASEVAC
+SURRENDERED 62 / 150 / 160 / NOMINAL 170; RECON SURRENDERED 60 (12 GPS
+out, ratio 0.80, Galileo fix valid PL 7.4 m, believed 118 m out) /
+RESTRICTED 84 / DEGRADED 94 / NOMINAL 104; COMBAT SURRENDERED 60 (12 GPS
+out, Galileo fix valid) / 86 / 96 / NOMINAL 106.
+
+In progress (agents): RECON stationary-deduction post-pass + overlay;
+CASEVAC route-constrained terrain fix + overlay. Not done: props by kind in
+the console (rings, phase lines, posts), the corrected third track in the
+console's scene, `/` → home, README section, F-0b threshold session (the
+RECON/COMBAT onset confidence of 0.49 sits below RESTRICTED because three
+features saturate while the derived half still stands behind a valid fix).
+
 ## Prerequisites found while scoping -- fix before any mission (F-0)
 
 All four planners hit the same wall independently. These are not Track F
