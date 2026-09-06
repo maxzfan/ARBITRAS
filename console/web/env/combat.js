@@ -30,16 +30,30 @@
   const SPEC = {
     hdr: '/vendor/asset-env-combat-sky.hdr',
     exposure: 1.6,
-    // fog.color is the harness's status.hdr_measured.horizon (linear horizon band as plain sRGB);
-    // fog is mixed before tone mapping, so on screen it lands at ACES(1.6 x linear) = #D4CCB6.
-    fog: { color: '#A1947C', density: 0.0015 },
-    // The sky sphere is not tone-mapped: its horizon is the fog colour AS SEEN (#D4CCB6) so the
-    // ground fades into it without a seam; mid is a warm dust grey, zenith the 40-80 deg band
-    // two stops under the HDR (#425583) so the console's sprites stay legible.
-    sky: { horizon: '#D4CCB6', mid: '#B9B1AE', zenith: '#425583' },
-    sun: { az: 131.9, el: 4.1 },                            // = status.hdr_measured at load (sun disc on the horizon, SE)
+    // Visible sky: the "dunes" theatre rendered in Blender/Cycles (UGV sim asset pack): a sand sea
+    // at dawn, far field only (our berms, scrapes and the compound stay real geometry). The HDR
+    // above still lights the scene. sun_u/sun_el measured in the image (u 0.125, el 12.9; the pack's
+    // manifest agrees). dim 1.0: the pano's 10-25 deg band (0.362) already sits under the previous
+    // sky.mid target (0.448), so it is shown as rendered. The sun rises from el 4 to el 13.
+    backdrop: { url: '/vendor/asset-backdrop-combat.jpg', sun_u: 0.125, sun_el: 12.9, dim: 1.0 },
+    // Relief: the dunes theatre's Blender height field (asset-relief-combat.js, -6..+14 m) at 0.55 under
+    // the berms and scrapes, blended over 90 m from the corridor edge so the dunes rise gently.
+    relief: { id: 'combat', scale: 0.8, blend_m: 90 },
+    // Set dressing from the pack's prototypes (asset-props-combat.glb): rocks and dead tufts. A sand sea
+    // is meant to be empty; the relief carries this theatre.
+    props: { url: '/vendor/asset-props-combat.glb', seed: 13, margin: 420, groups: [
+      { proto: 'Rock', n: 180, scale: [0.5, 3.3], sink: 0.25, inset: true, color: '#6E655A', keepOut: { corridor: 8, prop: 12 } },
+      { proto: 'Tuft', n: 500, region: 'near', near_m: 200, scale: [0.7, 1.9], castShadow: false, keepOut: { corridor: 4, prop: 6 },
+        tint: { low: [0.20, 0.15, 0.08], jitter: 0.25 } },
+    ] },
+    // fog is mixed before tone mapping: this is ACES^-1 at exposure 1.6 of the backdrop's horizon
+    // band as seen (#A79D92), so the cracked earth fades into the pano without a seam.
+    fog: { color: '#7A7269', density: 0.0015 },
+    // The gradient sphere (first paint, fallback) is not tone-mapped: the backdrop's own bands.
+    sky: { horizon: '#A79D92', mid: '#92A4B6', zenith: '#64758C' },
+    sun: { az: 131.9, el: 4.1 },                            // az: the HDR's sun (SE), the aim for the backdrop's sun; el from backdrop.sun_el at load
     palette: { ground: '#8C7C63', rock: '#6E655A', accent: '#E4551F' },
-    attribution: 'Sky, ground: Poly Haven, CC0',
+    attribution: 'Ground: Poly Haven, CC0 · sky: rendered scene (Blender), lit by a Poly Haven HDR',
     // Harness convention: the camera sits at compass bearing (180 - az) from the theatre centre and
     // is aimed by the harness. az 288 / dist 543 puts it ~120 m behind the line of departure, 40 m
     // up, so LD, the advance and the objective on its rise all lie ahead of it; sun to the right.
@@ -137,6 +151,7 @@
     //    (contract invariant 1). The flattening uses helpers.lateralOffset and
     //    helpers.smooth exactly as the logistics reference does; the rise takes
     //    a wider transition so it climbs gently from the objective's pad. -------
+    const R = H.relief(SPEC);                               // Blender relief (spec.relief); at() is 0 without the asset
     const heightAt = (x, z) => {
       const e = x, n = -z;
       const lat = Math.abs(H.lateralOffset(e, n)), clear = H.propClearance(e, n);
@@ -154,7 +169,8 @@
         const t = Math.hypot(x - s.x, z - s.z) / s.r; if (t >= 1.35) continue;
         base += t < 1 ? -s.d * (1 - t * t) : s.d * 0.3 * Math.sin(Math.PI * (t - 1) / 0.35);   // bowl, then a spoil lip
       }
-      let h = base * fNear;
+      let h = base * fNear
+            + R.at(x, z) * H.smooth(hw + 3, hw + 3 + R.blend, lat) * H.smooth(7, 7 + R.blend * 0.6, clear) * fGs;
       const dh = Math.hypot(x - HILL.x, z - HILL.z);
       if (dh < HILL.R) h += HILL.h * 0.5 * (1 + Math.cos(Math.PI * dh / HILL.R))
                           * H.smooth(hw + 3, hw + 80, lat) * H.smooth(7, 120, clear) * fGs;   // climbs ~10 deg from the pad
@@ -168,7 +184,7 @@
     //    Vertex colour and a UV warp break the tile repeat: dust-pale on crests,
     //    dark in scrapes. -----------------------------------------------------------
     const ext = H.extent(500);
-    const groundMat = new T.MeshStandardMaterial({ color: new T.Color(SPEC.palette.ground), vertexColors: true, roughness: 1, metalness: 0, envMapIntensity: 1.0 });
+    const groundMat = H.antiTile(new T.MeshStandardMaterial({ color: new T.Color(SPEC.palette.ground), vertexColors: true, roughness: 1, metalness: 0, envMapIntensity: 1.0 }));
     {
       const axis = (lo, hi, flo, fhi, step) => {
         const pre = []; let v = flo, s = step * 1.4;
@@ -370,6 +386,8 @@
       Object.assign(rockMat, { map: rm, normalMap: rn, roughnessMap: rr, color: new T.Color(0xB9AE9C), envMapIntensity: 0.8 });
       rockMat.needsUpdate = true; own.push(rm, rn, rr);
     }).catch(() => {});
+
+    H.scatterProps(ctx, heightAt, SPEC.props, own);       // async set dressing; meshes join `own`
 
     return {
       heightAt,

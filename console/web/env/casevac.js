@@ -32,11 +32,24 @@
   const SPEC = {
     hdr: '/vendor/asset-env-casevac-sky.hdr',
     exposure: 1.25,
-    fog: { color: '#7E8894', density: 0.0045 },            // horizon band ~2 stops under, blue pushed; 2x the prairie density
-    sky: { horizon: '#7E8894', mid: '#8A929D', zenith: '#75808F' },   // flat overcast dome: brightest just above the horizon
-    sun: { az: 123.0, el: 22.7 },                          // measured from the HDR; overridden at load
+    // Visible sky: the "urban" theatre rendered in Blender/Cycles (UGV sim asset pack): mid-rise
+    // blocks and towers beyond 120 m under a pale sky, far field only (the pre-map's buildings and
+    // trees near the route stay real geometry). The HDR above still lights the scene. sun_u/sun_el
+    // measured in the image (u 0.3387, el 22.0; the pack's manifest agrees; the HDR's weak sun is at
+    // el 22.7, so the light barely moves). dim 0.87: the pano's 10-25 deg band (0.328) brought to
+    // the previous sky.mid target (0.284).
+    backdrop: { url: '/vendor/asset-backdrop-casevac.jpg', sun_u: 0.3387, sun_el: 22.0, dim: 0.87 },
+    // Relief: the urban theatre's Blender height field (asset-relief-casevac.js, +-1 m) under the
+    // class-driven ground, blended over 30 m from the corridor edge.
+    relief: { id: 'casevac', scale: 1.0, blend_m: 30 },
+    // Set dressing from the pack's prototypes (asset-props-casevac.glb); the groups are built in build()
+    // because each is admitted by the pre-map's class under it (trees on tree_cover, lamps on paved, ...).
+    props: { url: '/vendor/asset-props-casevac.glb', seed: 11, margin: 380 },
+    fog: { color: '#6A6B69', density: 0.0045 },            // ACES^-1 at exposure 1.25 of the backdrop's horizon as seen (#80807E); 2x the prairie density
+    sky: { horizon: '#80807E', mid: '#88929E', zenith: '#657487' },   // first paint and fallback: the backdrop's bands at dim 0.87
+    sun: { az: 123.0, el: 22.7 },                          // az: measured from the HDR, the aim for the backdrop's sun; el from backdrop.sun_el at load
     palette: { ground: '#5A544C', rock: '#57544E', accent: '#E8A21C' },
-    attribution: 'Sky, ground: Poly Haven, CC0',
+    attribution: 'Ground: Poly Haven, CC0 · sky: rendered scene (Blender), lit by a Poly Haven HDR',
     hero_camera: { az: 228, el: 16, dist: 230, dolly: 0.6 },   // low oblique from the NW, over the aid station down the outbound leg
   };
 
@@ -116,7 +129,12 @@
       const lat = Math.abs(H.lateralOffset(x, -z)), clear = H.propClearance(x, -z), dg = Math.hypot(x - gs.e, -z - gs.n);
       return H.smooth(hw + 3, hw + 16, lat) * H.smooth(7, 20, clear) * H.smooth(20, 34, dg);
     };
-    const heightAt = (x, z) => relief(x, z) * flat(x, z);
+    const R = H.relief(SPEC);                               // Blender relief (spec.relief); at() is 0 without the asset
+    const flatWide = (x, z) => {
+      const lat = Math.abs(H.lateralOffset(x, -z)), clear = H.propClearance(x, -z), dg = Math.hypot(x - gs.e, -z - gs.n);
+      return H.smooth(hw + 3, hw + 3 + R.blend, lat) * H.smooth(7, 7 + R.blend*0.6, clear) * H.smooth(20, 44, dg);
+    };
+    const heightAt = (x, z) => relief(x, z) * flat(x, z) + R.at(x, z) * flatWide(x, z);
     const inCorridor = (e, n, pad) => Math.abs(H.lateralOffset(e, n)) < hw + pad;
     const nearProp = (e, n, pad) => H.propClearance(e, n) < pad || Math.hypot(e - gs.e, n - gs.n) < 20 + pad;
 
@@ -141,6 +159,7 @@
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor *= vRough;');
     };
     groundMat.customProgramCacheKey = () => 'casevac-ground-vrough';
+    H.antiTile(groundMat);                                   // chains after the roughness hook
     const TILE_M = 3.5;                                        // one texture tile; UVs are in tiles so both meshes agree
     const makeGround = (box, sp, drop) => {
       const E0 = oe + cell/2 + sp*Math.floor((box.minE - oe - cell/2)/sp), N0 = on + cell/2 + sp*Math.floor((box.minN - on - cell/2)/sp);
@@ -374,6 +393,24 @@
     Promise.all([H.loadTexture(H.FALLBACK.rock.diff, true, 1.6, aniso), H.loadTexture(H.FALLBACK.rock.nor, false, 1.6, aniso), H.loadTexture(H.FALLBACK.rock.rough, false, 1.6, aniso)])
       .then(([rm, rn, rr]) => { Object.assign(rockMat, {map:rm, normalMap:rn, roughnessMap:rr, color:new T.Color(0x9A948A)}); rockMat.needsUpdate = true; own.push(rm, rn, rr); })
       .catch(() => {});
+
+    // -- pack prototypes, admitted by the pre-map class under each candidate ------
+    if (grid) {
+      const BARE = cid('bare'), PAVED = cid('paved');
+      const isOpen = (e, n) => { const c = classAt(e, n); return c === BARE || c === GRASS || c === SHRUB || c === PAVED; };
+      H.scatterProps(ctx, heightAt, Object.assign({}, SPEC.props, { groups: [
+        { proto: 'Tree', n: 80, scale: [0.8, 1.1], sink: 0.05, inset: true, keepOut: { corridor: 22, prop: 14 },
+          accept: (e, n) => classAt(e, n) === TREE,
+          tint: { low: [0.08, 0.06, 0.04], high: [0.055, 0.10, 0.035], split: [0.25, 0.40], radial: [0.20, 0.40] } },
+        { proto: 'Rubble', n: 120, scale: [0.8, 2.4], sink: 0.02, inset: true, color: '#6A6660', keepOut: { corridor: 8, prop: 10 }, accept: isOpen },
+        { proto: 'Barrier', n: 60, scale: [0.95, 1.05], inset: true, color: '#8A8A86', keepOut: { corridor: 6, prop: 10 },
+          accept: (e, n) => { const c = classAt(e, n); return c === PAVED || c === BARE; } },
+        { proto: 'Lamp', n: 40, scale: [1, 1], inset: true, color: '#2A2B2D', roughness: 0.6, keepOut: { corridor: 6, prop: 10 },
+          accept: (e, n) => classAt(e, n) === PAVED },
+        { proto: 'Tuft', n: 400, scale: [0.7, 1.9], castShadow: false, keepOut: { corridor: 4, prop: 6 },
+          accept: (e, n) => { const c = classAt(e, n); return c === GRASS || c === BARE; }, tint: { low: [0.08, 0.085, 0.045], jitter: 0.2 } },
+      ] }), own);
+    }
 
     return {
       heightAt,

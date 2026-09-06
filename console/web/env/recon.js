@@ -38,11 +38,32 @@
   const SPEC = {
     hdr: '/vendor/asset-sky.hdr',                         // belfast_sunset_puresky, lighting only (PMREM)
     exposure: 1.1,
-    fog: { color: '#86716C', density: 0.0019 },           // HDR horizon band, 2 stops under (header)
-    sky: { horizon: '#86716C', mid: '#C3B4B6', zenith: '#7F83A1' },   // measured bands, ~2 stops under the HDR
-    sun: { az: 126.0, el: 2.6 },                          // measured from the HDR (harness hdr_measured); overridden at load
+    // Visible sky: the "forest" theatre rendered in Blender/Cycles (UGV sim asset pack): misty
+    // jungle, far field only (a distant tree line in haze; our ridge and trees stay real geometry).
+    // The HDR above still lights the scene. sun_u/sun_el measured in the image (glare centroid
+    // u 0.633; el 34.0 = the pack's manifest, the disc is lost in the mist). dim 0.58: the pano is
+    // near-white mist (10-25 deg band luminance 0.823) brought to the previous sky.mid target
+    // (0.476) so sprites stay legible. Mid-morning mist replaces dusk: the key light rises to el 34.
+    backdrop: { url: '/vendor/asset-backdrop-recon.jpg', sun_u: 0.633, sun_el: 34.0, dim: 0.58 },
+    // Relief: the forest theatre's Blender height field (asset-relief-recon.js, +-6 m) at 0.7, added
+    // under the module's own bench / valley / ridge, blended over 45 m from the corridor edge.
+    relief: { id: 'recon', scale: 0.7, blend_m: 45 },
+    // Set dressing from the pack's prototypes (asset-props-recon.glb): jungle trees (24-32 m), ferns and
+    // tufts in a band beside the loop, rocks; the module's own ridge tree line stays.
+    props: { url: '/vendor/asset-props-recon.glb', seed: 7, margin: 400, groups: [
+      { proto: 'Tree', n: 200, scale: [0.75, 1.35], sink: 0.05, inset: true, keepOut: { corridor: 30, prop: 18 },   // 200 x ~1 k tris keeps the theatre under the 600 k budget with the ridge line
+        tint: { low: [0.08, 0.06, 0.045], high: [0.045, 0.095, 0.028], split: [0.45, 0.60], radial: [0.25, 0.45] } },
+      { proto: 'Fern', n: 400, region: 'near', near_m: 140, scale: [0.6, 1.7], sink: 0.15, castShadow: false, keepOut: { corridor: 6, prop: 8 },
+        tint: { low: [0.035, 0.08, 0.02], high: [0.07, 0.14, 0.04], split: [0.1, 0.9], radial: [0.9, 1.0] } },
+      { proto: 'Tuft', n: 500, region: 'near', near_m: 120, scale: [0.7, 1.9], castShadow: false, keepOut: { corridor: 4, prop: 6 },
+        tint: { low: [0.05, 0.07, 0.025], jitter: 0.2 } },
+      { proto: 'Rock', n: 120, scale: [0.5, 3.4], sink: 0.25, inset: true, color: '#34312E', keepOut: { corridor: 8, prop: 12 } },
+    ] },
+    fog: { color: '#9C9C9D', density: 0.0019 },           // ACES^-1 at exposure 1.1 of the backdrop's horizon as seen (#B2B2B3)
+    sky: { horizon: '#B2B2B3', mid: '#B6B8BA', zenith: '#B4B7BB' },   // first paint and fallback: the backdrop's bands at dim 0.58 (uniform mist)
+    sun: { az: 126.0, el: 2.6 },                          // az: measured from the HDR, the aim for the backdrop's sun; el from backdrop.sun_el at load
     palette: { ground: '#4A4633', rock: '#34312E', accent: '#7FA8CC' },   // olive-brown, dark rock, cold blue
-    attribution: 'Sky, ground: Poly Haven, CC0',
+    attribution: 'Ground: Poly Haven, CC0 · sky: rendered scene (Blender), lit by a Poly Haven HDR',
     // Harness convention (preview.html): the camera sits at compass bearing
     // (180 - az) from the route box centre, dist metres away at elevation el, and
     // OrbitControls aim it at the route start. az 294 -> camera ~(-40, -80) ENU,
@@ -93,6 +114,7 @@
     // -- terrain: rolling hills that grow with distance, a valley to the south, the
     //    ridge to the north; FLAT along the corridor (hw + 3), inside every prop's
     //    rim (+7) and around the ground station (20 m) -- contract invariant 1. ----
+    const R = H.relief(SPEC);                               // Blender relief (spec.relief); at() is 0 without the asset
     const heightAt = (x, z) => {
       const n = -z;
       const lat = Math.abs(H.lateralOffset(x, n));
@@ -102,11 +124,12 @@
       const env = RIDGE_H * H.smooth(0, 140, c.t) * H.smooth(0, 140, CREST_LEN - c.t) * (0.85 + 0.15*noise(c.t/45, 0.5));
       const ridge = env * (1 - H.smooth(0, RIDGE_W, c.d)) * (1 + 0.12*noise(x/45 + 7, z/45));
       const clear = H.propClearance(x, n), gsd = Math.hypot(x - gs.e, n - gs.n);
-      return (hills + valley + ridge) * H.smooth(hw + 3, hw + 45, lat) * H.smooth(7, 20, clear) * H.smooth(20, 34, gsd);
+      return (hills + valley + ridge) * H.smooth(hw + 3, hw + 45, lat) * H.smooth(7, 20, clear) * H.smooth(20, 34, gsd)
+           + R.at(x, z) * H.smooth(hw + 3, hw + 3 + R.blend, lat) * H.smooth(7, 7 + R.blend*0.6, clear) * H.smooth(20, 44, gsd);
     };
     const ext = H.extent(450);
     const TW = ext.maxE - ext.minE, TD = ext.maxN - ext.minN, TCx = (ext.minE + ext.maxE)/2, TCz = -(ext.minN + ext.maxN)/2;
-    const groundMat = new T.MeshStandardMaterial({color: new T.Color(SPEC.palette.ground), roughness:1, metalness:0, envMapIntensity:1.0});
+    const groundMat = H.antiTile(new T.MeshStandardMaterial({color: new T.Color(SPEC.palette.ground), roughness:1, metalness:0, envMapIntensity:1.0}));
     {
       const geo = new T.PlaneGeometry(TW, TD, Math.min(Math.round(TW/6), 180), Math.min(Math.round(TD/6), 180));
       const pa = geo.attributes.position;
@@ -322,6 +345,8 @@
     loadSet(GROUND, 3.0, 0xCFD4C8).then(() => ctx.report({ground:'loaded'}))
       .catch(() => loadSet(H.FALLBACK.ground, 3.5, 0xB9BDB0).then(() => ctx.report({ground:'fallback', note:'recon ground set missing; Earth set (grass_path_2) in its place'}))
         .catch(() => ctx.report({ground:'fallback', note:'ground textures failed; flat colour'})));
+
+    H.scatterProps(ctx, heightAt, SPEC.props, own);       // async set dressing; meshes join `own`
 
     return {
       heightAt,

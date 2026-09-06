@@ -12,11 +12,31 @@
   const SPEC = {
     hdr: '/vendor/asset-earth-sky.hdr',
     exposure: 1.5,
-    fog: { color: '#8F94A1', density: 0.0022 },           // measured HDR horizon band (EARTH_BACKDROP.md)
-    sky: { horizon: '#8F94A1', mid: '#7891B0', zenith: '#5F7FB5' },   // ~2 stops under the HDR so sprites stay legible
-    sun: { az: 124.4, el: 47.3 },                          // measured from the HDR; overridden at load
+    // Visible sky: the "grassland" theatre rendered in Blender/Cycles (UGV sim asset pack), an
+    // equirectangular far field (sky, horizon, anything beyond 120 m; near props are ours). The HDR
+    // above still lights the scene. sun_u/sun_el: the clipped sun disc measured in the image
+    // (u 0.6725, el 11.0; the pack's manifest agrees on el). dim 0.58: the pano's 10-25 deg band
+    // (linear luminance 0.468) brought to the previous sky.mid target (0.274) so the console's
+    // additive sprites keep their contrast. Golden hour replaces noon: the key light drops to el 11.
+    backdrop: { url: '/vendor/asset-backdrop-logistics.jpg', sun_u: 0.6725, sun_el: 11.0, dim: 0.58 },
+    // Relief: the grassland theatre's Blender height field (asset-relief-logistics.js, +-5.5 m),
+    // oriented to the displayed pano, blended in over 45 m from the corridor edge (invariant 1 holds:
+    // flat within hw + 3, every prop's rim + 7 and 20 m of the ground station).
+    relief: { id: 'logistics', scale: 1.0, blend_m: 45 },
+    // Set dressing from the pack's prototypes (asset-props-logistics.glb): acacias, bushes, rocks; instanced,
+    // seeded, culled from the corridor. Vertex tints are linear RGB (trunk -> canopy by height and radius).
+    props: { url: '/vendor/asset-props-logistics.glb', seed: 5, margin: 420, groups: [
+      { proto: 'Tree', n: 90, scale: [0.85, 1.35], sink: 0.05, inset: true, keepOut: { corridor: 26, prop: 16 },
+        tint: { low: [0.06, 0.045, 0.028], high: [0.03, 0.06, 0.018], split: [0.30, 0.45], radial: [0.20, 0.40] } },
+      { proto: 'Bush', n: 220, scale: [0.6, 1.4], sink: 0.10, castShadow: false, keepOut: { corridor: 10, prop: 10 },
+        tint: { low: [0.03, 0.04, 0.014], high: [0.055, 0.075, 0.025], split: [0.2, 0.6], radial: [0.9, 1.0] } },
+      { proto: 'Rock', n: 120, scale: [0.6, 3.2], sink: 0.25, inset: true, color: '#5C574D', keepOut: { corridor: 8, prop: 12 } },
+    ] },
+    fog: { color: '#7A7B78', density: 0.0022 },           // ACES^-1 at exposure 1.5 of the backdrop's horizon as seen (#A3A4A0), so the ground fades into it
+    sky: { horizon: '#A3A4A0', mid: '#83919E', zenith: '#596A7F' },   // first paint and fallback: the backdrop's 0.5-4 / 10-25 / 55-90 deg bands at dim 0.58
+    sun: { az: 124.4, el: 47.3 },                          // az: measured from the HDR, the aim for the backdrop's sun; el comes from backdrop.sun_el at load
     palette: { ground: '#6B6A5E', rock: '#5C574D', accent: '#E8A21C' },
-    attribution: 'Sky, ground: Poly Haven, CC0',
+    attribution: 'Ground: Poly Haven, CC0 · sky: rendered scene (Blender), lit by a Poly Haven HDR',
     hero_camera: { az: 215, el: 13, dist: 82, dolly: 0.6 },   // low oblique over the convoy's left shoulder
   };
 
@@ -29,15 +49,17 @@
 
     // -- terrain: gentle prairie undulation, FLAT along the corridor, under the
     //    ground station and inside every prop's rim (contract invariant 1). ------
+    const R = H.relief(SPEC);                               // Blender relief (spec.relief); at() is 0 without the asset
     const heightAt = (x, z) => {
       const base = 2.4*noise(x/70 + 3.1, z/70 + 1.7) + 0.7*noise(x/22, z/22) + 0.18*noise(x/6, z/6);
       const lat = Math.abs(H.lateralOffset(x, -z));
-      const clear = H.propClearance(x, -z);
-      return base * H.smooth(hw + 3, hw + 16, lat) * H.smooth(7, 20, clear);
+      const clear = H.propClearance(x, -z), gsd = Math.hypot(x - gs.e, -z - gs.n);
+      return base * H.smooth(hw + 3, hw + 16, lat) * H.smooth(7, 20, clear)
+           + R.at(x, z) * H.smooth(hw + 3, hw + 3 + R.blend, lat) * H.smooth(7, 7 + R.blend*0.6, clear) * H.smooth(20, 44, gsd);
     };
     const ext = H.extent(500);
     const TW = ext.maxE - ext.minE, TD = ext.maxN - ext.minN, TCx = (ext.minE + ext.maxE)/2, TCz = -(ext.minN + ext.maxN)/2;
-    const groundMat = new T.MeshStandardMaterial({color: new T.Color(SPEC.palette.ground), roughness:1, metalness:0, envMapIntensity:1.0});
+    const groundMat = H.antiTile(new T.MeshStandardMaterial({color: new T.Color(SPEC.palette.ground), roughness:1, metalness:0, envMapIntensity:1.0}));
     {
       const geo = new T.PlaneGeometry(TW, TD, Math.min(Math.round(TW/10), 200), Math.min(Math.round(TD/10), 200));
       const pa = geo.attributes.position;
@@ -145,6 +167,8 @@
     }).catch(() => {});
 
     let sway = 0;
+    H.scatterProps(ctx, heightAt, SPEC.props, own);       // async set dressing; meshes join `own`
+
     return {
       heightAt,
       bounds: {minX: ext.minE, maxX: ext.maxE, minZ: -ext.maxN, maxZ: -ext.minN},

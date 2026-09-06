@@ -30,8 +30,14 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
 <script src="/vendor/three/GammaCorrectionShader.js"></script>
 <script src="/vendor/three/RGBELoader.js"></script>
 <script src="/vendor/three/OrbitControls.js"></script>
+<script src="/vendor/three/GLTFLoader.js"></script>
+<script src="/vendor/three/DRACOLoader.js"></script>
 <script src="/route.js"></script>
 <script src="/env/helpers.js"></script>
+<script src="/vendor/asset-relief-logistics.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-recon.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-casevac.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-combat.js" onerror="this.remove()"></script>
 <script>
 /* Standalone harness for one environment module (console/web/env/CONTRACT.md).
  *   /env/preview.html?env=<name>&mission=<name>[&post=0][&cam=chase|top|hero]
@@ -86,13 +92,13 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
   Object.assign(key.shadow.camera, {left:-60, right:60, top:60, bottom:-60, near:10, far:420});
   key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; key.layers.enable(H.INSET_LAYER); scene.add(key); scene.add(key.target);
   const hemi = new T.HemisphereLight(0x4A5A78, 0x2A241E, 0.6); hemi.layers.enable(H.INSET_LAYER); scene.add(hemi);
-  // procedural sky sphere from spec.sky
-  scene.add(new T.Mesh(new T.SphereGeometry(880, 48, 24), new T.ShaderMaterial({
+  // procedural sky sphere from spec.sky (first paint; spec.backdrop replaces it when it lands)
+  const gradientSky = new T.Mesh(new T.SphereGeometry(880, 48, 24), new T.ShaderMaterial({
     side:T.BackSide, depthWrite:false, fog:false, toneMapped:false,
     uniforms:{ch:{value:new T.Color(spec.sky.horizon)}, cm:{value:new T.Color(spec.sky.mid)}, cz:{value:new T.Color(spec.sky.zenith)}},
     vertexShader:'varying vec3 vW; void main(){ vW=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
     fragmentShader:'uniform vec3 ch,cm,cz; varying vec3 vW; void main(){ float e=normalize(vW).y; vec3 c=mix(ch,cm,smoothstep(-0.06,0.09,e)); c=mix(c,cz,smoothstep(0.08,0.70,e)); gl_FragColor=linearToOutputTexel(vec4(c,1.0)); }',
-  })));
+  })); scene.add(gradientSky);
 
   const t0 = performance.now();
   const handle = mod.build(ctx);
@@ -101,10 +107,18 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
   status.sky = 'loading';
   H.withTimeout(H.loadHDR(spec.hdr, renderer), 25000, 'HDRI').then(h => {
     if (USE_ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; }
-    sunAz = h.sunAz; sunEl = h.sunEl; status.sky = 'loaded';
+    if (!spec.backdrop) { sunAz = h.sunAz; sunEl = h.sunEl; } status.sky = 'loaded';
     status.hdr_measured = {sunAz: +h.sunAz.toFixed(1), sunEl: +h.sunEl.toFixed(1), horizon: '#' + h.fog.getHexString()};
   }).catch(() => H.loadHDR(H.FALLBACK.hdr, renderer).then(h => { if (USE_ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; } status.sky = 'fallback'; })
               .catch(() => { status.sky = 'fallback (gradient only)'; }));
+  // Rendered backdrop: the visible sky (CONTRACT.md spec.backdrop); its sun is aimed at spec.sun.az
+  // and the key light takes its elevation. The HDR keeps lighting through PMREM.
+  if (spec.backdrop) {
+    status.backdrop = 'loading';
+    H.withTimeout(H.loadBackdrop(spec.backdrop, spec.sun.az), 25000, 'backdrop').then(b => {
+      scene.remove(gradientSky); scene.add(b.mesh); sunAz = b.sunAz; sunEl = b.sunEl; status.backdrop = 'loaded';
+    }).catch(e => { status.backdrop = 'fallback (gradient): ' + e.message; });
+  }
 
   // harness-only reference: route centreline + a 2 m cube at the route start
   const line = new T.Line(new T.BufferGeometry().setFromPoints(m.route.map(q => H.toScene(q.e, q.n, handle.heightAt(q.e, -q.n) + 0.3))),

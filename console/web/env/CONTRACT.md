@@ -29,8 +29,72 @@ const SPEC = {
   palette: { ground: '#4F5A3F', rock: '#5C574D', accent: '#7FA8CC' },
   attribution: 'Sky, ground: Poly Haven, CC0',  // shown in the HUD corner
   hero_camera: { az: 200, el: 22, dist: 140, dolly: 0.6 },   // for the hero/tile framing
+  // optional -- a rendered equirectangular backdrop as the VISIBLE sky (see below)
+  backdrop: { url: '/vendor/asset-backdrop-recon.jpg', sun_u: 0.633, sun_el: 34.0, dim: 0.58 },
 };
 ```
+
+### `spec.backdrop` -- rendered sky, optional
+
+The gradient sphere is first paint and fallback. When `spec.backdrop` is
+present the console, the hero/tiles and the harness call
+`helpers.loadBackdrop(spec.backdrop, spec.sun.az)` and, when the JPEG lands,
+replace the gradient sphere with the pano on a sphere just inside it. The HDR
+in `spec.hdr` still lights the scene (PMREM); the backdrop is only what the
+viewer sees. Rules:
+
+- The image is a 2:1 equirectangular render of the theatre from the UGV sim
+  asset pack (Blender/Cycles, `export_env.py --hires`, 4096x2048), far field
+  only: sky, horizon and anything beyond 120 m. Near set dressing stays real
+  geometry in the module. It is a render, not a photograph (CLAUDE.md).
+- `sun_u` / `sun_el`: the sun disc measured IN THE IMAGE (u across, elevation
+  in degrees), never taken from a manifest. The sphere is rotated so that disc
+  sits at `spec.sun.az`, the azimuth the module was composed for, and the key
+  light takes `sun_el`; the HDR's measured sun no longer re-aims the key.
+- `dim`: linear multiplier so the pano's 10-25 deg band lands at the module's
+  previous `sky.mid` luminance (EARTH_BACKDROP.md's legibility rule for the
+  console's additive sprites). Never above 1.
+- `fog.color` becomes ACES^-1 at `spec.exposure` of the backdrop's horizon band
+  as seen (times `dim`), so the ground fades into the pano; `sky.*` become the
+  pano's own bands so first paint matches. Record the measurements in the
+  module header as the existing HDR measurements are.
+- Files are committed as `console/web/vendor/asset-backdrop-<mission>.jpg`
+  (rendered here, not fetchable; the `asset-env-*` ignore rule does not match
+  them). `report({backdrop: 'loaded' | 'fallback'})` like every other asset.
+
+### `spec.relief` and `spec.props` -- the theatre's ground and set dressing, optional
+
+Both come from the same Blender scenes as the backdrops
+(`console/web/env/tools/export_env_assets.py`, run inside Blender against
+`~/Desktop/UGV_CAD/environments/ENV_<biome>.blend`).
+
+- `relief: { id, scale, blend_m }` -- the theatre's height field
+  (`build_env.make_height_fn`, 160x160 over 760 m, int16) served as
+  `/vendor/asset-relief-<mission>.js` and loaded before the modules.
+  `helpers.relief(spec).at(x, z)` returns metres, oriented to the DISPLAYED
+  pano (Blender +X at compass `360 (0.25 - sun_u) + sun.az`, +Y ninety degrees
+  clockwise -- the pano is mirrored relative to Blender world, verified from
+  the camera frame of all four scenes), centred on the route box, fading to 0
+  at the field's edge. The module ADDS it with its own wide flattening band
+  (`smooth(hw + 3, hw + 3 + blend_m, lat)`, prop rims `+7`, ground station
+  `20 m`), so invariant 1 holds exactly as before; `blend_m` is wide (30-90 m)
+  because the relief is metres, not centimetres. Without the asset `at()` is 0.
+- `props: { url, seed, margin, groups: [...] }` -- the pack's low-poly
+  prototypes (`/vendor/asset-props-<mission>.glb`, Draco; trees decimated to
+  ~900 faces, one primitive each, normals only) scattered by
+  `helpers.scatterProps(ctx, heightAt, cfg, own)`: one `InstancedMesh` per
+  prototype variant, seeded, culled from the corridor (`keepOut.corridor` past
+  `hw`), every prop's rim (`keepOut.prop`) and the ground station, admitted by
+  an optional `accept(e, n)` (CASEVAC admits by pre-map class) and `density`.
+  `tint: {low, high, split, radial}` paints trunk -> canopy per vertex in
+  LINEAR RGB; `region: 'near'` scatters in a band beside the route. Async:
+  meshes join `own` for the module's dispose and `report({props, props_detail})`
+  carries instance, draw-call and triangle counts. `ctx.lite` (the home tiles)
+  scales counts by 0.35. Budget still applies: read `props_detail.triangles`.
+- `helpers.antiTile(material)` on the ground material blends a second sample of
+  the same map at ~1/7 scale and a low-frequency value noise into the albedo
+  so a 2k texture repeated across the theatre stops reading as a grid; it
+  chains any `onBeforeCompile` the material already has.
 
 ## `build(ctx)` -- synchronous first paint, async polish
 

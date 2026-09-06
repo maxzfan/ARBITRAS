@@ -123,6 +123,25 @@ branch of `console/server.py` now strips the terrain block and the advisory.
 At W = 1 the simulated sensor's misreads (1 − diag = 15%) show as single-epoch
 spikes of the terrain bar on clean epochs; `terrain_window` is the F-0b knob.
 
+Rendered backdrops (2026-09-06): each environment's visible sky is now the
+matching theatre from the UGV sim asset pack (Blender/Cycles equirectangular,
+far field only; grassland → LOGISTICS, forest → RECON, urban → CASEVAC,
+dunes → COMBAT), re-rendered here at 4096x2048 on the GPU and committed as
+`console/web/vendor/asset-backdrop-<mission>.jpg`. `spec.backdrop` in
+`env/CONTRACT.md`: the HDR still lights, the pano is what is seen, its sun is
+rotated onto the HDR's measured azimuth and the key light takes its elevation;
+fog and the first-paint gradient are derived from the pano. The pack's drivable
+`terrain.glb` is NOT used: contract invariant 1 (flat under the route and every
+prop) and the mission frames rule it out without a re-projection. Instead
+(same night) each theatre gained `spec.relief` and `spec.props`
+(env/CONTRACT.md): the Blender height field of the matching biome added under
+the module's own ground with a wide corridor blend, the pack's prototypes
+(acacias, bushes, jungle trees, ferns, rocks, rubble, lamps, barriers, tufts)
+instanced and culled from the corridor, and an anti-tiling ground shader --
+all exported by `console/web/env/tools/export_env_assets.py` from the
+`ENV_<biome>.blend` scenes, which carry no image textures (procedural Cycles
+materials), so geometry comes over flat-shaded and is tinted per vertex here.
+
 Not done: F-0b threshold session (RECON/COMBAT onset confidence 0.49 sits
 below RESTRICTED because three features saturate while the derived half
 still stands behind a valid fix, so both automatic missions halt at onset

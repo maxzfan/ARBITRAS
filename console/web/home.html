@@ -179,6 +179,10 @@
 <script src="/vendor/three/SkeletonUtils.js"></script>
 <script src="/route.js"></script>
 <script src="/env/helpers.js"></script>
+<script src="/vendor/asset-relief-logistics.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-recon.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-casevac.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-combat.js" onerror="this.remove()"></script>
 <script src="/env/logistics.js"></script>
 <script src="/env/recon.js" onerror="this.remove()"></script>
 <script src="/env/casevac.js" onerror="this.remove()"></script>
@@ -259,15 +263,23 @@
     Object.assign(key.shadow.camera, {left:-90, right:90, top:90, bottom:-90, near:10, far:520}); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03;
     scene.add(key); scene.add(key.target);
     const hemi = new T.HemisphereLight(0x4A5A78, 0x2A241E, 0.6); scene.add(hemi);
-    scene.add(new T.Mesh(new T.SphereGeometry(880, 48, 24), new T.ShaderMaterial({side:T.BackSide, depthWrite:false, fog:false, toneMapped:false,
+    const gradientSky = new T.Mesh(new T.SphereGeometry(880, 48, 24), new T.ShaderMaterial({side:T.BackSide, depthWrite:false, fog:false, toneMapped:false,
       uniforms:{ch:{value:new T.Color(spec.sky.horizon)}, cm:{value:new T.Color(spec.sky.mid)}, cz:{value:new T.Color(spec.sky.zenith)}},
       vertexShader:'varying vec3 vW; void main(){ vW=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-      fragmentShader:'uniform vec3 ch,cm,cz; varying vec3 vW; void main(){ float e=normalize(vW).y; vec3 c=mix(ch,cm,smoothstep(-0.06,0.09,e)); c=mix(c,cz,smoothstep(0.08,0.70,e)); gl_FragColor=linearToOutputTexel(vec4(c,1.0)); }'})));
+      fragmentShader:'uniform vec3 ch,cm,cz; varying vec3 vW; void main(){ float e=normalize(vW).y; vec3 c=mix(ch,cm,smoothstep(-0.06,0.09,e)); c=mix(c,cz,smoothstep(0.08,0.70,e)); gl_FragColor=linearToOutputTexel(vec4(c,1.0)); }'})); scene.add(gradientSky);
     const sun = {az: spec.sun.az, el: spec.sun.el};
     status.sky = 'loading';
     H.withTimeout(H.loadHDR(spec.hdr, renderer), 25000, 'HDRI').then(h => {
-      if (ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; } sun.az = h.sunAz; sun.el = h.sunEl; status.sky = 'loaded';
+      if (ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; } if (!spec.backdrop) { sun.az = h.sunAz; sun.el = h.sunEl; } status.sky = 'loaded';
     }).catch(() => { status.sky = 'fallback'; });
+    // Rendered backdrop (env/CONTRACT.md spec.backdrop): the visible sky; its sun aimed at spec.sun.az,
+    // the key light takes its elevation, the HDR keeps lighting through PMREM.
+    if (spec.backdrop) {
+      status.backdrop = 'loading';
+      H.withTimeout(H.loadBackdrop(spec.backdrop, spec.sun.az), 25000, 'backdrop').then(b => {
+        scene.remove(gradientSky); scene.add(b.mesh); sun.az = b.sunAz; sun.el = b.sunEl; status.backdrop = 'loaded';
+      }).catch(() => { status.backdrop = 'fallback'; });
+    }
     return {key, hemi, sun};
   }
   const glowTex = (() => { let t = null; return () => { if (t) return t;
@@ -365,7 +377,7 @@
       let terrain = null;
       if (m.scene && m.scene.terrain_map && !pending) { try { const t = await (await fetch('/terrain')).json(); terrain = Object.assign(t, {grid: Int16Array.from(t.grid)}); } catch (e) {} }
       const scene = new T.Scene(), cam = new T.PerspectiveCamera(58, 1, 0.5, 1400), status = {}, helpers = H.forMission(m);
-      const handle = envMod.build({THREE:T, scene, renderer, mission:m, helpers, terrain, report: st => Object.assign(status, st)});
+      const handle = envMod.build({THREE:T, scene, renderer, mission:m, helpers, terrain, lite: true, report: st => Object.assign(status, st)});
       const {key, sun} = dressScene(scene, envMod.spec, renderer, status);
       // route ribbon (harness-grade: the console draws the real corridor)
       scene.add(new T.Line(new T.BufferGeometry().setFromPoints(m.route.map(q => H.toScene(q.e, q.n, handle.heightAt(q.e, -q.n) + 0.25))),

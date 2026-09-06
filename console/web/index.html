@@ -310,6 +310,10 @@ setTimeout(function () {
 <script src="/vendor/three/OrbitControls.js"></script>
 <script src="/route.js"></script>
 <script src="/env/helpers.js"></script>
+<script src="/vendor/asset-relief-logistics.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-recon.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-casevac.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-combat.js" onerror="this.remove()"></script>
 <script src="/env/logistics.js" onerror="this.remove()"></script>
 <script src="/env/recon.js" onerror="this.remove()"></script>
 <script src="/env/casevac.js" onerror="this.remove()"></script>
@@ -1069,6 +1073,8 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
       if (status.model === 'fallback') notes.push('MODEL FALLBACK · primitive vehicle');
       if (status.sky === 'loading') notes.push('loading sky');
       if (status.sky === 'fallback') notes.push('SKY FALLBACK · gradient');
+      if (status.backdrop === 'loading') notes.push('loading backdrop');
+      if (status.backdrop === 'fallback') notes.push('BACKDROP FALLBACK · gradient');
       if (status.ground === 'fallback') notes.push('GROUND FALLBACK · untextured');
       statusRef.current({note: notes.join(' · '),
         attrib: (status.model === 'loaded' ? 'Vehicle: 4x4 UGV, own CAD (Blender) · ' : '')
@@ -1213,15 +1219,29 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
 
     // -- sky: HDRI environment + background; gradient sphere only as fallback ----
     const addGradientSky = () => {
-      scene.add(new T.Mesh(new T.SphereGeometry(880, 48, 24), new T.ShaderMaterial({
+      st.gradientSky = new T.Mesh(new T.SphereGeometry(880, 48, 24), new T.ShaderMaterial({
         side:T.BackSide, depthWrite:false, fog:false, toneMapped:false,
         uniforms:{ch:{value:new T.Color(spec ? spec.sky.horizon : ENV.horizon)}, cm:{value:new T.Color(spec ? spec.sky.mid : ENV.mid)}, cz:{value:new T.Color(spec ? spec.sky.zenith : ENV.zenith)}},
         vertexShader:'varying vec3 vW; void main(){ vW=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
         fragmentShader:'uniform vec3 ch,cm,cz; varying vec3 vW; void main(){ float e=normalize(vW).y; vec3 c=mix(ch,cm,smoothstep(-0.06,0.09,e)); c=mix(c,cz,smoothstep(0.08,0.70,e)); gl_FragColor=linearToOutputTexel(vec4(c,1.0)); }',
-      })));
+      })); scene.add(st.gradientSky);
     };
-    addGradientSky();                                   // always: the HDRI lights, it is not the backdrop
+    addGradientSky();                                   // first paint and fallback: the HDRI lights, it is not the backdrop
     st.sunAz = sunSpec.az; st.sunEl = sunSpec.el;
+    // Rendered backdrop (spec.backdrop, env/CONTRACT.md): the visible sky, drawn inside the gradient
+    // sphere once it lands, its sun aimed at spec.sun.az; the key light takes its sun elevation and
+    // the HDR below keeps lighting through PMREM. On failure the gradient stays.
+    const hasBackdrop = !!(spec && spec.backdrop);
+    if (hasBackdrop) {
+      status.backdrop = 'loading';
+      withTimeout(ARBITER_HELPERS.loadBackdrop(spec.backdrop, sunSpec.az), 25000, 'backdrop').then(b => {
+        if (!alive) return;
+        if (st.gradientSky) { scene.remove(st.gradientSky); st.gradientSky.geometry.dispose(); st.gradientSky.material.dispose(); st.gradientSky = null; }
+        scene.add(b.mesh); st.backdrop = b.mesh;
+        st.sunAz = b.sunAz; st.sunEl = b.sunEl; LDIR.copy(azel(b.sunAz, b.sunEl));
+        status.backdrop = 'loaded'; report(); if (st.inset) st.inset.dirty = true;
+      }).catch(() => { if (!alive) return; status.backdrop = 'fallback'; report(); });
+    }
     withTimeout(loadHDR((spec && spec.hdr) || ENV.hdr, renderer), 25000, 'HDRI').then(h => {
       if (!alive) return;
       if (QS.get('env') !== '0') scene.environment = h.env;   // PBR lighting + reflections only (?env=0: diagnostic)
@@ -1231,7 +1251,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
       const dAz = ((Math.atan2(h.sunDir.x, -h.sunDir.z)/D2R) + 360) % 360;
       st.sunCheck = {hdrAz:+dAz.toFixed(1), hdrEl:+h.sunEl.toFixed(1), specAz:sunSpec.az, specEl:sunSpec.el};
       // The environment's HDR is the light: re-aim the key at its measured sun.
-      if (spec) { st.sunAz = dAz; st.sunEl = h.sunEl; LDIR.copy(azel(dAz, h.sunEl)); }
+      if (spec && !hasBackdrop) { st.sunAz = dAz; st.sunEl = h.sunEl; LDIR.copy(azel(dAz, h.sunEl)); }
       status.sky = 'loaded'; report(); if (st.inset) st.inset.dirty = true;
     }).catch(() => { if (!alive) return; status.sky = 'fallback'; report(); });
 
@@ -1653,6 +1673,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
       cancelAnimationFrame(raf); ro.disconnect(); st.layer.dispose();
       if (st.env) st.env.dispose();
       if (st.overlay && st.overlay.dispose) st.overlay.dispose();
+      if (st.backdrop && st.backdrop.material.map) st.backdrop.material.map.dispose();
       if (controls) controls.dispose();
       for (const c of st.cmp) c.el.remove();
       st.lblTruth.el.remove(); st.lblGhost.el.remove(); st.lblGS.el.remove(); st.lblCorr.el.remove();
