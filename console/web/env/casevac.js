@@ -49,7 +49,6 @@
     sky: { horizon: '#80807E', mid: '#88929E', zenith: '#657487' },   // first paint and fallback: the backdrop's bands at dim 0.87
     sun: { az: 123.0, el: 22.7 },                          // az: measured from the HDR, the aim for the backdrop's sun; el from backdrop.sun_el at load
     palette: { ground: '#5A544C', rock: '#57544E', accent: '#E8A21C' },
-    attribution: 'Ground: Poly Haven, CC0 · sky: rendered scene (Blender), lit by a Poly Haven HDR',
     hero_camera: { az: 228, el: 16, dist: 230, dolly: 0.6 },   // low oblique from the NW, over the aid station down the outbound leg
   };
 

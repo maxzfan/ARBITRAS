@@ -53,7 +53,6 @@
     sky: { horizon: '#A79D92', mid: '#92A4B6', zenith: '#64758C' },
     sun: { az: 131.9, el: 4.1 },                            // az: the HDR's sun (SE), the aim for the backdrop's sun; el from backdrop.sun_el at load
     palette: { ground: '#8C7C63', rock: '#6E655A', accent: '#E4551F' },
-    attribution: 'Ground: Poly Haven, CC0 · sky: rendered scene (Blender), lit by a Poly Haven HDR',
     // Harness convention: the camera sits at compass bearing (180 - az) from the theatre centre and
     // is aimed by the harness. az 288 / dist 543 puts it ~120 m behind the line of departure, 40 m
     // up, so LD, the advance and the objective on its rise all lie ahead of it; sun to the right.

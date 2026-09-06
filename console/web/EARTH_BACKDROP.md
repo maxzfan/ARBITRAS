@@ -4,15 +4,14 @@ Goal: the environment must read as **Earth, temperate northern plains** (Camp Gr
 not another planet. The combo this was written against (the NASA Perseverance glb + `rocky_terrain_02` +
 `belfast_sunset_puresky`) read as Mars. The vehicle has since been replaced by the 4x4 UGV
 (`/vendor/asset-ugv.draco.glb`, own CAD, Draco-compressed; see `ENV.model` in index.html).
-Assets below are vendored and committed; nothing in index.html has been changed. Old assets are left in place.
+Assets below are vendored and committed. The older `asset-sky.hdr` / `asset-ground-*` set is still live: RECON lights with `asset-sky.hdr`, and `asset-ground-*` is the rock texture (`ENV.rockTex`, `helpers.rock`).
 
 ## Assets (all Poly Haven, CC0; flat in /vendor/ — server handler is basename-only)
 
 | replaces                     | new file                           | what                                              |
 |------------------------------|------------------------------------|---------------------------------------------------|
 | `asset-sky.hdr`              | `asset-earth-sky.hdr`              | `kloofendal_48d_partly_cloudy_puresky` 2k, 5.2 MB |
-| `asset-ground-diff.jpg`      | `asset-earth-ground-diff.jpg`      | `grass_path_2` diffuse 1k (sRGB)                  |
-| —                            | `asset-earth-ground-diff-2k.jpg`   | same, 2k (2.7 MB) — use if you can afford it      |
+| `asset-ground-diff.jpg`      | `asset-earth-ground-diff-2k.jpg`   | `grass_path_2` diffuse 2k (sRGB, 2.7 MB)          |
 | `asset-ground-nor_gl.jpg`    | `asset-earth-ground-nor_gl.jpg`    | normal, OpenGL +Y (Three.js default, no flip)     |
 | `asset-ground-rough.jpg`     | `asset-earth-ground-rough.jpg`     | roughness (linear)                                |
 

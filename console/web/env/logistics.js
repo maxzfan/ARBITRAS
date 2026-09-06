@@ -36,7 +36,6 @@
     sky: { horizon: '#A3A4A0', mid: '#83919E', zenith: '#596A7F' },   // first paint and fallback: the backdrop's 0.5-4 / 10-25 / 55-90 deg bands at dim 0.58
     sun: { az: 124.4, el: 47.3 },                          // az: measured from the HDR, the aim for the backdrop's sun; el comes from backdrop.sun_el at load
     palette: { ground: '#6B6A5E', rock: '#5C574D', accent: '#E8A21C' },
-    attribution: 'Ground: Poly Haven, CC0 · sky: rendered scene (Blender), lit by a Poly Haven HDR',
     hero_camera: { az: 215, el: 13, dist: 82, dolly: 0.6 },   // low oblique over the convoy's left shoulder
   };
 
