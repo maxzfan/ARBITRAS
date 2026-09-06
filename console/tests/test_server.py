@@ -172,7 +172,8 @@ def test_threshold_provenance_is_stamped_on_every_epoch():
 
 # --------------------------------------------------------------------- dialogue
 
-GUIDE_SCRIPT = {"guide": [{"epoch": 0, "lines": [
+GUIDE_SCRIPT = {"guide": [{"epoch": 0, "kind": "waypoint", "label": "FOB",
+                           "lines": [
     {"text": "The convoy is leaving the supply point on satellite navigation.",
      "tone": "calm", "claims": []}]}]}
 
@@ -184,8 +185,16 @@ def test_decide_attaches_the_dialogue_beside_the_explanation():
     payload = decide(Arbitras(), json.loads(line(0.9)), layer_on=True,
                      guide=Guide(GUIDE_SCRIPT))
     dl = payload["dialogue"]
-    assert set(dl) >= {"lines", "gate", "gate_reason", "verified", "failures"}
-    assert dl["gate"] is True and dl["lines"], "the epoch-0 beat opens a gate"
+    # Revision 2: no gate. A checkpoint carries its lines and the replay runs on.
+    assert set(dl) >= {"lines", "checkpoint", "verified", "failures"}
+    assert "gate" not in dl, "the gate model is gone (DIALOGUE.md, Revision 2)"
+    assert dl["lines"], "the epoch-0 checkpoint speaks"
+    cp = dl["checkpoint"]
+    assert cp["index"] >= 1 and cp["total"] >= cp["index"]
+    assert cp["kind"] in {"waypoint", "event", "intro", "end"}
+    # Every line is stamped with the epoch its claims were verified against.
+    for ln in dl["lines"]:
+        assert "epoch" in ln and "at" in ln
     assert payload["explanation"]["headline"], "still on the wire, untouched"
     assert payload["explanation_verified"] is True
 

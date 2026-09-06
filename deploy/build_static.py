@@ -31,8 +31,11 @@ SHIM_SRC = Path(__file__).resolve().parent / "static_shim.js"
 SHIM_NAME = "arbitras-static.js"
 
 # The server's own default, so a viewer who passes no ?rate= sees what the
-# server would have paced (console/server.py: `--rate`, design.md §5 says 10-20).
-DEFAULT_RATE = 15.0
+# server would have paced. It MUST track console/server.py `--rate`: this is
+# the only pacing the deployed site has, and at 15 the guide dialogue outruns
+# the reader that design.md §5 set the rate for. 10-20 is §5's DEVELOPMENT
+# range; presentation is 5 (§5, §11b).
+DEFAULT_RATE = 5.0
 
 # Not deployed: docs, editor droppings, and the Blender export scripts, none of
 # which a browser asks for.
