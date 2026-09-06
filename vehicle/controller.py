@@ -315,7 +315,9 @@ class Run:
             try:
                 wf.write(raw)
                 wf.flush()
-            except OSError:
+            except (OSError, ValueError):
+                # ValueError: write/flush on a client wfile already closed by
+                # the http.server machinery after the browser disconnected.
                 dead.append(wf)
         for wf in dead:
             try:
