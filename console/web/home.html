@@ -257,7 +257,7 @@
     renderer.info.autoReset = false; T.ColorManagement.legacyMode = false;
     return renderer;
   }
-  function dressScene(scene, spec, renderer, status) {
+  function dressScene(scene, spec, renderer, status, lite) {
     scene.fog = new T.FogExp2(new T.Color(spec.fog.color), spec.fog.density);
     const key = new T.DirectionalLight(0xFFF4E0, 3.0); key.castShadow = renderer.shadowMap.enabled; key.shadow.mapSize.set(2048, 2048);
     Object.assign(key.shadow.camera, {left:-90, right:90, top:90, bottom:-90, near:10, far:520}); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03;
@@ -268,10 +268,21 @@
       vertexShader:'varying vec3 vW; void main(){ vW=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
       fragmentShader:'uniform vec3 ch,cm,cz; varying vec3 vW; void main(){ float e=normalize(vW).y; vec3 c=mix(ch,cm,smoothstep(-0.06,0.09,e)); c=mix(c,cz,smoothstep(0.08,0.70,e)); gl_FragColor=linearToOutputTexel(vec4(c,1.0)); }'})); scene.add(gradientSky);
     const sun = {az: spec.sun.az, el: spec.sun.el};
-    status.sky = 'loading';
-    H.withTimeout(H.loadHDR(spec.hdr, renderer), 25000, 'HDRI').then(h => {
-      if (ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; } if (!spec.backdrop) { sun.az = h.sunAz; sun.el = h.sunEl; } status.sky = 'loaded';
-    }).catch(() => { status.sky = 'fallback'; });
+    // The HDR is 1-6 MB and its only job here is PMREM ambient: the VISIBLE sky is
+    // spec.backdrop, and where a backdrop exists the sun angles come from it, not
+    // from the HDR (spec.sun.az is already the measured value). Across the four
+    // selector tiles that is 16.4 MB fetched to shade four ~300 px thumbnails, on
+    // the landing page judges reach over venue wifi. Lite keeps the hemisphere
+    // light at full strength in its place. The console loads one environment at
+    // full size and still takes the HDR.
+    if (lite) {
+      status.sky = 'lite';
+    } else {
+      status.sky = 'loading';
+      H.withTimeout(H.loadHDR(spec.hdr, renderer), 25000, 'HDRI').then(h => {
+        if (ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; } if (!spec.backdrop) { sun.az = h.sunAz; sun.el = h.sunEl; } status.sky = 'loaded';
+      }).catch(() => { status.sky = 'fallback'; });
+    }
     // Rendered backdrop (env/CONTRACT.md spec.backdrop): the visible sky; its sun aimed at spec.sun.az,
     // the key light takes its elevation, the HDR keeps lighting through PMREM.
     if (spec.backdrop) {
@@ -365,11 +376,13 @@
     if (!canvas || getComputedStyle(canvas).display === 'none') return;
     const renderer = rig(canvas, {exposure: 1.4}, {shadows:false, maxDpr:1.5});
     renderer.setScissorTest(true);
-    const root = await loadModel();
     const tilesArr = [];
-    for (const ms of missions) {
+
+    // One tile's scene graph. Lifted out of the loop so construction can be
+    // deferred; the body below is unchanged.
+    const buildTile = async (root, ms) => {
       const col = row.querySelector(`[data-mission="${ms.name}"]`), tileEl = col && col.querySelector('.tile');
-      if (!tileEl) continue;
+      if (!tileEl) return;
       const envMod = (window.ARBITRAS_ENV || {})[ms.scene.env] || (window.ARBITRAS_ENV || {}).logistics;
       const pending = !((window.ARBITRAS_ENV || {})[ms.scene.env]);
       if (pending) tileEl.querySelector('.note').textContent = 'preview · scripted · env pending, prairie stand-in';
@@ -378,7 +391,7 @@
       if (m.scene && m.scene.terrain_map && !pending) { try { const t = await (await fetch('/terrain')).json(); terrain = Object.assign(t, {grid: Int16Array.from(t.grid)}); } catch (e) {} }
       const scene = new T.Scene(), cam = new T.PerspectiveCamera(58, 1, 0.5, 1400), status = {}, helpers = H.forMission(m);
       const handle = envMod.build({THREE:T, scene, renderer, mission:m, helpers, terrain, lite: true, report: st => Object.assign(status, st)});
-      const {key, sun} = dressScene(scene, envMod.spec, renderer, status);
+      const {key, sun} = dressScene(scene, envMod.spec, renderer, status, true);
       // route ribbon (harness-grade: the console draws the real corridor)
       scene.add(new T.Line(new T.BufferGeometry().setFromPoints(m.route.map(q => H.toScene(q.e, q.n, handle.heightAt(q.e, -q.n) + 0.25))),
         new T.LineBasicMaterial({color:0xE8A21C, transparent:true, opacity:0.75, toneMapped:false})));
@@ -390,7 +403,29 @@
       corr.traverse(o => { if (o.isMesh) { o.material = corrMat; o.castShadow = false; } }); corr.visible = false;
       const L = helpers.routeLength();
       tilesArr.push({ms, m, el: tileEl, scene, cam, handle, key, sun, veh, ghost, corr, helpers, L, t0: performance.now() + Math.random()*4000});
-    }
+    };
+
+    // Built when the selector approaches the viewport, not at page load, and one
+    // at a time. The hero owns the first screen and its own environment; letting
+    // four more environments race it for bandwidth is what made a first visit
+    // feel broken on venue wifi. `continue` became `return` with the loop body
+    // now a function -- a tile with no element is skipped either way.
+    let started = false;
+    const startTiles = async () => {
+      if (started) return;
+      started = true;
+      const root = await loadModel();
+      for (const ms of missions) {
+        try { await buildTile(root, ms); }
+        catch (e) { console.warn('tile failed', ms.name, e); }
+      }
+    };
+    new IntersectionObserver(([e], obs) => {
+      if (!e.isIntersecting) return;
+      obs.disconnect();
+      startTiles();
+    }, {rootMargin: '300px'}).observe(sec);
+
     let visible = true, last = performance.now(), acc = 0;
     new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, {threshold: 0.05}).observe(sec);
     const size = () => { const w = canvas.clientWidth, h = canvas.clientHeight; if (w && h) renderer.setSize(w, h, false); };

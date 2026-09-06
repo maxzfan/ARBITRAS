@@ -220,13 +220,21 @@ def build(site: Path, verify_identity: bool = True) -> dict:
 
     # --- edge headers -----------------------------------------------------
     # `.sse` is not a known extension, so the edge would type these
-    # application/octet-stream -- and Cloudflare decides whether to compress
-    # from the content type. Uncompressed, logistics.on is 2.4 MB on the wire
-    # instead of ~250 KB. Naming the type is what makes the transfer small, and
-    # text/event-stream is what these bodies actually are.
+    # application/octet-stream, and Cloudflare decides whether to compress from
+    # the content type. Uncompressed, logistics.on is 2.4 MB on the wire instead
+    # of ~250 KB.
+    #
+    # text/event-stream is what these bodies ARE, and it was the first thing
+    # tried -- but the edge deliberately never compresses that type, because SSE
+    # is meant to stream and compressing it would buffer it. Measured on the
+    # deployed site: correct type, no Content-Encoding, full 2.4 MB.
+    #
+    # Nothing here streams: the shim fetches each file whole and calls .text().
+    # So text/plain is both the honest description of the delivery and the one
+    # that gets compressed.
     (site / "_headers").write_text(
         "/api/events/*\n"
-        "  Content-Type: text/event-stream; charset=utf-8\n"
+        "  Content-Type: text/plain; charset=utf-8\n"
         "  Cache-Control: public, max-age=300\n"
         "\n"
         "/vendor/*\n"
@@ -259,9 +267,10 @@ PROBES = [
     ("/vendor/asset-env-combat-sky.hdr", ("application/octet-stream", "image/vnd.radiance")),
     ("/vendor/three/draco/draco_decoder.wasm", ("application/wasm",)),
     ("/vendor/asset-ugv.draco.glb", ("model/gltf-binary", "application/octet-stream")),
-    # Typed by site/_headers. If this reads octet-stream the header file did not
-    # apply and every stream is shipping ~10x its compressed size.
-    ("/api/events/logistics.on.sse", ("text/event-stream",)),
+    # Typed by site/_headers. octet-stream means the header file did not apply;
+    # text/event-stream means it applied but the edge will refuse to compress.
+    # Either way every stream ships ~10x its compressed size.
+    ("/api/events/logistics.on.sse", ("text/plain",)),
     ("/api/numbers.json", ("application/json",)),
     ("/console", ("text/html",)),
 ]
@@ -280,11 +289,18 @@ def probe(base: str) -> int:
     base = base.rstrip("/")
     bad = 0
     for path, want in PROBES:
+        # Cloudflare answers urllib's default User-Agent with 403, which reads as
+        # a broken deploy when the site is fine. Ask as a browser would.
+        req = Request(base + path, method="HEAD", headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+            "Accept-Encoding": "gzip",
+        })
         try:
-            with urlopen(Request(base + path, method="HEAD"), timeout=20) as r:
+            with urlopen(req, timeout=20) as r:
                 ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip()
+                enc = r.headers.get("Content-Encoding") or "none"
                 ok = want is None or ctype in want
-                print(f"  {'ok  ' if ok else 'BAD '} {path:45s} {r.status} {ctype}")
+                print(f"  {'ok  ' if ok else 'BAD '} {path:45s} {r.status} {ctype:28s} enc={enc}")
                 if not ok:
                     print(f"       expected one of {want}")
                     bad += 1
