@@ -12,3 +12,6 @@ console/web/vendor/asset-env-*
 
 # Built static site (deploy/build_static.py); rebuilt from out/ + vendor assets
 site/
+
+# wrangler local state
+.wrangler/

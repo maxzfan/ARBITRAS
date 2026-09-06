@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import sys
 import time
 from pathlib import Path
 
@@ -219,6 +218,21 @@ def build(site: Path, verify_identity: bool = True) -> dict:
               f"on {report['events'][f'api/events/{name}.on.sse']/1e6:5.2f} MB  "
               f"off {report['events'][f'api/events/{name}.off.sse']/1e6:5.2f} MB")
 
+    # --- edge headers -----------------------------------------------------
+    # `.sse` is not a known extension, so the edge would type these
+    # application/octet-stream -- and Cloudflare decides whether to compress
+    # from the content type. Uncompressed, logistics.on is 2.4 MB on the wire
+    # instead of ~250 KB. Naming the type is what makes the transfer small, and
+    # text/event-stream is what these bodies actually are.
+    (site / "_headers").write_text(
+        "/api/events/*\n"
+        "  Content-Type: text/event-stream; charset=utf-8\n"
+        "  Cache-Control: public, max-age=300\n"
+        "\n"
+        "/vendor/*\n"
+        "  Cache-Control: public, max-age=31536000, immutable\n"
+    )
+
     # --- shim + pages -----------------------------------------------------
     manifest = {"api": "/api", "rate": DEFAULT_RATE, "streams": streams, "fallback": "demo"}
     shim = (f"window.__ARBITRAS_STATIC__ = {json.dumps(manifest)};\n"
@@ -245,14 +259,21 @@ PROBES = [
     ("/vendor/asset-env-combat-sky.hdr", ("application/octet-stream", "image/vnd.radiance")),
     ("/vendor/three/draco/draco_decoder.wasm", ("application/wasm",)),
     ("/vendor/asset-ugv.draco.glb", ("model/gltf-binary", "application/octet-stream")),
-    ("/api/events/logistics.on.sse", None),
+    # Typed by site/_headers. If this reads octet-stream the header file did not
+    # apply and every stream is shipping ~10x its compressed size.
+    ("/api/events/logistics.on.sse", ("text/event-stream",)),
     ("/api/numbers.json", ("application/json",)),
     ("/console", ("text/html",)),
 ]
 
 
 def probe(base: str) -> int:
-    """HEAD one file per asset class against a deployed site."""
+    """HEAD one file per asset class against a DEPLOYED site.
+
+    Targets the real edge, not a local `python -m http.server`: two of the
+    expectations below (the event-stream type, and therefore compression) come
+    from site/_headers, which only Cloudflare Pages applies.
+    """
     from urllib.request import Request, urlopen
     from urllib.error import HTTPError, URLError
 
