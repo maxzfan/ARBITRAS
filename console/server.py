@@ -293,13 +293,6 @@ class Handler(BaseHTTPRequestHandler):
                                ".json": "application/json"}.get(ext, "text/plain; charset=utf-8"))
         if u.path == "/events":
             return self._events(parse_qs(u.query))
-        if u.path.startswith("/papers/"):
-            # Research section (home.html): the team's own papers, served from
-            # console/web/papers. Basename only, PDFs only.
-            name = Path(u.path[8:]).name
-            if not name or Path(name).suffix.lower() != ".pdf":
-                return self.send_error(404)
-            return self._file(WEB / "papers" / name, "application/pdf")
         if u.path.startswith("/vendor/"):
             # Basename only, plus at most one whitelisted subdirectory, so a
             # request can never walk out of vendor/.
