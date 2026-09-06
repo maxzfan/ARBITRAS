@@ -1,5 +1,10 @@
 # Measured quantities — USN8, 2026-08-20 (DOY 232)
 
+> **SUPERSEDED:** every d' figure recorded in this document before commit
+> `5780797` is stale — that run is the first with the 5° mask, the post-fit
+> residual feature 2, and a correctly-keyed cross-constellation calibration.
+> Use the "Items 4 and 5, measured on the masked detector" section at the end.
+
 Everything a threshold or an injected magnitude is expressed against. Measured,
 not assumed (CLAUDE.md: *thresholds derive from observed data*). Regenerate with
 `python -m backend.rinex.report_floor`.

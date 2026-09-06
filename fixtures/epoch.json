@@ -56,6 +56,7 @@
       "code_carrier_divergence": 0.25,
       "cross_constellation": 0.25
     },
-    "weight_sensitive_fraction": 0.5
+    "weight_sensitive_fraction": 0.5,
+    "combine_mode": "weighted_sum"
   }
 }
