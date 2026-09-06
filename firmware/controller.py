@@ -3,7 +3,7 @@
     python -m firmware.controller --car-ip 172.20.10.4 --id 10
     python -m firmware.controller --no-car          # dry run, prints motion
 
-Architecture (see tracks/TRACK_E.md for the car side):
+Architecture (see tracks/TRACK_G.md for the car side):
 
   console.server (:8420)  --one SSE replay-->  this process (:8421)
                                                  |-- motion loop --UDP--> car
@@ -53,8 +53,8 @@ from console import mission
 UPSTREAM_HOST = "127.0.0.1"
 UPSTREAM_PORT = 8420
 LISTEN_PORT = 8421
-UDP_PORT = 4210               # frozen, tracks/TRACK_E.md
-SEND_HZ = 20.0                # command rate to the car (TRACK_E jog rate)
+UDP_PORT = 4210               # frozen, tracks/TRACK_G.md
+SEND_HZ = 20.0                # command rate to the car (TRACK_G jog rate)
 DEMO_RATE_EPS = 4.25          # 510 epochs -> 120 s
 PRERUN_RATE_EPS = 8.5         # layer-off pre-run, ~35 s to the kill point
 

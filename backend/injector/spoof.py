@@ -86,6 +86,12 @@ class Spoof:
     # produces no code/carrier distortion to spike).
     carrier_rate_error: float = 0.0  # m/s of code-minus-carrier divergence
 
+    # Track F (tracks/TRACK_F_COMBAT.md, TRACK_F_RECON.md): an ABRUPT
+    # position-domain offset applied from the first attack epoch, on top of
+    # any walk: displacement = step + walk_off_mps * walked_s. 0.0 leaves every
+    # existing scenario and truth log byte-identical. Position mode only.
+    step_displacement_m: float = 0.0
+
     # Magnitudes with no figure in §7, expressed against the measured floor.
     capture_jitter_sigma: float = 3.0   # x clean C/N0 sigma, during capture only
     liftoff_transient_sigma: float = 6.0  # x clean cmc sigma, at lift-off
@@ -143,10 +149,14 @@ class Spoof:
         return self.common_bias_m + self.walk_off_mps * self.walked_s(t)
 
     def displacement_m(self, t: datetime) -> float:
-        """Commanded horizontal displacement magnitude, metres (position mode)."""
+        """Commanded horizontal displacement magnitude, metres (position mode):
+        the abrupt step (from the first attack epoch) plus the walk."""
         if self.walk_mode != "position":
             return 0.0
-        return self.walk_off_mps * self.walked_s(t)
+        st, _ = self.stage(t)
+        if st == CLEAN:
+            return 0.0
+        return self.step_displacement_m + self.walk_off_mps * self.walked_s(t)
 
 
 # --- displacement geometry ----------------------------------------------------
@@ -316,8 +326,51 @@ def MEACONING(onset: datetime, **kw) -> Spoof:
                          liftoff_transient_sigma=0.0), **kw)
 
 
+def SIMPLISTIC_POSITION(onset: datetime, bearing_deg: float = EAST_BEARING_DEG,
+                        target_svs="all_gps", step_m: float = 250.0, **kw) -> Spoof:
+    """§7 row 1 read in the POSITION domain (tracks/TRACK_F_COMBAT.md).
+
+    A crude single-transmitter spoofer captures the whole GPS set at +15 dB
+    (§7 crude midpoint, as SIMPLISTIC) and presents ranges consistent with a
+    receiver `step_m` metres along `bearing_deg`, abruptly, from the first
+    attack epoch: per-SV offsets `-e_sv . dp`, computed by inject(). 250 m is
+    chosen to be unmistakable at a glance and is not derived from anything
+    (stated, not derived), exactly as SIMPLISTIC's common bias. The
+    code/carrier mismatch rate is carried from SIMPLISTIC (stated). Measured
+    on the real day (TRACK_F_COMBAT.md): the G+E joint fix lands 98.5 m out,
+    Galileo anchoring the rest; a step on ALL 45 tracked SVs would land the
+    full 250 m and is invisible to three features (README limitation).
+    """
+    return replace(Spoof(name="simplistic_position", power_db=15.0, walk_off_mps=0.0,
+                         onset=onset, walk_mode="position", bearing_deg=bearing_deg,
+                         svs="G", target=target_svs, step_displacement_m=step_m,
+                         carrier_rate_error=0.014, liftoff_delay_s=0.0), **kw)
+
+
+def REPEATER_OFFSET(onset: datetime, bearing_deg: float = EAST_BEARING_DEG,
+                    standoff_m: float = 300.0, **kw) -> Spoof:
+    """Meaconing from a repeater at a standoff (tracks/TRACK_F_RECON.md).
+
+    A repeater re-radiates every GPS signal from its OWN antenna, so the
+    receiver solves toward the repeater's position: a position-domain step
+    of `standoff_m` along `bearing_deg` on all GPS, plus the common path delay
+    of the same length (1 us per 300 m) and the repeater's elevated power.
+    No walk, no code/carrier mismatch (the rebroadcast keeps them coherent).
+    300 m and 8 dB are MEACONING's stated figures; both are sweep parameters.
+    Measured (TRACK_F_RECON.md): the G+E fix lands 118-139 m out at 300 m;
+    the constellation-level rule then drops exactly GPS.
+    """
+    return replace(Spoof(name="repeater_offset", power_db=8.0, walk_off_mps=0.0,
+                         onset=onset, walk_mode="position", bearing_deg=bearing_deg,
+                         svs="G", target="all_gps", step_displacement_m=standoff_m,
+                         common_bias_m=standoff_m, capture_jitter_sigma=1.0,
+                         carrier_rate_error=0.0, liftoff_transient_sigma=0.0), **kw)
+
+
 SCENARIOS = {"simplistic": SIMPLISTIC, "carry_off": CARRY_OFF,
-             "clock_carry_off": CLOCK_CARRY_OFF, "meaconing": MEACONING}
+             "clock_carry_off": CLOCK_CARRY_OFF, "meaconing": MEACONING,
+             "simplistic_position": SIMPLISTIC_POSITION,
+             "repeater_offset": REPEATER_OFFSET}
 
 # Scenarios whose walk-off rate is a position rate rather than a range rate.
-POSITION_DOMAIN = ("carry_off",)
+POSITION_DOMAIN = ("carry_off", "simplistic_position", "repeater_offset")

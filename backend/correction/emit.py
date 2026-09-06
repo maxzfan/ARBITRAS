@@ -93,9 +93,17 @@ def d_rho_from_epoch(ep, nav, x_lin, svs=None) -> dict:
 
 
 def _emit(gate: Gate, checks: dict, pl_m, corrected_lla, weights: dict,
-          alert_limit_m: float) -> dict:
+          alert_limit_m: float, extra_checks=None) -> dict:
     """Step the gate and assemble the contract block. One exit for all paths,
-    so the key set cannot drift between the success and failure branches."""
+    so the key set cannot drift between the success and failure branches.
+
+    `extra_checks` (Track E, tracks/TRACK_E.md) is called with the corrected
+    LLA — None on fail-closed paths — and its entries are merged into
+    `checks` BEFORE the gate steps, so a sixth check participates in
+    hysteresis rather than being bolted on after correction_ok was decided.
+    """
+    if extra_checks is not None:
+        checks = {**checks, **extra_checks(corrected_lla)}
     decision = gate.step(checks, pl_m, alert_limit_m)
     # JSON has no Infinity: an unbounded PL (unmonitorable satellite) is
     # emitted as null; pl_under_al already reads False for it, so the gate,
@@ -118,7 +126,7 @@ def _emit(gate: Gate, checks: dict, pl_m, corrected_lla, weights: dict,
 def correction_block(context, d_rho_by_sv: dict, excluded_sv, gate: Gate,
                      tau_m=_MODULE, chi2_cutoff=_MODULE,
                      alert_limit_m: float = ALERT_LIMIT_M,
-                     drift_bound_m=None, dr_ecef=None) -> dict:
+                     drift_bound_m=None, dr_ecef=None, extra_checks=None) -> dict:
     """One epoch's `geometry.correction` block. See module docstring.
 
     context      GeometryEngine.solve_context() dict (or None: fail closed).
@@ -147,7 +155,8 @@ def correction_block(context, d_rho_by_sv: dict, excluded_sv, gate: Gate,
     if context is None or not d_rho_by_sv:
         return _emit(gate, evaluate_checks(alert_limit_m=alert_limit_m,
                                            chi2_cutoff=chi2_cutoff),
-                     None, None, weights, alert_limit_m)
+                     None, None, weights, alert_limit_m,
+                     extra_checks=extra_checks)
 
     h = np.asarray(context["H_trusted"], dtype=float)
     sv_order = list(context["sv_order"])
@@ -158,7 +167,8 @@ def correction_block(context, d_rho_by_sv: dict, excluded_sv, gate: Gate,
     if not rows:
         return _emit(gate, evaluate_checks(alert_limit_m=alert_limit_m,
                                            chi2_cutoff=chi2_cutoff),
-                     None, None, weights, alert_limit_m)
+                     None, None, weights, alert_limit_m,
+                     extra_checks=extra_checks)
 
     svs = [sv_order[i] for i in rows]
     h_sub = h[rows]
@@ -192,7 +202,8 @@ def correction_block(context, d_rho_by_sv: dict, excluded_sv, gate: Gate,
                                  alert_limit_m=alert_limit_m,
                                  chi2_cutoff=chi2_cutoff)
         checks["redundancy"] = False
-        return _emit(gate, checks, None, None, weights, alert_limit_m)
+        return _emit(gate, checks, None, None, weights, alert_limit_m,
+                     extra_checks=extra_checks)
 
     # TRACK_D.md D4: corrected_position must be finite when emitted.
     assert np.all(np.isfinite(sol.dx[:3])), \
@@ -211,7 +222,7 @@ def correction_block(context, d_rho_by_sv: dict, excluded_sv, gate: Gate,
                              alert_limit_m=alert_limit_m,
                              chi2_cutoff=chi2_cutoff)
     return _emit(gate, checks, pl_m, ecef_to_lla(*corrected), weights,
-                 alert_limit_m)
+                 alert_limit_m, extra_checks=extra_checks)
 
 
 def _engine_context():
@@ -234,7 +245,7 @@ class CorrectionEmitter:
 
     def __init__(self, nav=None, tau_m=_MODULE, chi2_cutoff=_MODULE,
                  alert_limit_m: float = ALERT_LIMIT_M,
-                 drift_bound_m=None, context_fn=None):
+                 drift_bound_m=None, context_fn=None, extra_checks=None):
         self.nav = nav
         self.gate = Gate()
         self.tau_m = tau_m
@@ -242,6 +253,7 @@ class CorrectionEmitter:
         self.alert_limit_m = alert_limit_m
         self.drift_bound_m = drift_bound_m
         self._context_fn = context_fn or _engine_context
+        self.extra_checks = extra_checks          # Track E check 6, or None
 
     def reset(self) -> None:
         """Fresh replay: hysteresis history restarts (browser-reload rule)."""
@@ -257,4 +269,5 @@ class CorrectionEmitter:
                                 tau_m=self.tau_m,
                                 chi2_cutoff=self.chi2_cutoff,
                                 alert_limit_m=self.alert_limit_m,
-                                drift_bound_m=self.drift_bound_m)
+                                drift_bound_m=self.drift_bound_m,
+                                extra_checks=self.extra_checks)

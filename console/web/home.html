@@ -1,0 +1,614 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARBITRAS</title>
+<style>
+  /* Track F routing page (tracks/TRACK_F.md §1): hero, mission selector, console.
+     Same vendored type and palette as the console so the two read as one product. */
+  @font-face{font-family:'IBM Plex Sans';font-weight:400;font-display:block;src:url('/vendor/plex-sans-400.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:500;font-display:block;src:url('/vendor/plex-sans-500.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:600;font-display:block;src:url('/vendor/plex-sans-600.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:700;font-display:block;src:url('/vendor/plex-sans-700.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Mono';font-weight:400;font-display:block;src:url('/vendor/plex-mono-400.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Mono';font-weight:500;font-display:block;src:url('/vendor/plex-mono-500.woff2') format('woff2')}
+  :root{
+    --bg:#0B0D0F; --panel:#0E1114; --line:#1C222A; --keyline:#2B333D;
+    --fg:#EEF2F6; --dim:#8794A2; --faint:#4E5A67; --accent:#E4551F; --truth:#7FA8CC; --amber:#E8A21C; --corrected:#6FCF97;
+    --display:"Helvetica Neue","Arial Narrow",Impact,system-ui,sans-serif;
+    --sans:'IBM Plex Sans','Inter',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,"SF Mono",Menlo,monospace;
+    --nav:56px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  section[id],footer[id]{scroll-margin-top:var(--nav)}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  /* ---- nav ---- */
+  nav{position:fixed;top:0;left:0;right:0;height:var(--nav);z-index:50;background:#000;display:flex;align-items:center;
+      padding:0 28px;border-bottom:1px solid #111}
+  nav .wordmark{font-family:var(--display);font-weight:900;font-size:24px;letter-spacing:.04em;font-stretch:condensed;text-transform:uppercase}
+  nav .links{flex:1;display:flex;justify-content:center;gap:44px}
+  nav .links a{font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;color:#D8DEE6}
+  nav .links a::before{content:'+';margin-right:10px;color:#9AA4B0}
+  nav .links a:hover{color:#fff}
+  nav .reset{font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;color:#D8DEE6;cursor:pointer}
+  /* ---- hero ---- */
+  .hero{position:relative;height:100vh;min-height:640px;overflow:hidden;background:#111418}
+  .hero canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .hero .shade{position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(90deg,rgba(6,8,10,.86) 0%,rgba(6,8,10,.55) 34%,rgba(6,8,10,0) 62%),
+               radial-gradient(ellipse at 60% 50%,rgba(0,0,0,0) 45%,rgba(0,0,0,.55) 100%),
+               linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,0) 22%)}
+  .hero .copy{position:absolute;left:28px;top:36%;transform:translateY(-40%);z-index:2;max-width:min(62vw,880px)}
+  .hero h1{font-family:var(--display);font-weight:900;font-stretch:condensed;text-transform:uppercase;
+    font-size:clamp(52px,7.4vw,112px);line-height:.92;letter-spacing:-.015em;margin:0}
+  .hero .sub{margin:26px 0 0;max-width:560px;font-size:15px;line-height:1.55;color:#D2D9E2}
+  .hero .clock{position:absolute;left:28px;bottom:34px;z-index:2;font-family:var(--mono);font-size:13px;letter-spacing:.2em;color:#C8D0DA;line-height:1.9}
+  .hero .down{position:absolute;left:50%;bottom:34px;z-index:2;transform:translateX(-50%);display:flex;align-items:center;gap:14px;
+    padding:14px 22px;border:1px solid #E6EAF0;background:rgba(0,0,0,.12);cursor:pointer;color:#fff;
+    font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;white-space:nowrap;
+    text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 14px rgba(0,0,0,.8);transition:background .15s}
+  .hero .down:hover{background:rgba(255,255,255,.1)}
+  .hero .down i{font-style:normal;font-size:17px;line-height:1;transition:transform .2s}
+  .hero .down:hover i{transform:translateY(3px)}
+  /* Text-only over a bright ground: the halo carries legibility so the block
+     never needs a panel behind it, which would cover the render it sits on. */
+  .hero .spec{position:absolute;right:28px;bottom:34px;z-index:2;font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:#E8EDF3;
+    text-transform:uppercase;min-width:440px;text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 14px rgba(0,0,0,.8)}
+  .hero .spec .row{display:flex;justify-content:space-between;gap:24px;line-height:1.95;cursor:default;transition:color .15s}
+  .hero .spec .row b{font-weight:500;color:#fff}
+  /* Provenance rides in the row's title (same idiom as the console strip), so the
+     hero keeps its headline numbers without a second line of grey over the render. */
+  .hero .spec .row:hover span{color:#fff}
+  .hero .cap{position:absolute;right:28px;top:calc(var(--nav) + 18px);z-index:2;font-family:var(--mono);font-size:10px;letter-spacing:.16em;
+    color:#8794A2;text-transform:uppercase;text-shadow:0 1px 2px #000}
+  /* ---- missions ---- */
+  .missions{position:relative;background:#F4F5F7;color:#0B0D0F;padding:70px 16px 60px}
+  .missions .tag{font-family:var(--sans);font-size:19px;line-height:1.45;max-width:520px;margin:0 0 42px;color:#1B2027}
+  .missions .row{position:relative;display:flex;align-items:stretch;gap:0}
+  /* accordion: flex-grow is the only animated property, so the WebGL scissor rects (re-read per frame) follow the layout.
+     hovered/keyboard-focused column takes ~2.2 shares; the selected column keeps a mild 1.25 when nothing is hovered. */
+  .missions .col{position:relative;flex:1 1 0;min-width:0;cursor:pointer;user-select:none;outline:0;transition:flex-grow .45s cubic-bezier(.2,.7,.2,1)}
+  .missions .col.active{flex-grow:1.25}
+  .missions .row.hovering .col{flex-grow:1}
+  .missions .row.hovering .col.hover{flex-grow:2.2}
+  .missions .col:focus-visible .lbl{text-decoration:underline;text-underline-offset:7px;text-decoration-thickness:2px}
+  .missions .lbl{font-family:var(--sans);font-weight:700;font-size:18px;letter-spacing:.22em;text-transform:uppercase;height:52px;display:flex;align-items:center;color:#0B0D0F;white-space:nowrap;overflow:hidden}
+  .missions .lbl::before{content:'▸';flex:0 0 auto;margin-right:12px;font-size:14px;transition:transform .2s}
+  .missions .col.hover .lbl::before,.missions .col.active .lbl::before{transform:rotate(90deg)}
+  .missions .tile{position:relative;height:min(62vh,640px);background:#0E1114;overflow:hidden;border-right:1px solid #F4F5F7}
+  .missions .col:last-child .tile{border-right:0}
+  .missions .tile .cap{position:absolute;left:0;right:0;bottom:0;padding:14px 16px 16px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.78) 40%);
+    color:#EEF2F6;font-family:var(--sans);font-size:12.5px;line-height:1.45;opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s}
+  .missions .col.hover .tile .cap,.missions .col.active .tile .cap{opacity:1;transform:none}
+  .missions .tile .cap b{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#E8A21C;margin-bottom:6px}
+  .missions .tile .mech{position:absolute;left:14px;top:12px;font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+    padding:5px 8px;border:1px solid rgba(255,255,255,.35);color:#fff;background:rgba(0,0,0,.35);
+    max-width:calc(100% - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transform-origin:left top;transition:transform .45s cubic-bezier(.2,.7,.2,1)}
+  .missions .col.hover .tile .mech{transform:scale(1.06)}   /* overlay-only zoom; the 3D camera is never touched */
+  .missions .tile .note{position:absolute;right:12px;top:44px;font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#C9D1DB;text-shadow:0 1px 2px #000;max-width:70%;text-align:right}
+  .missions .tile .scoped{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;letter-spacing:.2em;color:#8794A2}
+  .missions .col.hover .tile{filter:brightness(1.12)}
+  /* one canvas behind the four tiles, positioned inside the ROW so its top is the tiles' top (below the 52px labels) */
+  .missions canvas#tilesCanvas{position:absolute;left:0;top:52px;width:100%;height:min(62vh,640px);display:block;pointer-events:none;z-index:0}
+  .missions .col .lbl,.missions .col .tile{position:relative;z-index:1}
+  .missions .tile{background:transparent}
+  .missions .corner{position:absolute;width:26px;height:26px;border:1px solid #0B0D0F;opacity:.7}
+  .missions .corner.bl{left:80px;bottom:18px;border-right:0;border-top:0}
+  .missions .corner.br{right:80px;bottom:18px;border-left:0;border-top:0}
+  /* ---- console ---- */
+  .console{position:relative;height:100vh;min-height:720px;background:var(--bg);display:flex;flex-direction:column;padding-top:var(--nav)}
+  .console .mhead{flex:0 0 auto;display:grid;grid-template-columns:auto 1fr auto;gap:28px;align-items:center;padding:12px 24px;
+    border-bottom:1px solid var(--keyline);background:var(--panel)}
+  .console .mhead .t{font-family:var(--display);font-weight:900;font-size:30px;letter-spacing:-.01em;font-stretch:condensed;text-transform:uppercase;line-height:1}
+  .console .mhead .t small{display:block;font-family:var(--sans);font-weight:400;font-size:12px;color:var(--dim);letter-spacing:0;text-transform:none;margin-top:5px}
+  .console .mhead .atk{font-family:var(--sans);font-size:12.5px;color:var(--dim);line-height:1.45;max-width:900px}
+  .console .mhead .atk b{color:var(--fg);font-weight:600}
+  .console .mhead .right{display:flex;gap:10px;align-items:center}
+  .console .badge{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;padding:6px 9px;border:1px solid var(--keyline);color:var(--fg)}
+  .console .badge.auto{border-color:var(--corrected);color:var(--corrected)}
+  .console .badge.take{border-color:var(--amber);color:var(--amber)}
+  .console .badge.link{cursor:pointer;color:var(--dim)}
+  .console .badge.link:hover{color:var(--fg)}
+  .console iframe{flex:1;width:100%;border:0;background:var(--bg);display:block}
+  /* The console panel and the limits that qualify it are consequences of a
+     choice: neither exists on the page until a mission has been selected. */
+  body:not(.picked) #method,body:not(.picked) #limits{display:none}
+  /* ---- research ---- */
+  .research{background:var(--bg);border-top:1px solid var(--line);padding:64px 28px 72px}
+  .research h2{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin:0 0 10px}
+  .research .lede{font-size:14.5px;line-height:1.6;color:#C2CBD6;max-width:820px;margin:0 0 40px}
+  .research .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.45fr);gap:44px 64px;max-width:1560px;align-items:start}
+  .research h3{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);
+    margin:0 0 20px;padding-bottom:10px;border-bottom:1px solid var(--keyline)}
+  .research h4{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:0 0 14px}
+  .research h4+ul{margin-bottom:26px}
+  .research ul{list-style:none;margin:0;padding:0}
+  .research li{margin-bottom:18px}
+  .research .w{display:block;font-size:14px;font-weight:600;color:var(--fg);line-height:1.35}
+  .research .w.inl{display:inline}                     /* several primitives on one line */
+  .research a.w:hover{color:var(--amber)}
+  .research a.w::after{content:' ↗';font-size:11px;color:var(--faint)}
+  .research a.w:hover::after{color:var(--amber)}
+  .research .who{display:block;margin-top:5px;font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;color:#7C8A99}
+  .research .rel{display:block;margin-top:6px;font-size:12.5px;line-height:1.5;color:var(--dim);max-width:660px}
+  .research .cited li{margin-bottom:13px}
+  .research .cited .rel{margin-top:3px;font-size:12px}
+  @media (max-width:1100px){.research .cols{grid-template-columns:minmax(0,1fr)}}
+  /* ---- footer ---- */
+  footer{background:#000;padding:56px 28px 70px;color:#AEB8C4;font-size:13px;line-height:1.6}
+  footer h2{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8794A2;margin:0 0 16px}
+  footer ol{max-width:900px;margin:0;padding-left:18px}
+  footer li{margin-bottom:8px}
+  footer .fine{margin-top:28px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:#5C6875}
+  @media (max-width:1100px){.missions .row{flex-wrap:wrap} .missions .col,.missions .col.active,.missions .row.hovering .col,.missions .row.hovering .col.hover{flex:0 0 50%} .missions canvas#tilesCanvas{display:none} .hero .spec{display:none}}
+</style>
+
+<nav>
+  <a class="wordmark" href="#platform">ARBITRAS</a>
+  <div class="links">
+    <a href="#platform">Platform</a><a href="#missions">Missions</a><a href="#research">Research</a>
+  </div>
+  <span class="reset" id="reset" title="hard reset: reload">Reset</span>
+</nav>
+
+<section class="hero" id="platform">
+  <canvas id="heroCanvas"></canvas>
+  <div class="shade"></div>
+  <div class="cap">Rendered scene · illustrative · nothing in this backdrop is a measurement</div>
+  <div class="copy">
+    <h1>Signal quality<br>is not provenance</h1>
+    <p class="sub">A trust layer between a GNSS receiver and an autonomy stack. It detects spoofed positioning, scores confidence continuously, and degrades the vehicle's authority in stages — full autonomy, coast, finish the leg, hold — instead of one binary trust decision.</p>
+  </div>
+  <div class="down" id="down" title="the four missions">Explore use cases <i>↓</i></div>
+  <div class="clock" id="clock">--.---.----<br>--:--:-- ZULU</div>
+  <div class="spec" id="spec"></div>
+</section>
+
+<section class="missions" id="missions">
+  <p class="tag">Four missions. Four attacks from the same threat model. One arbitras deciding, every epoch, how much authority the vehicle keeps.</p>
+  <div class="row" id="missionRow"><canvas id="tilesCanvas"></canvas></div>
+  <i class="corner bl"></i><i class="corner br"></i>
+</section>
+
+<section class="console" id="method">
+  <div class="mhead">
+    <div class="t" id="mTitle"></div>
+    <div class="atk" id="mAttack"></div>
+    <div class="right" id="mRight"></div>
+  </div>
+  <iframe id="consoleFrame" title="ARBITRAS console" allow="fullscreen"></iframe>
+</section>
+
+<section class="research" id="research">
+  <h2>Research</h2>
+  <p class="lede">ARBITRAS is an assembly of published work — its geometry score, its credential layer and its scoring discipline each come from somewhere, and the relationships below are the ones stated in <code>docs/design.md</code> §3. Where a work carries no link the citation is the reference.</p>
+  <div class="cols">
+    <div>
+      <h3>Our papers</h3>
+      <ul>
+        <li><a class="w" href="/papers/anderson-2024-gnss-cryptography.pdf" target="_blank" rel="noopener">Designing Cryptography Systems for GNSS Data and Ranging Authentication</a>
+          <span class="who">Jason Anderson · PhD dissertation, Stanford University, Aeronautics and Astronautics · December 2024</span>
+          <span class="rel">The design space our credential layer sits in: data and ranging authentication under GNSS's bandwidth constraint, and the receiver-side processing that turns a verified message into a statement about trust. Its argument that the product can now dictate the cryptography, rather than the reverse, is why a mission authorisation here is short-lived and continuously renewed instead of signed once.</span></li>
+        <li><a class="w" href="/papers/converge-coverage-view-selection.pdf" target="_blank" rel="noopener">Coverage Optimization for Camera View Selection (CONVERGE)</a>
+          <span class="who">Timothy Chen*, Adam Dai*, Maximilian Adang, Grace Gao, Mac Schwager · Stanford University</span>
+          <span class="rel">Fisher Information Gain reduced to a tractable coverage surrogate for active view selection. Different domain, same mathematics: the source of the geometry score — an information ratio over the line-of-sight matrix, normalised to <code>(det ratio)^(1/(3+k))</code> — and of the next-best-observation ranking the console pursues in DEGRADED. The mathematics is what carries over; ARBITRAS holds no imagery and no camera anywhere.</span></li>
+        <li><a class="w" href="/papers/cho-sbas-authentication-poster.pdf" target="_blank" rel="noopener">Authenticating Satellite-Based Augmentation Systems (SBAS)</a>
+          <span class="who">Eric Hyunseung Cho · advisor Prof. Todd Walter · Stanford GPS Laboratory · 2026</span>
+          <span class="rel">A standards-compliant prototype of SBAS message authentication: 250 bits per second, no signature and nothing confirming the sender, and ICAO's answer to it. The upstream problem our credential layer assumes solved — that work authenticates the message, and this one asks what authority the message grants.</span></li>
+      </ul>
+    </div>
+    <div class="cited">
+      <h3>Works cited</h3>
+      <h4>Authentication and credentials</h4>
+      <ul>
+        <li><a class="w" href="https://www.rfc-editor.org/rfc/rfc4082" target="_blank" rel="noopener">RFC 4082 — TESLA</a>
+          <span class="rel">Delayed disclosure of symmetric keys buys asymmetry without a signature per message. The hash chain and disclosure schedule here are ours; the primitives under them never are.</span></li>
+        <li><span class="w">ICAO Doc 10169 — SBAS authentication</span>
+          <span class="rel">TESLA, Ed25519, KMAC, compressed certificates. The protocol our credential layer reimplements; HMAC substitutes for KMAC under the library-crypto-only rule.</span></li>
+        <li><a class="w" href="https://www.gsc-europa.eu/galileo/services/galileo-open-service-navigation-message-authentication-osnma" target="_blank" rel="noopener">Galileo OSNMA</a>
+          <span class="rel">Operational 24 July 2025. TESLA delayed disclosure with live PKI, Merkle root and OTAR. Upstream of us: it authenticates the message and says nothing about authority.</span></li>
+        <li><a class="w inl" href="https://www.rfc-editor.org/rfc/rfc8032" target="_blank" rel="noopener">RFC 8032 — Ed25519</a> ·
+          <a class="w inl" href="https://csrc.nist.gov/pubs/fips/180-4/upd1/final" target="_blank" rel="noopener">FIPS 180-4 — SHA-256</a> ·
+          <a class="w inl" href="https://www.rfc-editor.org/rfc/rfc2104" target="_blank" rel="noopener">RFC 2104 — HMAC</a>
+          <span class="rel">The anchor signature, the chain and the tag over each authorisation. All three come from <code>cryptography</code>; no primitive in this project is written by us.</span></li>
+      </ul>
+      <h4>Scoring, geometry and detection</h4>
+      <ul>
+        <li><a class="w" href="https://arxiv.org/abs/2607.05415" target="_blank" rel="noopener">How Stable Is a PNT Resilience Score? — arXiv 2607.05415</a>
+          <span class="rel">Ally and challenge. Single-number resilience ratings are weighting-unstable: re-weighting flips the winner in up to 22% of draws under nominal conditions. It is why the false surrender rate is reported as a distribution over sampled weight vectors, and why the composite never appears without its four sub-scores and the geometry block.</span></li>
+        <li><span class="w">PNTTING — PNT Trust Inference Engine</span>
+          <span class="rel">Molina-Markham et al., DHS S&amp;T / MITRE. The closest published work: probabilistic trust inference for PNT user equipment, meant to assist automated decisions. More principled than ours; no credential binding, and not an authority arbiter with a published false-alarm rate.</span></li>
+        <li><span class="w">DHS Resilient PNT Conformance Framework v2.0 (2022) · Reference Architecture v1.0 (2022) · IEEE P1952</span>
+          <span class="rel">Four resilience levels, source-agnostic and outcome-based; Zero Trust applied to PNT — "function under the assumption of compromise." Our state machine instantiates that behavioural intent, and is a candidate conformance test for the standard in development.</span></li>
+        <li><span class="w">RAIM / ARAIM</span>
+          <span class="rel">An independent-fault model rather than a coordinated adversary, answering "can I trust this fix" and not "how much may this platform do." Its subset-geometry reasoning is the closest published relative of the geometry score.</span></li>
+        <li><span class="w">Rothmaier, Chen, Lo, Walter — ION GNSS+ 2021 · Psiaki &amp; Humphreys, Proc. IEEE 2016</span>
+          <span class="rel">Spoofing detection by metric combination, and the canonical survey. Our detector is that class of method, kept in the measurement domain and made to carry a confidence rather than a verdict.</span></li>
+        <li><span class="w">TEXBAT (UT Austin) · OAKBAT (ORNL)</span>
+          <span class="rel">The standard spoofing datasets, both raw IQ. We work one layer up, on RINEX observables, which is why the attacks here are injected rather than replayed.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer id="limits">
+  <h2>Limits, stated properly</h2>
+  <ol>
+    <li>The attacks are synthetic: the injector writes them into real RINEX observables from a static reference station. The route, the vehicles and the environments are a presentation frame; only the measured displacement between believed and true position separates the tracks.</li>
+    <li>One station, one day, one injector, open sky. Thresholds are measured separation points for USN8 on 2026-08-20 and generalise no further than that sentence.</li>
+    <li>Headline numbers above are computed from the streams on disk at server start and carry their source on hover. Where a stream is missing the value is blank, never typed in.</li>
+    <li>Operator takeover moves a vehicle in the presentation frame under a human's command; ARBITRAS itself never commands motion. Automatic corrections act on the corrected fix and are gated by its protection level.</li>
+  </ol>
+  <div class="fine">Built at DNHacks, 5–6 September 2026 · Vehicle: 4x4 UGV, own CAD · Sky and ground: Poly Haven, CC0 · No imagery anywhere on this page</div>
+</footer>
+
+<script src="/vendor/three.js"></script>
+<script src="/vendor/three/Pass.js"></script>
+<script src="/vendor/three/CopyShader.js"></script>
+<script src="/vendor/three/ShaderPass.js"></script>
+<script src="/vendor/three/MaskPass.js"></script>
+<script src="/vendor/three/EffectComposer.js"></script>
+<script src="/vendor/three/RenderPass.js"></script>
+<script src="/vendor/three/LuminosityHighPassShader.js"></script>
+<script src="/vendor/three/UnrealBloomPass.js"></script>
+<script src="/vendor/three/GammaCorrectionShader.js"></script>
+<script src="/vendor/three/GLTFLoader.js"></script>
+<script src="/vendor/three/DRACOLoader.js"></script>
+<script src="/vendor/three/RGBELoader.js"></script>
+<script src="/vendor/three/SkeletonUtils.js"></script>
+<script src="/route.js"></script>
+<script src="/env/helpers.js"></script>
+<script src="/vendor/asset-relief-logistics.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-recon.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-casevac.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-combat.js" onerror="this.remove()"></script>
+<script src="/env/logistics.js"></script>
+<script src="/env/recon.js" onerror="this.remove()"></script>
+<script src="/env/casevac.js" onerror="this.remove()"></script>
+<script src="/env/combat.js" onerror="this.remove()"></script>
+<script>
+(function () {
+  const QS = new URLSearchParams(location.search);
+  const POST = QS.get('post') !== '0', SHADOW = QS.get('shadow') !== '0', ENVMAP = QS.get('envmap') !== '0';
+  const T = THREE, H = ARBITRAS_HELPERS, R = Route, D2R = Math.PI / 180;
+  const MECH = {takeover: ['take', 'Operator takeover'], stationary: ['auto', 'Automatic · stationary deduction'], terrain: ['auto', 'Automatic · terrain-referenced']};
+  const MODEL = '/vendor/asset-ugv.draco.glb';
+  const info = {hero: {}, tiles: {}, model: 'loading'};
+  window.__homeInfo = () => JSON.parse(JSON.stringify(info));
+
+  // ---------------------------------------------------------------- clock
+  const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const p2 = n => String(n).padStart(2, '0');
+  const tickClock = () => { const d = new Date();
+    document.getElementById('clock').innerHTML = `${p2(d.getUTCDate())}.${MON[d.getUTCMonth()]}.${d.getUTCFullYear()}<br>${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())} ZULU`; };
+  tickClock(); setInterval(tickClock, 1000);
+  document.getElementById('down').onclick = () => document.getElementById('missions').scrollIntoView({behavior:'smooth'});
+  document.getElementById('reset').onclick = () => location.reload();
+
+  // ---------------------------------------------------------------- numbers (sourced)
+  fetch('/numbers').then(r => r.json()).then(n => {
+    const el = document.getElementById('spec');
+    const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    el.innerHTML = n.rows.map(r => `<div class="row" title="${esc(r.source)}"><span>${r.label}</span><b>${r.value == null ? '—' : r.value}${r.unit ? ' ' + r.unit : ''}</b></div>`).join('');
+  }).catch(() => {});
+
+  // ---------------------------------------------------------------- vehicle model (shared)
+  let modelRoot = null, modelReady = null;
+  function primitiveUGV() {
+    const g = new T.Group(), body = new T.MeshStandardMaterial({color:0x6E6A5C, roughness:0.82, metalness:0.15}),
+          tire = new T.MeshStandardMaterial({color:0x1C1D20, roughness:1});
+    const add = (geo, m, x, y, z, rz=0) => { const o = new T.Mesh(geo, m); o.position.set(x, y, z); o.rotation.z = rz; o.castShadow = o.receiveShadow = true; g.add(o); return o; };
+    add(new T.BoxGeometry(1.75, 0.55, 3.3), body, 0, 0.72, 0); add(new T.BoxGeometry(1.4, 0.34, 2.3), body, 0, 1.2, 0.1);
+    add(new T.CylinderGeometry(0.05, 0.05, 1.2, 8), body, 0.35, 1.9, 0.8);
+    const w = new T.CylinderGeometry(0.46, 0.46, 0.34, 20);
+    for (const sx of [-1, 1]) for (const z of [-1.1, 1.1]) add(w, tire, sx*1.02, 0.46, z, Math.PI/2);
+    g.userData.antennaY = 2.5; return g;
+  }
+  function prepare(root) {
+    // real units (see index.html ENV.model: vehicleHeight null); centre in x/z, sit on y=0.
+    const box = new T.Box3().setFromObject(root), c = box.getCenter(new T.Vector3());
+    root.position.set(-c.x, -box.min.y, -c.z); root.updateMatrixWorld(true);
+    root.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; if (o.isSkinnedMesh) o.frustumCulled = false; } });
+    const g = new T.Group(); g.add(root); g.userData.antennaY = box.max.y - box.min.y + 0.3; return g;
+  }
+  function loadModel() {
+    if (modelReady) return modelReady;
+    modelReady = new Promise(res => {
+      if (typeof T.GLTFLoader !== 'function') { info.model = 'primitive'; return res(primitiveUGV()); }
+      const loader = new T.GLTFLoader();
+      if (typeof T.DRACOLoader === 'function') { const d = new T.DRACOLoader(); d.setDecoderPath('/vendor/three/draco/'); loader.setDRACOLoader(d); }
+      H.withTimeout(new Promise((ok, bad) => loader.load(MODEL, g => ok(g.scene), undefined, bad)), 25000, 'model')
+        .then(scene => { info.model = 'glb'; res(prepare(scene)); })
+        .catch(e => { console.warn('vehicle model unavailable:', e && e.message); info.model = 'primitive'; res(primitiveUGV()); });
+    });
+    return modelReady;
+  }
+  const cloneVehicle = root => (T.SkeletonUtils && T.SkeletonUtils.clone) ? T.SkeletonUtils.clone(root) : root.clone(true);
+  // vehicle forward axis: +Z in glTF convention unless the CAD says otherwise (?face= compass degrees offset)
+  const FACE = QS.has('face') ? +QS.get('face') : 90;
+  const headingToYaw = headingRad => -((90 - headingRad / D2R) * D2R) + FACE * D2R;
+
+  // ---------------------------------------------------------------- shared scene rig
+  function rig(canvas, spec, opts) {
+    const renderer = new T.WebGLRenderer({canvas, antialias:true, alpha:false, powerPreference:'high-performance'});
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, opts.maxDpr || 2));
+    renderer.outputEncoding = T.sRGBEncoding; renderer.toneMapping = T.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = spec.exposure || 1.5; renderer.shadowMap.enabled = SHADOW && !!opts.shadows; renderer.shadowMap.type = T.PCFSoftShadowMap;
+    renderer.info.autoReset = false; T.ColorManagement.legacyMode = false;
+    return renderer;
+  }
+  function dressScene(scene, spec, renderer, status, lite) {
+    scene.fog = new T.FogExp2(new T.Color(spec.fog.color), spec.fog.density);
+    const key = new T.DirectionalLight(0xFFF4E0, 3.0); key.castShadow = renderer.shadowMap.enabled; key.shadow.mapSize.set(2048, 2048);
+    Object.assign(key.shadow.camera, {left:-90, right:90, top:90, bottom:-90, near:10, far:520}); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03;
+    scene.add(key); scene.add(key.target);
+    const hemi = new T.HemisphereLight(0x4A5A78, 0x2A241E, 0.6); scene.add(hemi);
+    const gradientSky = new T.Mesh(new T.SphereGeometry(880, 48, 24), new T.ShaderMaterial({side:T.BackSide, depthWrite:false, fog:false, toneMapped:false,
+      uniforms:{ch:{value:new T.Color(spec.sky.horizon)}, cm:{value:new T.Color(spec.sky.mid)}, cz:{value:new T.Color(spec.sky.zenith)}},
+      vertexShader:'varying vec3 vW; void main(){ vW=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+      fragmentShader:'uniform vec3 ch,cm,cz; varying vec3 vW; void main(){ float e=normalize(vW).y; vec3 c=mix(ch,cm,smoothstep(-0.06,0.09,e)); c=mix(c,cz,smoothstep(0.08,0.70,e)); gl_FragColor=linearToOutputTexel(vec4(c,1.0)); }'})); scene.add(gradientSky);
+    const sun = {az: spec.sun.az, el: spec.sun.el};
+    // The HDR is 1-6 MB and its only job here is PMREM ambient: the VISIBLE sky is
+    // spec.backdrop, and where a backdrop exists the sun angles come from it, not
+    // from the HDR (spec.sun.az is already the measured value). Across the four
+    // selector tiles that is 16.4 MB fetched to shade four ~300 px thumbnails, on
+    // the landing page judges reach over venue wifi. Lite keeps the hemisphere
+    // light at full strength in its place. The console loads one environment at
+    // full size and still takes the HDR.
+    if (lite) {
+      status.sky = 'lite';
+    } else {
+      status.sky = 'loading';
+      H.withTimeout(H.loadHDR(spec.hdr, renderer), 25000, 'HDRI').then(h => {
+        if (ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; } if (!spec.backdrop) { sun.az = h.sunAz; sun.el = h.sunEl; } status.sky = 'loaded';
+      }).catch(() => { status.sky = 'fallback'; });
+    }
+    // Rendered backdrop (env/CONTRACT.md spec.backdrop): the visible sky; its sun aimed at spec.sun.az,
+    // the key light takes its elevation, the HDR keeps lighting through PMREM.
+    if (spec.backdrop) {
+      status.backdrop = 'loading';
+      H.withTimeout(H.loadBackdrop(spec.backdrop, spec.sun.az), 25000, 'backdrop').then(b => {
+        scene.remove(gradientSky); scene.add(b.mesh); sun.az = b.sunAz; sun.el = b.sunEl; status.backdrop = 'loaded';
+      }).catch(() => { status.backdrop = 'fallback'; });
+    }
+    return {key, hemi, sun};
+  }
+  const glowTex = (() => { let t = null; return () => { if (t) return t;
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), grd = g.createRadialGradient(32,32,0,32,32,32);
+    grd.addColorStop(0,'rgba(255,255,255,1)'); grd.addColorStop(.16,'rgba(255,255,255,.9)'); grd.addColorStop(.42,'rgba(255,255,255,.16)'); grd.addColorStop(1,'rgba(255,255,255,0)');
+    g.fillStyle = grd; g.fillRect(0,0,64,64); t = new T.CanvasTexture(c); return t; }; })();
+
+  // ---------------------------------------------------------------- hero
+  async function hero() {
+    const canvas = document.getElementById('heroCanvas'), sec = document.getElementById('platform');
+    const env = (window.ARBITRAS_ENV || {}).logistics; if (!env) return;
+    const m = await (await fetch('/mission?name=logistics')).json();
+    const spec = env.spec, renderer = rig(canvas, spec, {shadows:true});
+    const scene = new T.Scene(), cam = new T.PerspectiveCamera(48, 1, 0.5, 1600);
+    const status = {}; const helpers = H.forMission(m);
+    const handle = env.build({THREE:T, scene, renderer, mission:m, helpers, terrain:null, report: st => Object.assign(status, st)});
+    const {key, sun} = dressScene(scene, spec, renderer, status);
+    let composer = null;
+    if (POST && T.EffectComposer) { composer = new T.EffectComposer(renderer); composer.addPass(new T.RenderPass(scene, cam));
+      composer.addPass(new T.UnrealBloomPass(new T.Vector2(2, 2), 0.28, 0.5, 0.82)); composer.addPass(new T.ShaderPass(T.GammaCorrectionShader)); }
+
+    // the fleet: a three-vehicle convoy on the route, a scout on a parallel line, one returning
+    const L = helpers.routeLength();
+    const fleet = [
+      {kind:'convoy', s: 60,  v: 3.2, lat: 0,   dir: 1},
+      {kind:'convoy', s: 46,  v: 3.2, lat: 0,   dir: 1},
+      {kind:'convoy', s: 32,  v: 3.2, lat: 0,   dir: 1},
+      {kind:'return', s: 520, v: 2.6, lat: -6,  dir: -1},
+      {kind:'scout',  s: 300, v: 2.2, lat: 130, dir: -1},
+    ];
+    const root = await loadModel();
+    for (const f of fleet) { f.obj = cloneVehicle(root); f.antY = root.userData.antennaY || 2.4; scene.add(f.obj); }
+    const place = f => {
+      const P = helpers.routePoint(f.s), nx = -Math.sin(P.heading), ny = Math.cos(P.heading);   // left normal
+      const e = P.e + nx * f.lat, n = P.n + ny * f.lat, z = -n, y = handle.heightAt(e, z);
+      f.obj.position.set(e, y, z); f.obj.rotation.y = headingToYaw(f.dir > 0 ? P.heading : P.heading + Math.PI);
+      f.pos = f.obj.position;
+    };
+    fleet.forEach(place);
+    // decorative satellites over the lead vehicle: fixed az/el, rays to its antenna (captioned illustrative)
+    const SATS = [[38,62],[97,48],[141,71],[188,35],[226,57],[281,44],[318,66],[12,28],[74,21],[251,25]];
+    const lead = fleet[0], satRadius = 420, satObjs = SATS.map(([az, el]) => {
+      const sp = new T.Sprite(new T.SpriteMaterial({map:glowTex(), color:0xA9CCEA, transparent:true, blending:T.AdditiveBlending, depthWrite:false, fog:false, toneMapped:false}));
+      sp.scale.setScalar(9); scene.add(sp);
+      const ln = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]), new T.LineBasicMaterial({color:0xA9CCEA, transparent:true, opacity:0.28, fog:false, toneMapped:false}));
+      scene.add(ln); return {sp, ln, dir: H.azel(az, el)};
+    });
+    const antenna = new T.Vector3();
+    // camera: high oblique dolly around the convoy
+    const hc = spec.hero_camera || {az:200, el:24, dist:150, dolly:0.6};
+    let theta = hc.az * D2R, visible = true, last = performance.now(), frames = 0, fpsT = last;
+    new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, {threshold: 0.05}).observe(sec);
+    const size = () => { const w = canvas.clientWidth, h = canvas.clientHeight; if (!w || !h) return;
+      cam.aspect = w/h; cam.updateProjectionMatrix(); renderer.setSize(w, h, false); if (composer) composer.setSize(w, h); };
+    new ResizeObserver(size).observe(canvas); size();
+    const look = new T.Vector3(), want = new T.Vector3();
+    function loop() {
+      requestAnimationFrame(loop);
+      const now = performance.now(), dt = Math.min(0.1, (now - last)/1000); last = now;
+      if (!visible || document.hidden) return;
+      renderer.info.reset();
+      for (const f of fleet) { f.s += f.dir * f.v * dt * 3.0; if (f.s > L - 10) f.s = 10; if (f.s < 10) f.s = L - 10; place(f); }
+      antenna.copy(lead.pos); antenna.y += lead.antY;
+      for (const s of satObjs) { s.sp.position.copy(s.dir).multiplyScalar(satRadius).add(lead.pos);
+        const pa = s.ln.geometry.attributes.position; pa.setXYZ(0, antenna.x, antenna.y, antenna.z); pa.setXYZ(1, s.sp.position.x, s.sp.position.y, s.sp.position.z); pa.needsUpdate = true; }
+      theta += hc.dolly * 0.02 * dt;
+      look.copy(lead.pos).add(new T.Vector3(0, 1.5, 0));
+      const el = hc.el * D2R;
+      want.set(look.x + Math.sin(theta)*Math.cos(el)*hc.dist, look.y + Math.sin(el)*hc.dist, look.z + Math.cos(theta)*Math.cos(el)*hc.dist);
+      want.y = Math.max(want.y, handle.heightAt(want.x, want.z) + 3);
+      cam.position.lerp(want, 1 - Math.exp(-dt*2.0)); cam.lookAt(look);
+      const LD = H.azel(sun.az, sun.el); key.position.copy(LD).multiplyScalar(180).add(lead.pos); key.target.position.copy(lead.pos); key.target.updateMatrixWorld();
+      if (handle.tick) handle.tick(dt, cam);
+      if (composer) composer.render(); else renderer.render(scene, cam);
+      frames++; if (now - fpsT > 1000) { info.hero = {fps: +(frames*1000/(now-fpsT)).toFixed(1), calls: renderer.info.render.calls, tris: renderer.info.render.triangles, status:{...status}, model: info.model}; frames = 0; fpsT = now; }
+    }
+    loop();
+  }
+
+  // ---------------------------------------------------------------- selector tiles (one renderer, scissored)
+  async function tiles(missions) {
+    const canvas = document.getElementById('tilesCanvas'), row = document.getElementById('missionRow'), sec = document.getElementById('missions');
+    if (!canvas || getComputedStyle(canvas).display === 'none') return;
+    const renderer = rig(canvas, {exposure: 1.4}, {shadows:false, maxDpr:1.5});
+    renderer.setScissorTest(true);
+    const tilesArr = [];
+
+    // One tile's scene graph. Lifted out of the loop so construction can be
+    // deferred; the body below is unchanged.
+    const buildTile = async (root, ms) => {
+      const col = row.querySelector(`[data-mission="${ms.name}"]`), tileEl = col && col.querySelector('.tile');
+      if (!tileEl) return;
+      const envMod = (window.ARBITRAS_ENV || {})[ms.scene.env] || (window.ARBITRAS_ENV || {}).logistics;
+      const pending = !((window.ARBITRAS_ENV || {})[ms.scene.env]);
+      if (pending) tileEl.querySelector('.note').textContent = 'preview · scripted · env pending, prairie stand-in';
+      const m = await (await fetch('/mission?name=' + ms.name)).json();
+      let terrain = null;
+      if (m.scene && m.scene.terrain_map && !pending) { try { const t = await (await fetch('/terrain')).json(); terrain = Object.assign(t, {grid: Int16Array.from(t.grid)}); } catch (e) {} }
+      const scene = new T.Scene(), cam = new T.PerspectiveCamera(58, 1, 0.5, 1400), status = {}, helpers = H.forMission(m);
+      const handle = envMod.build({THREE:T, scene, renderer, mission:m, helpers, terrain, lite: true, report: st => Object.assign(status, st)});
+      const {key, sun} = dressScene(scene, envMod.spec, renderer, status, true);
+      // route ribbon (harness-grade: the console draws the real corridor)
+      scene.add(new T.Line(new T.BufferGeometry().setFromPoints(m.route.map(q => H.toScene(q.e, q.n, handle.heightAt(q.e, -q.n) + 0.25))),
+        new T.LineBasicMaterial({color:0xE8A21C, transparent:true, opacity:0.75, toneMapped:false})));
+      const veh = cloneVehicle(root), ghost = cloneVehicle(root); scene.add(veh); scene.add(ghost);
+      const ghostMat = new T.MeshStandardMaterial({color:0xE4551F, emissive:0xE4551F, emissiveIntensity:0.55, transparent:true, opacity:0.4, depthWrite:false, roughness:0.7});
+      ghost.traverse(o => { if (o.isMesh) { o.material = ghostMat; o.castShadow = false; } });
+      const corr = cloneVehicle(root); scene.add(corr);
+      const corrMat = new T.MeshStandardMaterial({color:0x6FCF97, emissive:0x6FCF97, emissiveIntensity:0.45, transparent:true, opacity:0.35, depthWrite:false, roughness:0.7});
+      corr.traverse(o => { if (o.isMesh) { o.material = corrMat; o.castShadow = false; } }); corr.visible = false;
+      const L = helpers.routeLength();
+      tilesArr.push({ms, m, el: tileEl, scene, cam, handle, key, sun, veh, ghost, corr, helpers, L, t0: performance.now() + Math.random()*4000});
+    };
+
+    // Built when the selector approaches the viewport, not at page load, and one
+    // at a time. The hero owns the first screen and its own environment; letting
+    // four more environments race it for bandwidth is what made a first visit
+    // feel broken on venue wifi. `continue` became `return` with the loop body
+    // now a function -- a tile with no element is skipped either way.
+    let started = false;
+    const startTiles = async () => {
+      if (started) return;
+      started = true;
+      const root = await loadModel();
+      for (const ms of missions) {
+        try { await buildTile(root, ms); }
+        catch (e) { console.warn('tile failed', ms.name, e); }
+      }
+    };
+    new IntersectionObserver(([e], obs) => {
+      if (!e.isIntersecting) return;
+      obs.disconnect();
+      startTiles();
+    }, {rootMargin: '300px'}).observe(sec);
+
+    let visible = true, last = performance.now(), acc = 0;
+    new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, {threshold: 0.05}).observe(sec);
+    const size = () => { const w = canvas.clientWidth, h = canvas.clientHeight; if (w && h) renderer.setSize(w, h, false); };
+    new ResizeObserver(size).observe(canvas); size();
+    const LOOP_S = 12;
+    const put = (obj, helpers, handle, s, lat, headingOverride) => {
+      const P = helpers.routePoint(s), nx = -Math.sin(P.heading), ny = Math.cos(P.heading);
+      const e = P.e + nx*lat, n = P.n + ny*lat, z = -n; obj.position.set(e, handle.heightAt(e, z), z);
+      obj.rotation.y = headingToYaw(headingOverride != null ? headingOverride : P.heading); return P;
+    };
+    function loop() {
+      requestAnimationFrame(loop);
+      const now = performance.now(), dt = Math.min(0.1, (now - last)/1000); last = now;
+      if (!visible || document.hidden) return;
+      acc += dt; if (acc < 1/30) return; acc = 0;                      // 30 fps cap for four tiles
+      renderer.info.reset();
+      const cr = canvas.getBoundingClientRect();
+      for (const t of tilesArr) {
+        const r = t.el.getBoundingClientRect(), x = r.left - cr.left, y = cr.bottom - r.bottom, w = r.width, h = r.height;
+        if (w <= 0 || h <= 0) continue;
+        const u = ((now - t.t0) / 1000 % LOOP_S) / LOOP_S;             // 0..1 over the loop
+        // scripted preview per mechanism (captioned "preview · scripted"): what the ghost does under that mission's attack
+        const mech = t.ms.mechanism, env = t.ms.scene.env;
+        let sVeh = 40 + u * Math.min(t.L * 0.45, 420), ghostOff = {along: 0, lat: 0}, corrVisible = false, holding = false;
+        if (env === 'logistics') { if (u > 0.35) ghostOff.lat = -(u - 0.35) * 160; }                             // peels off east (right of a north route)
+        else if (env === 'casevac') { if (u > 0.3) ghostOff.along = (u - 0.3) * 260; corrVisible = u > 0.55; }     // runs ahead along the track; terrain fix appears
+        else if (env === 'recon') { if (u > 0.3 && u < 0.72) { holding = true; sVeh = 40 + 0.3 * Math.min(t.L * 0.45, 420); ghostOff.lat = -(u - 0.3) * 240; } corrVisible = u > 0.5 && u < 0.72; }
+        else if (env === 'combat') { if (u > 0.4 && u < 0.72) { ghostOff.along = 98; corrVisible = true; } }
+        const P = put(t.veh, t.helpers, t.handle, sVeh, 0);
+        const ghostS = sVeh + ghostOff.along; put(t.ghost, t.helpers, t.handle, ghostS, ghostOff.lat, P.heading);
+        t.ghost.visible = ghostOff.along !== 0 || ghostOff.lat !== 0;
+        t.corr.visible = corrVisible; if (corrVisible) put(t.corr, t.helpers, t.handle, sVeh + 0.6, 0.8, P.heading);
+        // chase camera over the left shoulder, looking past the vehicle toward the ghost
+        const az = (90 - P.heading / D2R + 360) % 360 * D2R, camAz = az + Math.PI - 0.7, dist = 24;
+        const lx = t.veh.position.x + Math.sin(az)*6 + (t.ghost.visible ? (t.ghost.position.x - t.veh.position.x)*0.25 : 0),
+              lz = t.veh.position.z - Math.cos(az)*6 + (t.ghost.visible ? (t.ghost.position.z - t.veh.position.z)*0.25 : 0);
+        t.cam.position.set(lx + Math.sin(camAz)*dist, t.veh.position.y + 7, lz - Math.cos(camAz)*dist);
+        t.cam.position.y = Math.max(t.cam.position.y, t.handle.heightAt(t.cam.position.x, t.cam.position.z) + 2.5);
+        t.cam.lookAt(lx, t.veh.position.y + 1.2, lz); t.cam.aspect = w/h; t.cam.updateProjectionMatrix();
+        const LD = H.azel(t.sun.az, t.sun.el); t.key.position.copy(LD).multiplyScalar(180).add(t.veh.position); t.key.target.position.copy(t.veh.position); t.key.target.updateMatrixWorld();
+        if (t.handle.tick) t.handle.tick(dt, t.cam);
+        renderer.setViewport(x, y, w, h); renderer.setScissor(x, y, w, h); renderer.render(t.scene, t.cam);
+      }
+      info.tiles = {n: tilesArr.length, calls: renderer.info.render.calls, tris: renderer.info.render.triangles};
+    }
+    loop();
+  }
+
+  // ---------------------------------------------------------------- selector DOM + routing
+  let missionsData = [];
+  function selectMission(name, scroll = true) {
+    const ms = missionsData.find(x => x.name === name); if (!ms) return;
+    for (const c of document.querySelectorAll('.missions .col')) { const on = c.dataset.mission === name; c.classList.toggle('active', on); c.setAttribute('aria-pressed', String(on)); }
+    const [cls, label] = MECH[ms.mechanism] || ['', ms.mechanism];
+    document.getElementById('mTitle').innerHTML = `${ms.title}<small>${ms.tagline}</small>`;
+    document.getElementById('mAttack').innerHTML = `<b>${ms.attack.name}.</b> ${ms.attack.mechanism} <b>Response:</b> ${ms.attack.response}`;
+    const right = document.getElementById('mRight');
+    // Honesty rule: a mission whose stream is not generated yet shows the
+    // LOGISTICS console (its own frame over its own data), labelled as such,
+    // never another mission's frame over logistics data.
+    const target = ms.built ? name : 'logistics';
+    const url = `/console?mission=${encodeURIComponent(target)}`;
+    right.innerHTML = (ms.built ? '' : `<span class="badge">stream pending · logistics console shown</span>`)
+      + `<span class="badge ${cls}">${label}</span><a class="badge link" href="${url}" target="_blank">open console ↗</a>`;
+    document.body.classList.add('picked');                      // reveals the console panel, the limits and their nav entries
+    const fr = document.getElementById('consoleFrame');
+    if (fr.dataset.mission !== target) { fr.src = url + '&hz=3'; fr.dataset.mission = target; }
+    const u = new URL(location.href); u.searchParams.set('mission', name); history.replaceState(null, '', u);
+    if (scroll) document.getElementById('method').scrollIntoView({behavior:'smooth'});
+  }
+  fetch('/missions').then(r => r.json()).then(async ms => {
+    missionsData = ms;
+    const row = document.getElementById('missionRow'), tc = document.getElementById('tilesCanvas');
+    row.innerHTML = ms.map(x => `<div class="col" data-mission="${x.name}" tabindex="0" role="button" aria-pressed="false" aria-label="${x.title} mission: ${x.attack.name}">
+        <div class="lbl">${x.title}</div>
+        <div class="tile">
+          <span class="mech">${(MECH[x.mechanism] || ['', x.mechanism])[1]}</span>
+          <span class="note">preview · scripted</span>
+          <div class="cap"><b>${x.attack.name}</b>${x.tagline}<br>${x.attack.response}</div>
+        </div></div>`).join('');
+    row.insertBefore(tc, row.firstChild);                       // the canvas survives the innerHTML rebuild
+    const cols = [...row.querySelectorAll('.col')], canHover = matchMedia('(hover:hover)').matches;
+    const setHover = col => { for (const c of cols) c.classList.toggle('hover', c === col); row.classList.toggle('hovering', !!col); };
+    for (const col of cols) {
+      col.addEventListener('click', () => selectMission(col.dataset.mission));
+      if (canHover) {
+        col.addEventListener('mouseenter', () => setHover(col));
+        col.addEventListener('mousemove', () => { if (!col.classList.contains('hover')) setHover(col); });
+      }
+      col.addEventListener('focus', () => { if (col.matches(':focus-visible')) setHover(col); });   // keyboard focus expands; mouse/touch focus is handled by hover/click
+      col.addEventListener('blur', () => { if (!row.matches(':hover')) setHover(null); });
+      col.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMission(col.dataset.mission); }
+        else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); cols[(cols.indexOf(col) + (e.key === 'ArrowRight' ? 1 : cols.length - 1)) % cols.length].focus(); }
+      });
+    }
+    row.addEventListener('mouseleave', () => setHover(cols.find(c => c.matches(':focus-visible')) || null));   // ease back to equal widths unless a keyboard focus is holding one open
+    const want = QS.get('mission');
+    if (want && ms.some(x => x.name === want)) { selectMission(want, false); setTimeout(() => document.getElementById('method').scrollIntoView(), 50); }
+    tiles(ms).catch(e => console.warn('tiles failed', e));
+  });
+  hero().catch(e => console.warn('hero failed', e));
+})();
+</script>

@@ -55,9 +55,10 @@ import numpy as np
 import pandas as pd
 
 from backend.correction.emit import CorrectionEmitter
-from backend.detection import (FEATURE_NAMES, CrossConstellation,
-                               FeatureExtractor, Weights, by_sv_scores, fit,
-                               fit_cross, record, score, write_jsonl)
+from backend.detection import (FEATURE_NAMES, OPTIONAL_FEATURE_NAMES,
+                               CrossConstellation, FeatureExtractor, Weights,
+                               by_sv_scores, fit, fit_cross, record, score,
+                               write_jsonl)
 from backend.geometry.engine import compute_geometry_block, set_sigma_uere
 from backend.geometry.solve import (NavTables, displacement, error_from_surveyed,
                                     solve_epoch)
@@ -67,6 +68,7 @@ from backend.measurement.sigma_uere import load_or_measure
 from backend.rinex import ephemeris, noise
 from backend.rinex.loader import load_obs
 from backend.rinex.solve import residual_panel, solve_per_constellation
+from backend.terrain.channel import apply_bound
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
 SYSTEMS = "GERCS"
@@ -222,36 +224,62 @@ def solve_positions(clean, injected, nav: NavTables) -> tuple[dict, dict]:
 def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
                  label: str = "", positions: dict | None = None,
                  xc: CrossConstellation | None = None, nav_xc=None,
-                 corrector=None) -> list[dict]:
-    fx, w, out = FeatureExtractor(cal), Weights(), []
+                 corrector=None, terrain=None, weights=None,
+                 exclude=None) -> list[dict]:
+    """`exclude(per_sv, cal, xc_result, ep) -> list[str]` is Track F's seam for
+    the distrust rule (backend/missions.py); None = the k=1 rule below."""
+    fx, w, out = FeatureExtractor(cal), (weights or Weights()), []
     n = len(epochs)
     for i, ep in enumerate(epochs):
-        # One solve per epoch, shared, exactly as backend.replay.run does it:
-        # feature 2 (post-fit pseudorange residual) needs resid_m from the
-        # all-in-view solution, feature 4 needs the per-constellation fixes.
-        # Without the resid= seam, feature 2 is silently unscored and the
-        # distrust rule never fires (found 2026-09-06 regen).
+        # One per-constellation solve per epoch, shared by feature 2 (post-fit
+        # residual) and feature 4 (cross-constellation), exactly as
+        # backend.replay.run wires it. Before 2026-09-05 23:xx this called
+        # fx.step(ep) with no residual, so feature 2 read 0.0 on every epoch
+        # of every demo stream and nothing was ever excluded (TRACK_F.md F-0a).
         sols = solve_per_constellation(ep, nav_xc) if nav_xc is not None else {}
         res = fx.step(ep, resid=(sols.get("all") or {}).get("resid_m"))
         feats = res["features"]
+        xc_result = None
         if xc is not None and nav_xc is not None:
-            # §6a.4: Eric's absolute per-constellation WLS feeds the streaming
-            # cross-constellation scorer. The caller must xc.reset() before
-            # each replay so no state leaks across runs.
-            feats["cross_constellation"] = xc.score(ep, sols)["value"]
-        excluded = distrusted(res["per_sv"], cal)
+            # §6a.4: Eric's absolute per-constellation WLS (backend/rinex/solve.py)
+            # feeds the streaming cross-constellation scorer. The caller must
+            # xc.reset() before each replay so no state leaks across runs.
+            xc_result = xc.score(ep, sols)
+            feats["cross_constellation"] = xc_result["value"]
+        excluded = (distrusted(res["per_sv"], cal) if exclude is None
+                    else exclude(res["per_sv"], cal, xc_result, ep))
         geom = geometry_block(ep.time, excluded, list(ep.df.index))
+        sol = positions.get(ep.time) if positions else None
+        solved = sol is not None and sol["believed"] is not None
+        t_block = None
+        if terrain is not None:
+            # Track E (tracks/TRACK_E.md): the SIMULATED sensor reads at the
+            # antenna; the believed fix is looked up on the signed map. Must
+            # precede the corrector, whose check 6 reads this epoch's posterior.
+            t_out = terrain.step(dict(sol["believed"].lla) if solved else None,
+                                 sol["believed"].dop["H"] if solved else None)
+            t_block = t_out["block"]
+            if t_out["feature"] is not None:
+                feats["terrain_mismatch"] = t_out["feature"]
         if corrector is not None:
             # Track D (TRACK_D.md D4): reads the solve context the engine
             # just left, so this must follow geometry_block. Emitted even
             # when it fails (correction_ok false) — never a silent pass.
             geom["correction"] = corrector(ep, excluded)
-        sol = positions.get(ep.time) if positions else None
-        solved = sol is not None and sol["believed"] is not None
+        geom = apply_bound(geom, t_block)            # no-op without terrain
         rec = record(ep.time, feats, score(feats, geom, w),
                      n_sv=ep.n_sv, geometry=geom, credential_status="VALID",
                      position=dict(sol["believed"].lla) if solved else None,
-                     by_sv=by_sv_scores(res["per_sv"], cal.z_sat))
+                     by_sv=by_sv_scores(res["per_sv"], cal.z_sat),
+                     terrain=t_block)
+        if xc_result is not None:
+            # Track F (TRACK_F_RECON.md F-R6): the compensated channel z-scores
+            # behind feature 4, so a mission post-pass can attribute a
+            # disagreement (which constellation, clock or position) without
+            # re-solving. Attached AFTER record() because the emitter casts every
+            # feature to a float; nested under features like by_sv, additive.
+            rec["features"]["cross_constellation_detail"] = {
+                k: round(float(v), 3) for k, v in (xc_result.get("channels") or {}).items()}
         # Replay ground truth for the console (underscore = out of contract):
         # the WLS fix from the CLEAN pseudoranges at this epoch. `position` is
         # the fix from the injected ones. Same satellites, same weights.
@@ -270,6 +298,9 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
                 "n_spoofed": int(row["n_spoofed"]),
                 "range_offset_m": round(float(row["range_offset_m"]), 2),
                 "cmc_divergence_m": round(float(row["cmc_divergence_m"]), 3),
+                "commanded_displacement_m": round(float(row.get("commanded_displacement_m", 0.0)), 2),
+                "bearing_deg": (None if not np.isfinite(row.get("bearing_deg", float("nan")))
+                                else round(float(row["bearing_deg"]), 1)),
             }
         out.append(rec)
         if i % 500 == 0:
@@ -285,22 +316,32 @@ def main(argv=None) -> None:
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--target", choices=sorted(TARGETS), default=DEFAULT_TARGET,
                     help="spoofed GPS subset rule for the carry-off (see docstring)")
+    # Track E (tracks/TRACK_E.md). Off unless --terrain-map is given; when on,
+    # every output (streams AND provenance) goes under --out, never over the
+    # shipped streams or docs/ — the sensor is simulated.
+    ap.add_argument("--terrain-map", default=None,
+                    help="signed pre-map .npz (TRACK_E.md); the channel is off unless given")
+    ap.add_argument("--terrain-pub", default="data/terrain_map_pub.pem")
+    ap.add_argument("--terrain-diag", type=float, default=None,
+                    help="confusion-matrix diagonal of the SIMULATED sensor; "
+                         "required with --terrain-map (a swept parameter, no default)")
+    ap.add_argument("--terrain-window", type=int, default=1)
+    ap.add_argument("--terrain-seed", type=int, default=20260820)
     args = ap.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    if args.terrain_map and args.terrain_diag is None:
+        ap.error("--terrain-diag is required with --terrain-map (swept parameter, no default)")
+    prov_path = out / "stream_provenance.md" if args.terrain_map else PROVENANCE
 
     print("load", flush=True)
     clean = load_obs(args.obs, systems=SYSTEMS)
     floor = noise.measure(clean)
     print(" ", floor)
+    # Feature 2 is the post-fit residual (commit 76293c9): the calibration needs
+    # the clean-day residual panel or it is never scored (TRACK_F.md F-0a).
     nav_xc = ephemeris.load_nav()
-    # Feature 2's calibration source (backend.replay.run does the same): the
-    # clean-day post-fit residual panel. Without it fit() cannot set z_sat for
-    # pseudorange_residual and the feature is silently dead in the streams.
-    print("post-fit residual panel (feature 2 calibration)", flush=True)
-    resid = residual_panel(clean, nav_xc)
-    print(f"  {resid.shape[0]} epochs x {resid.shape[1]} SV")
-    cal = fit(clean, floor, resid_panel=resid)
+    cal = fit(clean, floor, resid_panel=residual_panel(clean, nav_xc))
     print(" ", cal)
 
     print("cross-constellation calibration (§6a.4, per-constellation WLS)", flush=True)
@@ -336,22 +377,61 @@ def main(argv=None) -> None:
                                              "d": displacement(s["truth"], s["truth"])})
                  for t, s in positions.items()}
 
+    # Track E's channel: signed map + simulated sensor, calibrated on the clean
+    # day's fixes at the antenna. None when the flag is absent.
+    terrain, terrain_rows, terrain_note = None, "", ""
+    if args.terrain_map:
+        from backend.terrain.channel import TerrainChannel
+        from backend.terrain.sensor import ConfusionSensor, confusion_from_diag
+        from backend.terrain.signing import load_verified
+        rmap = load_verified(args.terrain_map, args.terrain_pub)   # raises: not consulted
+        sensor = ConfusionSensor(confusion_from_diag(len(rmap.classes), args.terrain_diag),
+                                 rmap.classes, seed=args.terrain_seed)
+        terrain = TerrainChannel(rmap, sensor, sigma_uere_m=su["sigma_uere_m"],
+                                 window_epochs=args.terrain_window)
+        print("terrain calibration (clean day, SIMULATED sensor at the antenna)", flush=True)
+        t_stats = terrain.calibrate(
+            (s["truth"].lla["lat"], s["truth"].lla["lon"], s["truth"].dop["H"])
+            for s in positions.values() if s is not None)
+        print(f"  map {rmap.map_id} checksum {rmap.checksum()[:12]} signed={rmap.signed}")
+        print(f"  {t_stats}")
+        unknown_frac = float(np.mean(rmap.grid == -1))
+        terrain_rows = TERRAIN_ROWS.format(
+            diag=args.terrain_diag, seed=args.terrain_seed, window=args.terrain_window,
+            window_prov=("untuned: W=1, no smoothing" if args.terrain_window == 1
+                         else "chosen at the threshold session"),
+            sat=terrain.saturation, sat_prov=terrain.saturation_provenance,
+            map_id=rmap.map_id, checksum=rmap.checksum()[:12], attribution=rmap.attribution,
+            cell=rmap.cell_m, unknown=unknown_frac, pub=args.terrain_pub,
+            floor=terrain.floor, floor_prov=terrain.floor_provenance)
+        terrain_note = ("\n**Terrain channel ON (Track E): the sensor is SIMULATED** — a "
+                        "confusion matrix, not hardware. Not for the submission video "
+                        "(tracks/TRACK_E.md). Streams and this file live under the run's "
+                        "--out directory, never over the shipped streams.\n")
+    weights = Weights.equal(FEATURE_NAMES + OPTIONAL_FEATURE_NAMES) if terrain else Weights()
+
     # Track D's corrector: one emitter, reset per replay (owns the gate).
-    corrector = CorrectionEmitter(nav)
+    # Track E's check 6 enters through extra_checks (None when terrain is off).
+    corrector = CorrectionEmitter(nav, extra_checks=terrain.gate_check if terrain else None)
 
     print("clean replay", flush=True)
     xc.reset()
     corrector.reset()
+    if terrain:
+        terrain.reset()
     clean_recs = score_stream(clean, cal, label="clean", positions=clean_pos,
-                              xc=xc, nav_xc=nav_xc, corrector=corrector)
+                              xc=xc, nav_xc=nav_xc, corrector=corrector,
+                              terrain=terrain, weights=weights)
     write_atomic(clean_recs, out / "clean.jsonl")
 
     print("carry-off replay", flush=True)
     xc.reset()
     corrector.reset()
+    if terrain:
+        terrain.reset()
     inj_recs = score_stream(injected, cal, truth=truth, label="carry",
                             positions=positions, xc=xc, nav_xc=nav_xc,
-                            corrector=corrector)
+                            corrector=corrector, terrain=terrain, weights=weights)
     write_atomic(inj_recs, out / "carryoff.jsonl")
 
     # Four-beat stitch: one contiguous slice of the SAME causal injected run,
@@ -367,10 +447,11 @@ def main(argv=None) -> None:
     dprof = _displacement_profile(demo, truth)
     print("  displacement over the attack window:", dprof["summary"])
     _write_provenance(clean, floor, cal, truth, demo, onset_i, lo, hi, clean_recs,
-                      sanity, dprof, args.target, su)
+                      sanity, dprof, args.target, su, path=prov_path,
+                      terrain_rows=terrain_rows, terrain_note=terrain_note)
     print(f"\nwrote {out/'clean.jsonl'} ({len(clean_recs)}), "
           f"{out/'carryoff.jsonl'} ({len(inj_recs)}), "
-          f"{out/'demo.jsonl'} ({len(demo)}), {PROVENANCE}")
+          f"{out/'demo.jsonl'} ({len(demo)}), {prov_path}")
 
 
 def _displacement_profile(demo, truth) -> dict:
@@ -404,8 +485,19 @@ def _displacement_profile(demo, truth) -> dict:
     return prof
 
 
+# Track E provenance rows (tracks/TRACK_E.md), interpolated only when the
+# channel ran. Every value here is either a map fact or a SIMULATED-sensor
+# parameter, and the rows say which.
+TERRAIN_ROWS = """| `features.terrain_mismatch` | **simulated** / derived | Track E (`backend/terrain/channel.py`): 1 − L/L_max between the SIMULATED sensor posterior (confusion diagonal {diag}, seed {seed}, `backend/terrain/sensor.py`) and the map posterior under the believed position's footprint (sigma = HDOP × sigma_UERE, floored at half a cell); trailing window {window} epoch(s) ({window_prov}); saturation {sat:.4f} = {sat_prov} |
+| `terrain.*` | map: **public** raster; sensor: **simulated** | map `{map_id}` ({cell:g} m cells, {unknown:.1%} of cells unlabelled and treated conservatively) checksum {checksum} — {attribution}; Ed25519-verified against `{pub}`, a stand-in for mission issuance with the same status as the scripted credential schedule. `consistent_extent_m` and `nearest_boundary` are derived from the map alone |
+| `geometry.displacement_bound_m` (this run) | derived | min(residual bound, `terrain.consistent_extent_m`); `geometry.bound_source` names the binding channel and `geometry.residual_bound_m` preserves the pure geometry number |
+| `geometry.correction.checks.terrain_consistent` | derived from a **calibrated** floor | L at the corrected fix ≥ {floor:.4f} = {floor_prov}; enters the gate before hysteresis (`extra_checks`) |
+"""
+
+
 def _write_provenance(clean, floor, cal, truth, demo, onset_i, lo, hi, clean_recs,
-                      sanity, dprof, target_name, su):
+                      sanity, dprof, target_name, su, path=PROVENANCE,
+                      terrain_rows: str = "", terrain_note: str = ""):
     active = truth[truth["stage"] != CLEAN]
     ex_clean = np.mean([len(r["geometry"]["excluded_sv"]) > 0 for r in clean_recs])
     creds = [r["credential_status"] for r in demo]
@@ -436,7 +528,7 @@ nothing on screen can be mistaken for a measurement it is not (design.md §11b).
 USN8 (US Naval Observatory), 2026-08-20, {len(clean)} epochs at {EPOCH_S} s,
 systems {SYSTEMS}. {floor}
 {cal}
-
+{terrain_note}
 ## Field classification
 
 | Field | Class | Source |
@@ -456,7 +548,7 @@ systems {SYSTEMS}. {floor}
 | `geometry.next_best_observation` | derived | rank-one determinant update over visible-but-untrusted groups (CONVERGE identity) |
 | `features.by_sv` | derived | Track D contract extension 1 (`backend/detection/features.py by_sv_scores`): per-SV max of the three per-SV features, each normalised by its calibrated saturation and clipped to [0, 1]. Cross-constellation is solution-level and does not enter |
 | `geometry.correction` | derived from **measured** thresholds | Track D weighted-RAIM block (`backend/correction/emit.py`): trusted-subset WLS re-solve (binary weights from `excluded_sv`), slope-form protection level with tau fit on the clean day (p99.9 per-SV residual, `backend.correction.validate`), five-check gate with 10-epoch grant / 1-epoch revoke hysteresis. Fail-closed: `correction_ok: false` with null position whenever the solve or any evaluated check cannot stand |
-| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last {20 / DEMO_RATE_EPS:.1f} s at the {DEMO_RATE_EPS:.0f} epochs/s demo rate; tuned to {T_INT_EPOCHS} × {DISCLOSURE_LAG_INTERVALS} so every credential state holds ≥ {LEGIBLE_EPOCHS / DEMO_RATE_EPS:.0f} s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. {pre_lapse} |
+{terrain_rows}| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last {20 / DEMO_RATE_EPS:.1f} s at the {DEMO_RATE_EPS:.0f} epochs/s demo rate; tuned to {T_INT_EPOCHS} × {DISCLOSURE_LAG_INTERVALS} so every credential state holds ≥ {LEGIBLE_EPOCHS / DEMO_RATE_EPS:.0f} s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. {pre_lapse} |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 
@@ -542,7 +634,7 @@ unset ("picked by hand from the printed arithmetic"); replace it when given.
 Walk-off was not tuned (§7: venue).
 """
     PROVENANCE.parent.mkdir(parents=True, exist_ok=True)
-    PROVENANCE.write_text(md)
+    Path(path).write_text(md)
 
 
 if __name__ == "__main__":

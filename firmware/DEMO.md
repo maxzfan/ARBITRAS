@@ -44,7 +44,7 @@ cd firmware && pio run -e car10 -t upload && pio device monitor
 ```
 
 Note the `CAR 10 READY ip=... port=4210` line — that IP goes to the
-controller and jog tool. TRACK_E acceptance gate (all must pass before any
+controller and jog tool. TRACK_G acceptance gate (all must pass before any
 choreographed run):
 
 1. `pio run -e car10` builds clean ✅ (done)

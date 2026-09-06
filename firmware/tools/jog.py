@@ -1,4 +1,4 @@
-"""Keyboard jogger for the ARBITRAS demo car. Spec: tracks/TRACK_E.md.
+"""Keyboard jogger for the ARBITRAS demo car. Spec: tracks/TRACK_G.md.
 
     python -m firmware.tools.jog --ip 172.20.10.4 --id 10
 

@@ -1,0 +1,188 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ARBITRAS env preview</title>
+<style>
+  html,body{margin:0;height:100%;background:#0B0D0F;color:#EEF2F6;font:12px/1.5 ui-monospace,Menlo,monospace;overflow:hidden}
+  #view{position:absolute;inset:0}
+  #view canvas{display:block;width:100%;height:100%}
+  #hud{position:absolute;left:14px;top:12px;z-index:5;white-space:pre;text-shadow:0 1px 2px #000c;pointer-events:none}
+  #err{position:absolute;inset:0;display:none;padding:24px;background:#3d1f1f;color:#f0b3b0;white-space:pre-wrap}
+</style>
+<div id="view"></div>
+<div id="hud">loading…</div>
+<pre id="err"></pre>
+<script>
+window.addEventListener('error', e => { const el = document.getElementById('err');
+  el.style.display = 'block'; el.textContent += (e.message || 'error') + '\n  at ' + (e.filename || '?') + ':' + (e.lineno || '?') + '\n'; });
+</script>
+<script src="/vendor/three.js"></script>
+<script src="/vendor/three/Pass.js"></script>
+<script src="/vendor/three/CopyShader.js"></script>
+<script src="/vendor/three/ShaderPass.js"></script>
+<script src="/vendor/three/MaskPass.js"></script>
+<script src="/vendor/three/EffectComposer.js"></script>
+<script src="/vendor/three/RenderPass.js"></script>
+<script src="/vendor/three/LuminosityHighPassShader.js"></script>
+<script src="/vendor/three/UnrealBloomPass.js"></script>
+<script src="/vendor/three/SimplexNoise.js"></script>
+<script src="/vendor/three/SSAOShader.js"></script>
+<script src="/vendor/three/SSAOPass.js"></script>
+<script src="/vendor/three/GammaCorrectionShader.js"></script>
+<script src="/vendor/three/RGBELoader.js"></script>
+<script src="/vendor/three/OrbitControls.js"></script>
+<script src="/vendor/three/GLTFLoader.js"></script>
+<script src="/vendor/three/DRACOLoader.js"></script>
+<script src="/route.js"></script>
+<script src="/env/helpers.js"></script>
+<script src="/vendor/asset-relief-logistics.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-recon.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-casevac.js" onerror="this.remove()"></script>
+<script src="/vendor/asset-relief-combat.js" onerror="this.remove()"></script>
+<script>
+/* Standalone harness for one environment module (console/web/env/CONTRACT.md).
+ *   /env/preview.html?env=<name>&mission=<name>[&post=0][&cam=chase|top|hero]
+ * Mirrors what the console does around an environment: procedural sky sphere
+ * from spec.sky, key + hemi lights, PMREM environment from spec.hdr with the
+ * sun re-aimed at the HDR's brightest pixel, FogExp2 from spec.fog, ACES at
+ * spec.exposure, SSAO + bloom + gamma. Draws the route centreline and a 2 m
+ * box at the route start for scale (harness only -- not part of the module).
+ */
+(async function () {
+  const QS = new URLSearchParams(location.search);
+  const envName = QS.get('env') || 'logistics', missionName = QS.get('mission') || envName;
+  const T = THREE, H = ARBITRAS_HELPERS, hud = document.getElementById('hud');
+  const say = s => { hud.textContent = s; };
+
+  const s = document.createElement('script'); s.src = '/env/' + envName + '.js';
+  await new Promise((res, rej) => { s.onload = res; s.onerror = () => rej(new Error('env module /env/' + envName + '.js failed to load')); document.head.appendChild(s); });
+  const mod = (window.ARBITRAS_ENV || {})[envName];
+  if (!mod) throw new Error('env module did not register window.ARBITRAS_ENV.' + envName);
+
+  const m = await (await fetch('/mission?name=' + missionName)).json();
+  let terrain = null;
+  if (m.scene && m.scene.terrain_map) {
+    try { const t = await (await fetch('/terrain')).json(); terrain = Object.assign(t, {grid: Int16Array.from(t.grid)}); }
+    catch (e) { console.warn('no /terrain:', e); }
+  }
+  const spec = mod.spec, view = document.getElementById('view');
+  const renderer = new T.WebGLRenderer({antialias:true, alpha:false, powerPreference:'high-performance'});
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.outputEncoding = T.sRGBEncoding; renderer.toneMapping = T.ACESFilmicToneMapping;
+  // ?shadow=0 and ?envmap=0 are headless diagnostics: SwiftShader renders shadow
+  // maps and float PMREM environments unreliably (everything reads as in-shadow),
+  // so headless screenshots are judged with them off; brightness is tuned on a
+  // real GPU (console/web/EARTH_BACKDROP.md, TRACK_B.md).
+  renderer.toneMappingExposure = +(QS.get('exposure') || spec.exposure || 1.5);
+  renderer.shadowMap.enabled = QS.get('shadow') !== '0'; renderer.shadowMap.type = T.PCFSoftShadowMap;
+  const USE_ENVMAP = QS.get('envmap') !== '0';
+  renderer.info.autoReset = false; view.appendChild(renderer.domElement);
+  T.ColorManagement.legacyMode = false;
+
+  const scene = new T.Scene();
+  scene.fog = new T.FogExp2(new T.Color(spec.fog.color), spec.fog.density);
+  renderer.setClearColor(new T.Color(spec.fog.color), 1);
+  const cam = new T.PerspectiveCamera(62, 1, 0.5, 1500);
+  const status = {};
+  const helpers = H.forMission(m);
+  const ctx = {THREE:T, scene, renderer, mission:m, helpers, terrain,
+               report: st => { Object.assign(status, st); }};
+
+  // lights (the console does the same; the key is re-aimed when the HDR lands)
+  const key = new T.DirectionalLight(0xFFF4E0, 3.0); key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
+  Object.assign(key.shadow.camera, {left:-60, right:60, top:60, bottom:-60, near:10, far:420});
+  key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; key.layers.enable(H.INSET_LAYER); scene.add(key); scene.add(key.target);
+  const hemi = new T.HemisphereLight(0x4A5A78, 0x2A241E, 0.6); hemi.layers.enable(H.INSET_LAYER); scene.add(hemi);
+  // procedural sky sphere from spec.sky (first paint; spec.backdrop replaces it when it lands)
+  const gradientSky = new T.Mesh(new T.SphereGeometry(880, 48, 24), new T.ShaderMaterial({
+    side:T.BackSide, depthWrite:false, fog:false, toneMapped:false,
+    uniforms:{ch:{value:new T.Color(spec.sky.horizon)}, cm:{value:new T.Color(spec.sky.mid)}, cz:{value:new T.Color(spec.sky.zenith)}},
+    vertexShader:'varying vec3 vW; void main(){ vW=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+    fragmentShader:'uniform vec3 ch,cm,cz; varying vec3 vW; void main(){ float e=normalize(vW).y; vec3 c=mix(ch,cm,smoothstep(-0.06,0.09,e)); c=mix(c,cz,smoothstep(0.08,0.70,e)); gl_FragColor=linearToOutputTexel(vec4(c,1.0)); }',
+  })); scene.add(gradientSky);
+
+  const t0 = performance.now();
+  const handle = mod.build(ctx);
+  const buildMs = performance.now() - t0;
+  let sunAz = handle.sunAz != null ? handle.sunAz : spec.sun.az, sunEl = handle.sunEl != null ? handle.sunEl : spec.sun.el;
+  status.sky = 'loading';
+  H.withTimeout(H.loadHDR(spec.hdr, renderer), 25000, 'HDRI').then(h => {
+    if (USE_ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; }
+    if (!spec.backdrop) { sunAz = h.sunAz; sunEl = h.sunEl; } status.sky = 'loaded';
+    status.hdr_measured = {sunAz: +h.sunAz.toFixed(1), sunEl: +h.sunEl.toFixed(1), horizon: '#' + h.fog.getHexString()};
+  }).catch(() => H.loadHDR(H.FALLBACK.hdr, renderer).then(h => { if (USE_ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; } status.sky = 'fallback'; })
+              .catch(() => { status.sky = 'fallback (gradient only)'; }));
+  // Rendered backdrop: the visible sky (CONTRACT.md spec.backdrop); its sun is aimed at spec.sun.az
+  // and the key light takes its elevation. The HDR keeps lighting through PMREM.
+  if (spec.backdrop) {
+    status.backdrop = 'loading';
+    H.withTimeout(H.loadBackdrop(spec.backdrop, spec.sun.az), 25000, 'backdrop').then(b => {
+      scene.remove(gradientSky); scene.add(b.mesh); sunAz = b.sunAz; sunEl = b.sunEl; status.backdrop = 'loaded';
+    }).catch(e => { status.backdrop = 'fallback (gradient): ' + e.message; });
+  }
+
+  // harness-only reference: route centreline + a 2 m cube at the route start
+  const line = new T.Line(new T.BufferGeometry().setFromPoints(m.route.map(q => H.toScene(q.e, q.n, handle.heightAt(q.e, -q.n) + 0.3))),
+    new T.LineBasicMaterial({color:0xE8A21C, transparent:true, opacity:0.8, toneMapped:false}));
+  scene.add(line);
+  const P0 = helpers.routePoint(0);
+  const cube = new T.Mesh(new T.BoxGeometry(2, 2, 2), new T.MeshStandardMaterial({color:0xE4551F, roughness:0.6}));
+  cube.position.set(P0.e, handle.heightAt(P0.e, -P0.n) + 1, -P0.n); cube.castShadow = true; scene.add(cube);
+
+  // composer like the console
+  let composer = null;
+  if (QS.get('post') !== '0' && T.EffectComposer) {
+    composer = new T.EffectComposer(renderer); composer.setPixelRatio(renderer.getPixelRatio());
+    composer.addPass(new T.RenderPass(scene, cam));
+    const ssao = new T.SSAOPass(scene, cam, 2, 2); ssao.kernelRadius = 0.7; ssao.minDistance = 0.00005; ssao.maxDistance = 0.0025; composer.addPass(ssao);
+    composer.addPass(new T.UnrealBloomPass(new T.Vector2(2, 2), 0.32, 0.45, 0.80));
+    composer.addPass(new T.ShaderPass(T.GammaCorrectionShader));
+  }
+  // camera: chase at route start (default), top-down, or the module's hero framing
+  const az = (90 - P0.heading / H.D2R + 360) % 360 * H.D2R;   // compass azimuth of travel
+  const camMode = QS.get('cam') || 'chase';
+  const look = new T.Vector3(P0.e + Math.sin(az)*12, handle.heightAt(P0.e, -P0.n) + 1.2, -P0.n - Math.cos(az)*12);
+  if (camMode === 'top') { cam.position.set(P0.e, 220, -P0.n + 1); cam.lookAt(P0.e, 0, -P0.n); }
+  else if (camMode === 'hero' && spec.hero_camera) {
+    const hc = spec.hero_camera, c = helpers.extent(0), ce = (c.minE + c.maxE)/2, cn = (c.minN + c.maxN)/2;
+    const d = hc.dist, a = hc.az * H.D2R, e = hc.el * H.D2R;
+    cam.position.set(ce + Math.sin(a)*Math.cos(e)*d, Math.sin(e)*d + 2, -cn + Math.cos(a)*Math.cos(e)*d); cam.lookAt(ce, 0, -cn);
+  } else {
+    const camAz = az + Math.PI - 0.62, dist = 17;
+    cam.position.set(look.x + Math.sin(camAz)*dist, look.y + 2.0 + dist*0.10, look.z - Math.cos(camAz)*dist); cam.lookAt(look);
+    cam.rotateX(14 * H.D2R);
+  }
+  const controls = new T.OrbitControls(cam, renderer.domElement); controls.target.copy(look); controls.enableDamping = true; controls.maxDistance = 600;
+
+  // height invariant check along the route: spread must be 0
+  const hs = []; const L = helpers.routeLength();
+  for (let s = 0; s <= L; s += 5) { const p = helpers.routePoint(s); hs.push(handle.heightAt(p.e, -p.n)); }
+  const routeSpread = Math.max(...hs) - Math.min(...hs);
+  const propSpread = m.props.map(p => { const v = []; for (let a = 0; a < 360; a += 45) { const r = (p.radius_m || 0);
+    v.push(handle.heightAt(p.e + Math.sin(a*H.D2R)*r, -(p.n + Math.cos(a*H.D2R)*r))); } return +(Math.max(...v) - Math.min(...v)).toFixed(3); });
+
+  const size = () => { const w = view.clientWidth, h = view.clientHeight; cam.aspect = w/h; cam.updateProjectionMatrix();
+    renderer.setSize(w, h, false); if (composer) composer.setSize(w, h); };
+  size(); addEventListener('resize', size);
+  let last = performance.now(), frames = 0, fpsT = last, fps = 0;
+  const LDIR = new T.Vector3();
+  function loop() {
+    const now = performance.now(), dt = Math.min(0.1, (now - last)/1000); last = now;
+    renderer.info.reset();
+    LDIR.copy(H.azel(sunAz, sunEl)); key.position.copy(LDIR).multiplyScalar(160).add(look); key.target.position.copy(look); key.target.updateMatrixWorld();
+    if (handle.tick) handle.tick(dt, cam);
+    controls.update();
+    if (composer) composer.render(); else renderer.render(scene, cam);
+    frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
+    say(`env ${envName} · mission ${m.name} · build ${buildMs.toFixed(0)} ms · ${fps.toFixed(0)} fps\n`
+      + `draw calls ${renderer.info.render.calls} · triangles ${renderer.info.render.triangles}\n`
+      + `status ${JSON.stringify(status)}\nroute height spread ${routeSpread.toFixed(3)} m (must be 0) · prop rims ${JSON.stringify(propSpread)}\n`
+      + `sun az ${sunAz.toFixed(1)} el ${sunEl.toFixed(1)} · drag to orbit`);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+  window.__envPreviewInfo = () => ({env: envName, mission: m.name, buildMs: +buildMs.toFixed(0), fps: +fps.toFixed(1),
+    drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles, status: {...status},
+    heightSamples: {routeSpread: +routeSpread.toFixed(3), propRimSpread: propSpread}, sun: {az: +sunAz.toFixed(1), el: +sunEl.toFixed(1)},
+    bounds: handle.bounds || null, envSet: !!scene.environment});
+})().catch(e => { const el = document.getElementById('err'); el.style.display = 'block'; el.textContent += String(e && e.stack || e); });
+</script>

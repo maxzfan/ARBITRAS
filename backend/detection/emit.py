@@ -53,19 +53,24 @@ SURVEYED = ecef_to_lla(*USN8_ECEF)
 
 def record(time: datetime, features: dict, scored: dict, n_sv: int,
            geometry: dict | None = None, credential_status: str = "VALID",
-           position: dict | None = None, by_sv: dict | None = None) -> dict:
+           position: dict | None = None, by_sv: dict | None = None,
+           terrain: dict | None = None) -> dict:
     """One §5 contract object.
 
     `by_sv` (TRACK_D.md contract extension 1) nests into `features` as the
     per-satellite anomaly map — detection.by_sv_scores computes it; this
     emitter only rounds and passes it through, like every other block.
+
+    `terrain` (tracks/TRACK_E.md) is Track E's block, passed through untouched
+    and present ONLY when the channel ran — a sensorless record carries no
+    `terrain` key, so it is byte-identical to a record from before Track E.
     """
     ts = time if time.tzinfo else time.replace(tzinfo=timezone.utc)
     feats = {k: round(float(v), 4) for k, v in features.items()}
     if by_sv is not None:
         feats["by_sv"] = {sv: round(float(v), 4)
                           for sv, v in sorted(by_sv.items())}
-    return {
+    rec = {
         "timestamp": ts.isoformat().replace("+00:00", "Z"),
         "confidence": round(scored["confidence"], 4),
         "credential_status": credential_status,
@@ -79,8 +84,11 @@ def record(time: datetime, features: dict, scored: dict, n_sv: int,
         "score_detail": {k: scored[k] for k in
                          ("feature_score", "geometry_deficit", "beta",
                           "geometry_available", "weights_tuned", "weights",
-                          "weight_sensitive_fraction")},
+                          "weight_sensitive_fraction", "features_scored")},
     }
+    if terrain is not None:
+        rec["terrain"] = terrain
+    return rec
 
 
 def write_jsonl(records, path) -> Path:

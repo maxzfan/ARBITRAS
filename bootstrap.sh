@@ -16,7 +16,7 @@ echo "== 2/3  venv + libraries =="
 [ -d .venv ] || "$PY" -m venv .venv
 source .venv/bin/activate
 pip install -q -U pip wheel setuptools
-pip install -q "gnss-lib-py==1.0.4" "georinex==1.16.1"
+pip install -q "gnss-lib-py==1.0.4" "georinex==1.16.1" "cryptography"
 python -c "import georinex, gnss_lib_py, sys; print('python', sys.version.split()[0]); print('georinex ok'); print('gnss_lib_py ok')"
 
 echo "== 3/3  data (BKG mirror — no login needed; CDDIS requires Earthdata auth) =="
@@ -39,3 +39,13 @@ echo
 echo "DONE. Every new terminal, including any Claude Code spawns:"
 echo "    cd $(pwd) && source .venv/bin/activate"
 echo "NOTE: there is no conda on this setup. design.md §13 says 'conda activate dnhacks' — that is stale."
+
+echo "== Track F environment assets (console/web/env/ASSETS.txt; Poly Haven CC0, no login; gitignored) =="
+while IFS=$'\t' read -r url name; do
+  [ -z "$url" ] && continue
+  case "$url" in \#*) continue;; esac
+  dest="console/web/vendor/$name"
+  if [ ! -s "$dest" ]; then
+    echo "  fetch $name"; curl -sSL -o "$dest" "$url" || echo "  WARN: $name failed; the console falls back to the vendored Earth set"
+  fi
+done < console/web/env/ASSETS.txt

@@ -13,6 +13,7 @@
     "pseudorange_residual": 0.15,
     "code_carrier_divergence": 0.08,
     "cross_constellation": 0.34,
+    "terrain_mismatch": 0.62,
     "by_sv": {
       "E12": 0.04,
       "G07": 0.91,
@@ -65,12 +66,15 @@
         "redundancy": true,
         "residual_test": null,
         "continuity": null,
-        "cross_constellation": null
+        "cross_constellation": null,
+        "terrain_consistent": null
       },
       "trusted_count": 1,
       "correction_ok": false,
       "speed_scale": 0.0
-    }
+    },
+    "bound_source": "residual",
+    "residual_bound_m": 41.2
   },
   "satellites_tracked": 11,
   "score_detail": {
@@ -80,11 +84,65 @@
     "geometry_available": true,
     "weights_tuned": false,
     "weights": {
-      "cn0_anomaly": 0.25,
-      "pseudorange_residual": 0.25,
-      "code_carrier_divergence": 0.25,
-      "cross_constellation": 0.25
+      "cn0_anomaly": 0.2,
+      "pseudorange_residual": 0.2,
+      "code_carrier_divergence": 0.2,
+      "cross_constellation": 0.2,
+      "terrain_mismatch": 0.2
     },
-    "weight_sensitive_fraction": 0.5
+    "weight_sensitive_fraction": 0.5,
+    "features_scored": [
+      "cn0_anomaly",
+      "pseudorange_residual",
+      "code_carrier_divergence",
+      "cross_constellation",
+      "terrain_mismatch"
+    ]
+  },
+  "terrain": {
+    "available": true,
+    "sensed": {
+      "class": "tree_cover",
+      "p": {
+        "tree_cover": 0.84,
+        "grass": 0.11,
+        "building": 0.05
+      }
+    },
+    "map_at_position": {
+      "class": "building",
+      "p": {
+        "building": 0.93,
+        "grass": 0.07
+      }
+    },
+    "match_likelihood": 0.1,
+    "consistent_extent_m": 210.0,
+    "nearest_boundary": {
+      "distance_m": 38.0,
+      "bearing_deg": 47.0,
+      "class_beyond": "grass"
+    },
+    "map": {
+      "id": "osm-<lat>_<lon>-r600-c5",
+      "cell_m": 5.0,
+      "classes": 7,
+      "signed": true,
+      "age_days": null,
+      "attribution": "\u00a9 OpenStreetMap contributors, ODbL 1.0"
+    },
+    "sensor": {
+      "id": "sim-confusion-v0",
+      "source": "simulated",
+      "footprint_m": 0.0,
+      "k": 7,
+      "confusion_diag": 0.85,
+      "window_epochs": 1,
+      "window_provenance": "untuned: W=1, no smoothing until the threshold session",
+      "saturation": 0.9412,
+      "saturation_provenance": "p99 of clean-run windowed mismatch, n=2880",
+      "floor": 0.1176,
+      "floor_provenance": "p0.1 of clean-run match likelihood, n=2880"
+    }
   }
 }

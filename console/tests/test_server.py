@@ -198,3 +198,42 @@ def test_time_to_alert_measures_from_injection():
 def test_time_to_alert_is_none_when_never_alerted():
     epochs = [json.loads(line(0.92))] * 100
     assert time_to_alert(arbitrate(epochs), injection_epoch=50) is None
+
+
+# ------------------------------------------------------------ terrain (Track E)
+
+TERRAIN_BLOCK = {
+    "available": True,
+    "sensed": {"class": "building", "p": {"building": 0.85}},
+    "map_at_position": {"class": "tree_cover", "p": {"tree_cover": 1.0}},
+    "match_likelihood": 0.025,
+    "consistent_extent_m": None,
+    "nearest_boundary": {"distance_m": 42.1, "bearing_deg": 134.2, "class_beyond": "building"},
+    "map": {"id": "osm-test", "cell_m": 5.0, "classes": 7, "signed": True},
+    "sensor": {"id": "sim-confusion-v0", "source": "simulated"},
+}
+
+
+def test_layer_on_passes_the_terrain_block_to_the_wire():
+    """The console renders the terrain block (tracks/TRACK_E.md); it must
+    arrive intact, sensor stamp included."""
+    epoch = json.loads(line(0.60))
+    epoch["terrain"] = TERRAIN_BLOCK
+    epoch["features"]["terrain_mismatch"] = 1.0
+    payload = decide(Arbitras(), epoch, layer_on=True)
+    assert payload["terrain"] == TERRAIN_BLOCK
+    assert payload["terrain"]["sensor"]["source"] == "simulated"
+    assert payload["features"]["terrain_mismatch"] == 1.0
+
+
+def test_layer_off_strips_the_terrain_block_and_the_advisory():
+    """Beat 2: the terrain verdict and the DEGRADED advisory are trust-layer
+    output like the features and the geometry block; OFF means off the wire."""
+    epoch = json.loads(line(0.60))
+    epoch["terrain"] = TERRAIN_BLOCK
+    epoch["features"]["terrain_mismatch"] = 1.0
+    payload = decide(Arbitras(), epoch, layer_on=False)
+    assert payload["terrain"] == {}
+    assert payload["advisory"] is None
+    assert payload["pursuing"] is None
+    assert payload["features"] == {}

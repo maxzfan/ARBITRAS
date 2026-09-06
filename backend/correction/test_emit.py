@@ -197,13 +197,16 @@ def test_block_shape_matches_the_contract_fixture(fx):
     fixture = json.loads(FIXTURE_EPOCH.read_text())
     fx_block = fixture["geometry"]["correction"]
     assert set(fx_block) == BLOCK_KEYS
-    assert set(fx_block["checks"]) == CHECK_KEYS
+    # Track E's check 6 (`terrain_consistent`, tracks/TRACK_E.md) is additive:
+    # present in the fixture, emitted live only when the channel supplies
+    # extra_checks. The five Track D keys must still match exactly.
+    assert set(fx_block["checks"]) - {"terrain_consistent"} == CHECK_KEYS
     assert "by_sv" in fixture["features"]
 
     sat, pr = fx
     block = correction_block(_context(sat), _d_rho(sat, pr), ["G04"], Gate())
     assert set(block) == set(fx_block)
-    assert set(block["checks"]) == set(fx_block["checks"])
+    assert set(block["checks"]) == set(fx_block["checks"]) - {"terrain_consistent"}
     assert set(block["corrected_position"]) == set(fx_block["corrected_position"])
     # fixture invariant holds too: zero-weight set == excluded_sv
     assert {sv for sv, w in fx_block["weights"].items() if w == 0.0} \
@@ -241,3 +244,44 @@ def test_emitter_seam_fails_closed_without_engine_or_nav(fx):
     assert block["weights"] == {"G07": 0.0}
     emitter.reset()
     assert emitter.gate._run == 0
+
+
+# --- Track E (tracks/TRACK_E.md): check 6 enters the gate before hysteresis --
+
+def test_extra_checks_are_merged_before_the_gate_steps():
+    """A False extra check revokes; None leaves the gate untouched; the key is
+    emitted either way; without the hook the key is absent."""
+    from backend.correction.emit import _emit
+    checks = {"pl_under_al": True, "redundancy": True, "residual_test": True,
+              "continuity": None, "cross_constellation": None}
+    seen = []
+
+    def extra(lla):
+        seen.append(lla)
+        return {"terrain_consistent": False}
+
+    g = Gate()
+    for _ in range(GRANT_EPOCHS + 2):
+        blk = _emit(g, checks, 3.0, {"lat": 1.0, "lon": 2.0, "alt": 3.0}, {"G01": 1.0},
+                    15.0, extra_checks=extra)
+    assert blk["checks"]["terrain_consistent"] is False and blk["correction_ok"] is False
+    assert seen[-1] == {"lat": 1.0, "lon": 2.0, "alt": 3.0}
+
+    g = Gate()
+    for _ in range(GRANT_EPOCHS + 2):
+        blk = _emit(g, checks, 3.0, {"lat": 1.0, "lon": 2.0, "alt": 3.0}, {"G01": 1.0},
+                    15.0, extra_checks=lambda lla: {"terrain_consistent": None})
+    assert blk["checks"]["terrain_consistent"] is None and blk["correction_ok"] is True
+
+    blk = _emit(Gate(), checks, 3.0, None, {}, 15.0)
+    assert "terrain_consistent" not in blk["checks"]
+
+
+def test_correction_emitter_threads_extra_checks_through_fail_closed_paths():
+    """With no context the block fails closed AND the hook still sees None."""
+    seen = []
+    em = CorrectionEmitter(nav=None, context_fn=lambda: None,
+                           extra_checks=lambda lla: seen.append(lla) or {"terrain_consistent": None})
+    blk = em(None, [])
+    assert blk["correction_ok"] is False and seen == [None]
+    assert blk["checks"]["terrain_consistent"] is None

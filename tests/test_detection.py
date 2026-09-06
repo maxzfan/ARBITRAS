@@ -227,6 +227,8 @@ def test_record_matches_the_contract_fixture():
     r = record(datetime(2026, 8, 20, 0, 14, 30), feats,
                score(feats, None), n_sv=11)
     for key in fixture:
+        if key == "terrain":
+            continue        # Track E's optional block: present only when the channel ran
         assert key in r, f"§5 contract key {key!r} missing from the record"
     assert r["timestamp"].endswith("Z")
     assert 0.0 <= r["confidence"] <= 1.0
@@ -352,10 +354,70 @@ def test_contract_doc_and_fixture_match_the_emitted_record():
 
     # features.by_sv (TRACK_D.md contract extension 1) is additive and
     # optional — emitted only when the caller passes it — and its per-SV
-    # keys are data, not schema. Exempt like the geometry subkeys.
+    # keys are data, not schema. Exempt like the geometry subkeys. The same
+    # holds for Track E's `terrain` block and `features.terrain_mismatch`
+    # (tracks/TRACK_E.md): present only when the channel ran.
     geom = lambda ps: {x for x in ps if not x.startswith("geometry.")
-                       and not x.startswith("features.by_sv")}
+                       and not x.startswith("features.by_sv")
+                       and not x.startswith("terrain")
+                       and x != "features.terrain_mismatch"
+                       and not x.startswith("score_detail.weights.")}
     assert geom(paths(spec)) == geom(paths(live))
     assert geom(paths(spec)) == geom(paths(fixture))
     assert set(spec["features"]) == set(FEATURE_NAMES)
-    assert set(fixture["features"]) - {"by_sv"} == set(FEATURE_NAMES)
+    assert set(fixture["features"]) - {"by_sv", "terrain_mismatch"} == set(FEATURE_NAMES)
+
+
+# --- Track E seams (tracks/TRACK_E.md E3) ----------------------------------
+from backend.detection import OPTIONAL_FEATURE_NAMES, anomaly, scored_features
+
+
+def test_optional_feature_is_not_in_the_base_set():
+    assert OPTIONAL_FEATURE_NAMES == ("terrain_mismatch",)
+    assert not set(OPTIONAL_FEATURE_NAMES) & set(FEATURE_NAMES)
+
+
+def test_weights_equal_over_five_names():
+    w = Weights.equal(FEATURE_NAMES + OPTIONAL_FEATURE_NAMES)
+    assert len(w.feature) == 5 and all(abs(v - 0.2) < 1e-12 for v in w.feature.values())
+
+
+def test_missing_optional_feature_renormalises_not_reads_zero():
+    w = Weights.equal(FEATURE_NAMES + OPTIONAL_FEATURE_NAMES)
+    four = {n: 0.4 for n in FEATURE_NAMES}
+    assert anomaly(four, w) == pytest.approx(0.4)          # not 0.32
+    assert scored_features(four, w) == list(FEATURE_NAMES)
+    five = dict(four, terrain_mismatch=1.0)
+    assert anomaly(five, w) == pytest.approx(0.4 * 0.8 + 1.0 * 0.2)
+    assert scored_features(five, w) == list(FEATURE_NAMES + OPTIONAL_FEATURE_NAMES)
+
+
+def test_nan_feature_is_not_scored():
+    w = Weights()
+    feats = {n: 0.5 for n in FEATURE_NAMES}
+    feats["cross_constellation"] = float("nan")
+    assert anomaly(feats, w) == pytest.approx(0.5)
+    assert "cross_constellation" not in scored_features(feats, w)
+
+
+def test_score_reports_features_scored():
+    feats = {n: 0.3 for n in FEATURE_NAMES}
+    assert score(feats, None, Weights())["features_scored"] == list(FEATURE_NAMES)
+
+
+def test_dirichlet_over_named_features():
+    rng = np.random.default_rng(0)
+    w = Weights.dirichlet(rng, names=FEATURE_NAMES + OPTIONAL_FEATURE_NAMES)
+    assert set(w.feature) == set(FEATURE_NAMES + OPTIONAL_FEATURE_NAMES)
+    assert abs(sum(w.feature.values()) - 1.0) < 1e-9
+
+
+def test_record_carries_terrain_only_when_given():
+    feats = {n: 0.3 for n in FEATURE_NAMES}
+    s = score(feats, None, Weights())
+    t = datetime(2026, 8, 20, 0, 0)
+    plain = record(t, feats, s, n_sv=10)
+    assert "terrain" not in plain
+    assert plain["score_detail"]["features_scored"] == list(FEATURE_NAMES)
+    with_t = record(t, feats, s, n_sv=10, terrain={"available": True})
+    assert with_t["terrain"] == {"available": True}

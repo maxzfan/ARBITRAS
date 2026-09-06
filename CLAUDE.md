@@ -69,6 +69,11 @@ convention below.
   confidence scoring, credential layer (TESLA), measurement.
 - `backend/geometry/` — information matrix, information ratio, analytic
   displacement bound, next-best-observation ranking.
+- `backend/terrain/` — Track E (tracks/TRACK_E.md): SIMULATED terrain-class
+  sensor checked against a signed OSM-rasterised pre-map at the believed
+  position. Off unless `--terrain-map` is given; never on the submission
+  video. Adds `features.terrain_mismatch`, the `terrain` block, the min
+  bound rule (`geometry.bound_source`) and correction check 6.
 - `console/` — trust state machine, operator console, natural-language
   explanation layer, explanation verifier.
 - `fixtures/epoch.json` — one hand-written contract object. Tracks B and C
@@ -102,3 +107,5 @@ account — do not burn time on it. `bootstrap.sh` pulls everything.
 - The geometry score must be derivable on a whiteboard in two minutes. If an
   implementation makes it un-explainable, the implementation is wrong.
 - Keep functions testable against both clean and injected datasets.
+- Terrain (Track E) figures are curves over the sensor's confusion diagonal,
+  never a point; every terrain record is stamped `sensor.source: "simulated"`.

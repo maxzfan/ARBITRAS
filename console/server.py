@@ -26,6 +26,7 @@ from console.arbitras.explain import explain, verify
 from console.arbitras.machine import Arbitras
 from console.arbitras.states import THRESHOLD_PROVENANCE, THRESHOLDS, TrustState
 from console import mission
+from console import missions as mission_registry
 
 WEB = Path(__file__).parent / "web"
 VENDOR_MIME = {
@@ -96,7 +97,78 @@ def follow(path: Path, stale_after: float = 2.0, poll: float = 0.05):
             time.sleep(poll)
 
 
-def decide(arb: Arbitras, epoch, layer_on: bool) -> dict:
+_TERRAIN_CACHE: dict = {}
+_NUMBERS_CACHE: dict = {}
+
+
+def numbers(clean_path=Path("out/clean.jsonl"), attack_path=Path("out/carryoff.jsonl")) -> dict:
+    """design.md §10 headline numbers from the streams on disk, cached per mtime.
+
+    max adversarial displacement = |position - _truth| at the epoch before the
+    first arbitrated transition out of NOMINAL after onset; the analytic bound
+    is that same epoch's geometry.displacement_bound_m; time-to-alert is epochs
+    from onset to that transition; FSR is epochs below NOMINAL over the clean
+    replay. Nulls, with a note, when a stream is missing."""
+    key = tuple((str(q), q.stat().st_mtime if q.exists() else None) for q in (clean_path, attack_path))
+    if _NUMBERS_CACHE.get("key") == key:
+        return _NUMBERS_CACHE["v"]
+    from console.replay import arbitrate, false_surrender_rate, time_to_alert
+    rows = []
+    def row(label, value, unit, source): rows.append({"label": label, "value": value, "unit": unit, "source": source})
+    if attack_path.exists():
+        eps = read_epochs(attack_path)
+        onset = next((i for i, e in enumerate(eps) if isinstance(e, dict)
+                      and (e.get("_attack") or {}).get("stage", "CLEAN") != "CLEAN"), None)
+        if onset is not None:
+            dec = arbitrate(eps)
+            tta = time_to_alert(dec, onset)
+            k = onset + tta - 1 if tta else None
+            disp = bound = None
+            if k is not None and isinstance(eps[k], dict):
+                disp = (eps[k].get("_solution") or {}).get("displacement_m")
+                bound = (eps[k].get("geometry") or {}).get("displacement_bound_m")
+            src = f"{attack_path}, epoch {k} (before the first transition out of NOMINAL)"
+            row("MAX ADVERSARIAL DISPLACEMENT", disp, "M", src)
+            row("ANALYTIC BOUND · SAME EPOCH", bound, "M", src)
+            row("TIME TO ALERT", tta, "EPOCHS", f"{attack_path}, onset epoch {onset}, 30 s epochs")
+        else:
+            row("MAX ADVERSARIAL DISPLACEMENT", None, "M", f"{attack_path}: no attack epochs")
+    else:
+        row("MAX ADVERSARIAL DISPLACEMENT", None, "M", f"{attack_path} missing: run python -m backend.demo")
+    if clean_path.exists():
+        m = false_surrender_rate(arbitrate(read_epochs(clean_path)))
+        row("FALSE SURRENDER RATE", None if m.get("fsr") is None else round(m["fsr"], 4), "",
+            f"{clean_path}, {m.get('epochs')} clean epochs, {m.get('downgrade_events')} events")
+    else:
+        row("FALSE SURRENDER RATE", None, "", f"{clean_path} missing")
+    row("STATION", "USN8 · 2026-08-20 · 30 S · 5 CONSTELLATIONS", "", "design.md §4")
+    row("THRESHOLDS", THRESHOLD_PROVENANCE.split(":")[0], "", "console/arbitras/states.py")
+    v = {"rows": rows, "note": "computed from the streams on disk at server start; every value carries its source"}
+    _NUMBERS_CACHE.update(key=key, v=v)
+    return v
+
+
+def terrain_map(path: Path = Path("data/terrain_usn8.npz")) -> dict | None:
+    """Class grid of the signed pre-map as plain JSON (row index grows north,
+    column index east, -1 = unlabelled). Cached after the first read."""
+    if "t" in _TERRAIN_CACHE:
+        return _TERRAIN_CACHE["t"]
+    if not path.exists():
+        return None
+    import numpy as np
+    z = np.load(path, allow_pickle=False)
+    hdr = json.loads(str(z["header"]))
+    grid = z["grid"].astype(int)
+    t = {"rows": int(grid.shape[0]), "cols": int(grid.shape[1]),
+         "cell_m": hdr.get("cell_m"), "origin_enu": hdr.get("origin_enu"),
+         "classes": hdr.get("classes"), "map_id": hdr.get("map_id"),
+         "signed": path.with_suffix(".npz.sig").exists(),
+         "grid": grid.ravel().tolist()}
+    _TERRAIN_CACHE["t"] = t
+    return t
+
+
+def decide(arb: Arbitras, epoch, layer_on: bool, guide=None) -> dict:
     """One arbitration + explanation + verification, ready for the wire."""
     d = arb.step(epoch)
     payload = d.to_dict()
@@ -136,6 +208,11 @@ def decide(arb: Arbitras, epoch, layer_on: bool) -> dict:
         payload["geometry_divergence"] = None
         payload["implied_state"] = None
         payload["reason"] = "layer_off"
+        # Track E: the terrain verdict and the DEGRADED advisory built on it
+        # are the layer's output too (tracks/TRACK_E.md); off means off.
+        payload["terrain"] = {}
+        payload["advisory"] = None
+        payload["pursuing"] = None
 
     payload["layer_on"] = layer_on
     payload["thresholds"] = {s.name: v for s, v in THRESHOLDS.items()}
@@ -165,21 +242,64 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
-        if u.path in ("/", "/index.html"):
+        if u.path == "/":
+            # Track F: the routing page is the front door; the console lives at
+            # /console (and /index.html) and is what the page's third section hosts.
+            home = WEB / "home.html"
+            return self._file(home if home.exists() else WEB / "index.html", "text/html; charset=utf-8")
+        if u.path in ("/console", "/index.html"):
             return self._file(WEB / "index.html", "text/html; charset=utf-8")
         if u.path == "/route.js":
             # Our own kinematics module (mirrors console/mission.py); not vendor.
             return self._file(WEB / "route.js", "application/javascript")
         if u.path == "/mission":
-            body = json.dumps(mission.as_dict()).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            return self.wfile.write(body)
+            # Track F (tracks/TRACK_F.md §3): ?name= selects a registry mission;
+            # without it the legacy console/mission.py frame is served unchanged.
+            q = parse_qs(u.query)
+            name = q.get("name", [None])[0]
+            if name is None:
+                return self._json(mission.as_dict())
+            try:
+                return self._json(mission_registry.as_dict(mission_registry.get(name)))
+            except KeyError as e:
+                return self.send_error(404, str(e))
+        if u.path == "/missions":
+            return self._json(mission_registry.summary())
+        if u.path == "/numbers":
+            # Hero spec block (TRACK_F.md §1): headline results computed from
+            # the streams on disk, each with its source, never typed by hand.
+            return self._json(numbers())
+        if u.path == "/terrain":
+            # The signed pre-map (Track E) as a class grid, for the CASEVAC
+            # environment. Mission context, not an observable: loaded with numpy
+            # straight from the .npz; nothing from backend/ is imported.
+            t = terrain_map()
+            return self._json(t) if t else self.send_error(404, "no terrain map in data/")
+        if u.path == "/home":                       # kept as an alias
+            return self._file(WEB / "home.html", "text/html; charset=utf-8")
+        if u.path.startswith("/overlays/"):
+            name = Path(u.path[10:]).name
+            if not name or Path(name).suffix.lower() not in (".js", ".md"):
+                return self.send_error(404)
+            return self._file(WEB / "overlays" / name,
+                              "application/javascript" if name.endswith(".js") else "text/plain; charset=utf-8")
+        if u.path.startswith("/env/"):
+            name = Path(u.path[5:]).name
+            ext = Path(name).suffix.lower()
+            if not name or ext not in (".js", ".html", ".md", ".txt", ".json"):
+                return self.send_error(404)
+            return self._file(WEB / "env" / name,
+                              {".js": "application/javascript", ".html": "text/html; charset=utf-8",
+                               ".json": "application/json"}.get(ext, "text/plain; charset=utf-8"))
         if u.path == "/events":
             return self._events(parse_qs(u.query))
+        if u.path.startswith("/papers/"):
+            # Research section (home.html): the team's own papers, served from
+            # console/web/papers. Basename only, PDFs only.
+            name = Path(u.path[8:]).name
+            if not name or Path(name).suffix.lower() != ".pdf":
+                return self.send_error(404)
+            return self._file(WEB / "papers" / name, "application/pdf")
         if u.path.startswith("/vendor/"):
             # Basename only, plus at most one whitelisted subdirectory, so a
             # request can never walk out of vendor/.
@@ -196,6 +316,15 @@ class Handler(BaseHTTPRequestHandler):
             ctype = VENDOR_MIME.get(ext, "application/octet-stream")
             return self._file(WEB.joinpath("vendor", *sub, name), ctype)
         self.send_error(404)
+
+    def _json(self, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        return self.wfile.write(body)
 
     def _file(self, path: Path, ctype):
         if not path.exists():
@@ -227,10 +356,24 @@ class Handler(BaseHTTPRequestHandler):
 
         arb = Arbitras()      # fresh per connection: reload == hard reset
         delay = 1.0 / max(rate, 0.1)
+        # Track F: ?mission=<name> replays that mission's stream (or its
+        # fallback until generated); --source still wins in tail mode.
+        src_path = Path(a.source)
+        mname = q.get("mission", [None])[0]
+        if mname and not a.tail:
+            try:
+                mm = mission_registry.get(mname)
+            except KeyError:
+                mm = None
+            if mm is not None:
+                for cand in (mm.stream, mm.fallback_stream):
+                    if cand and Path(cand).exists():
+                        src_path = Path(cand)
+                        break
         try:
             tailing = bool(a.tail)
-            source = (follow(Path(a.source), a.stale_after) if tailing
-                      else iter(read_epochs(Path(a.source))))
+            source = (follow(src_path, a.stale_after) if tailing
+                      else iter(read_epochs(src_path)))
             for epoch in source:
                 payload = decide(arb, epoch, layer_on)
                 self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())

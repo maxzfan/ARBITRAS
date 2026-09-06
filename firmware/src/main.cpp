@@ -1,4 +1,4 @@
-// ARBITRAS demo car firmware. Spec: tracks/TRACK_E.md (FROZEN).
+// ARBITRAS demo car firmware. Spec: tracks/TRACK_G.md (FROZEN).
 // The car is a dumb actuator: (throttle, steer) over UDP -> two DRV8833
 // channels. No localization, no state machine, no GNSS knowledge.
 
@@ -10,7 +10,7 @@
 #error "CAR_ID must come from the build flag (see platformio.ini)"
 #endif
 
-// ---- Tunable constants (only block of magic numbers; see TRACK_E.md) ----
+// ---- Tunable constants (only block of magic numbers; see TRACK_G.md) ----
 static const char *WIFI_SSID = "FILL_ME_IN";   // hotspot credentials,
 static const char *WIFI_PASS = "FILL_ME_IN";   // filled by hand
 static const uint16_t UDP_PORT     = 4210;
