@@ -1,0 +1,164 @@
+/* LOGISTICS environment -- northern prairie at noon (tracks/TRACK_F.md §2).
+ *
+ * The reference implementation of console/web/env/CONTRACT.md: this is the
+ * console's original terrain, rocks and ground set, moved behind the contract
+ * so the other three theatres can be built the same way. Everything here is
+ * set dressing; the console draws every measured thing on top of it.
+ *
+ * Assets: the vendored Earth set (Poly Haven, CC0): kloofendal_48d_partly_cloudy
+ * sky for lighting, grass_path_2 ground, rocky_terrain rocks. No new downloads.
+ */
+(function () {
+  const SPEC = {
+    hdr: '/vendor/asset-earth-sky.hdr',
+    exposure: 1.5,
+    fog: { color: '#8F94A1', density: 0.0022 },           // measured HDR horizon band (EARTH_BACKDROP.md)
+    sky: { horizon: '#8F94A1', mid: '#7891B0', zenith: '#5F7FB5' },   // ~2 stops under the HDR so sprites stay legible
+    sun: { az: 124.4, el: 47.3 },                          // measured from the HDR; overridden at load
+    palette: { ground: '#6B6A5E', rock: '#5C574D', accent: '#E8A21C' },
+    attribution: 'Sky, ground: Poly Haven, CC0',
+    hero_camera: { az: 200, el: 24, dist: 150, dolly: 0.6 },
+  };
+
+  function build(ctx) {
+    const T = ctx.THREE, H = ctx.helpers, m = ctx.mission, scene = ctx.scene;
+    const hw = m.corridor_half_width_m, gs = m.ground_station;
+    const noise = H.makeNoise(7), rnd = H.mulberry32(11);
+    const aniso = ctx.renderer.capabilities.getMaxAnisotropy();
+    const own = [];                                         // everything we must dispose
+
+    // -- terrain: gentle prairie undulation, FLAT along the corridor, under the
+    //    ground station and inside every prop's rim (contract invariant 1). ------
+    const heightAt = (x, z) => {
+      const base = 2.4*noise(x/70 + 3.1, z/70 + 1.7) + 0.7*noise(x/22, z/22) + 0.18*noise(x/6, z/6);
+      const lat = Math.abs(H.lateralOffset(x, -z));
+      const clear = H.propClearance(x, -z);
+      return base * H.smooth(hw + 3, hw + 16, lat) * H.smooth(7, 20, clear);
+    };
+    const ext = H.extent(500);
+    const TW = ext.maxE - ext.minE, TD = ext.maxN - ext.minN, TCx = (ext.minE + ext.maxE)/2, TCz = -(ext.minN + ext.maxN)/2;
+    const groundMat = new T.MeshStandardMaterial({color: new T.Color(SPEC.palette.ground), roughness:1, metalness:0, envMapIntensity:1.0});
+    {
+      const geo = new T.PlaneGeometry(TW, TD, Math.min(Math.round(TW/10), 200), Math.min(Math.round(TD/10), 200));
+      const pa = geo.attributes.position;
+      for (let i = 0; i < pa.count; i++) pa.setZ(i, heightAt(pa.getX(i) + TCx, -pa.getY(i) + TCz));
+      geo.computeVertexNormals();
+      const ground = new T.Mesh(geo, groundMat);
+      ground.rotation.x = -Math.PI/2; ground.position.set(TCx, 0, TCz); ground.receiveShadow = true;
+      ground.layers.enable(H.INSET_LAYER); scene.add(ground); own.push(ground);
+    }
+
+    // -- rocks: instanced, seeded, never in the corridor or on a prop ------------
+    const rockMat = new T.MeshStandardMaterial({color: new T.Color(SPEC.palette.rock), roughness:0.92, metalness:0.02, envMapIntensity:0.55});
+    {
+      const rockGeo = new T.DodecahedronGeometry(1, 1);
+      const pa = rockGeo.attributes.position, rv = new T.Vector3();
+      for (let i = 0; i < pa.count; i++) { rv.fromBufferAttribute(pa, i);
+        rv.multiplyScalar(1 + 0.30*noise(rv.x*1.7 + 5.2, rv.y*1.7 + rv.z*0.9)); pa.setXYZ(i, rv.x, rv.y*0.8, rv.z); }
+      rockGeo.computeVertexNormals();
+      const rocks = new T.InstancedMesh(rockGeo, rockMat, 340);
+      const m4 = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), pv = new T.Vector3(), sv = new T.Vector3();
+      let n = 0, tries = 0;
+      const put = (x, z, s) => {
+        e.set(rnd()*Math.PI, rnd()*Math.PI, rnd()*Math.PI); q.setFromEuler(e);
+        sv.set(s*(0.8+rnd()*0.5), s*(0.55+rnd()*0.5), s*(0.8+rnd()*0.5));
+        m4.compose(pv.set(x, heightAt(x, z) - 0.22*s, z), q, sv); rocks.setMatrixAt(n++, m4);
+      };
+      while (n < 320 && tries++ < 12000) {
+        const x = TCx + (rnd()-0.5)*(TW-300), z = TCz + (rnd()-0.5)*(TD-300);
+        if (Math.abs(H.lateralOffset(x, -z)) < hw + 8) continue;
+        if (H.propClearance(x, -z) < 12) continue;
+        if (rnd() > 0.35 + 0.65*(noise(x/40, z/40)+1)/2) continue;
+        put(x, z, 0.35 + rnd()*rnd()*1.9);
+      }
+      for (let i = 0; i < 20; i++) { const a = rnd()*Math.PI*2, d = 160 + rnd()*200;   // skyline outcrops
+        put(TCx + Math.sin(a)*d, TCz + Math.cos(a)*d, 5 + rnd()*9); }
+      rocks.count = n; rocks.castShadow = true; rocks.receiveShadow = true; rocks.layers.enable(H.INSET_LAYER);
+      scene.add(rocks); own.push(rocks);
+    }
+
+    // -- dry grass tufts: one InstancedMesh of three crossed blades, vertex-tinted,
+    //    seeded, outside the corridor; swayed in tick(). Not on the inset layer. ----
+    let grass = null; const GRASS_N = 2600;
+    {
+      const g = new T.BufferGeometry();
+      const verts = [], cols = [];
+      const blade = (rot) => {                              // one blade: a thin triangle 0.45 m tall
+        const c = Math.cos(rot), s = Math.sin(rot), w = 0.05, h = 0.45;
+        verts.push(-w*c, 0, -w*s,  w*c, 0, w*s,  0, h, 0);
+        cols.push(0.36,0.33,0.20, 0.36,0.33,0.20, 0.62,0.58,0.36);
+      };
+      blade(0); blade(Math.PI/3); blade(2*Math.PI/3);
+      g.setAttribute('position', new T.Float32BufferAttribute(verts, 3));
+      g.setAttribute('color', new T.Float32BufferAttribute(cols, 3));
+      g.computeVertexNormals();
+      const mat = new T.MeshStandardMaterial({vertexColors:true, roughness:1, metalness:0, side:T.DoubleSide});
+      grass = new T.InstancedMesh(g, mat, GRASS_N);
+      const m4 = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), pv = new T.Vector3(), sv = new T.Vector3();
+      let n = 0, tries = 0;
+      while (n < GRASS_N && tries++ < GRASS_N*6) {
+        const x = TCx + (rnd()-0.5)*(TW-400), z = TCz + (rnd()-0.5)*(TD-400);
+        if (Math.abs(H.lateralOffset(x, -z)) < hw + 1.5) continue;
+        if (H.propClearance(x, -z) < 4) continue;
+        if (rnd() > 0.45 + 0.55*(noise(x/25 + 9, z/25)+1)/2) continue;
+        e.set(0, rnd()*Math.PI*2, 0); q.setFromEuler(e); const s = 0.7 + rnd()*0.8;
+        sv.set(s, s*(0.8 + rnd()*0.6), s);
+        m4.compose(pv.set(x, heightAt(x, z), z), q, sv); grass.setMatrixAt(n++, m4);
+      }
+      grass.count = n; grass.castShadow = false; grass.receiveShadow = true; grass.frustumCulled = false;
+      scene.add(grass); own.push(grass);
+    }
+
+    // -- set dressing at the FOB: a few stacked blocks and a mast, outside the ring --
+    for (const p of m.props) {
+      if (p.kind !== 'fob') continue;
+      const dark = new T.MeshStandardMaterial({color:0x5A5548, roughness:0.9});
+      const r = (p.radius_m || 30) + 6;
+      for (let i = 0; i < 7; i++) {
+        const a = -0.9 + i*0.22, bx = p.e + Math.sin(a)*r, bz = -(p.n + Math.cos(a)*r);
+        const b = new T.Mesh(new T.BoxGeometry(2.2, 1.4 + (i%2)*0.9, 2.2), dark);
+        b.position.set(bx, heightAt(bx, bz) + b.geometry.parameters.height/2, bz);
+        b.castShadow = b.receiveShadow = true; b.layers.enable(H.INSET_LAYER); scene.add(b); own.push(b);
+      }
+    }
+
+    // -- textures: swap in when they arrive; report either way ----------------------
+    ctx.report({ground:'loading', vegetation:'loaded'});
+    Promise.all([
+      H.loadTexture(H.FALLBACK.ground.diff, true, 225, aniso), H.loadTexture(H.FALLBACK.ground.nor, false, 225, aniso),
+      H.loadTexture(H.FALLBACK.ground.rough, false, 225, aniso),
+    ]).then(([map, nor, rough]) => {
+      const rep = Math.round(Math.max(TW, TD) / 3.5);                      // one tile ~3.5 m
+      for (const t of [map, nor, rough]) { t.repeat.set(rep, rep); t.needsUpdate = true; own.push(t); }
+      Object.assign(groundMat, {map, normalMap:nor, roughnessMap:rough, color:new T.Color(0xFFFFFF), envMapIntensity:1.0});
+      groundMat.normalScale.set(0.8, 0.8); groundMat.needsUpdate = true;
+      ctx.report({ground:'loaded'});
+    }).catch(() => ctx.report({ground:'fallback', note:'ground textures failed; flat colour'}));
+    Promise.all([
+      H.loadTexture(H.FALLBACK.rock.diff, true, 1.6, aniso), H.loadTexture(H.FALLBACK.rock.nor, false, 1.6, aniso),
+      H.loadTexture(H.FALLBACK.rock.rough, false, 1.6, aniso),
+    ]).then(([rm, rn, rr]) => {
+      Object.assign(rockMat, {map:rm, normalMap:rn, roughnessMap:rr, color:new T.Color(0xB8AC9C), envMapIntensity:1.0});
+      rockMat.needsUpdate = true; own.push(rm, rn, rr);
+    }).catch(() => {});
+
+    let sway = 0;
+    return {
+      heightAt,
+      bounds: {minX: ext.minE, maxX: ext.maxE, minZ: -ext.maxN, maxZ: -ext.minN},
+      sunAz: SPEC.sun.az, sunEl: SPEC.sun.el,
+      tick(dt) { if (!grass) return; sway += dt; grass.rotation.z = Math.sin(sway*0.9)*0.012; },
+      dispose() {
+        for (const o of own) {
+          if (o.isTexture) { o.dispose(); continue; }
+          scene.remove(o);
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(mm => mm.dispose());
+        }
+      },
+    };
+  }
+
+  window.ARBITER_ENV = window.ARBITER_ENV || {};
+  window.ARBITER_ENV.logistics = { id: 'logistics', spec: SPEC, build };
+})();

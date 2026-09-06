@@ -26,6 +26,7 @@ from console.arbiter.explain import explain, verify
 from console.arbiter.machine import Arbiter
 from console.arbiter.states import THRESHOLD_PROVENANCE, THRESHOLDS, TrustState
 from console import mission
+from console import missions as mission_registry
 
 WEB = Path(__file__).parent / "web"
 VENDOR_MIME = {
@@ -94,6 +95,29 @@ def follow(path: Path, stale_after: float = 2.0, poll: float = 0.05):
                 yield None
                 continue
             time.sleep(poll)
+
+
+_TERRAIN_CACHE: dict = {}
+
+
+def terrain_map(path: Path = Path("data/terrain_usn8.npz")) -> dict | None:
+    """Class grid of the signed pre-map as plain JSON (row index grows north,
+    column index east, -1 = unlabelled). Cached after the first read."""
+    if "t" in _TERRAIN_CACHE:
+        return _TERRAIN_CACHE["t"]
+    if not path.exists():
+        return None
+    import numpy as np
+    z = np.load(path, allow_pickle=False)
+    hdr = json.loads(str(z["header"]))
+    grid = z["grid"].astype(int)
+    t = {"rows": int(grid.shape[0]), "cols": int(grid.shape[1]),
+         "cell_m": hdr.get("cell_m"), "origin_enu": hdr.get("origin_enu"),
+         "classes": hdr.get("classes"), "map_id": hdr.get("map_id"),
+         "signed": path.with_suffix(".npz.sig").exists(),
+         "grid": grid.ravel().tolist()}
+    _TERRAIN_CACHE["t"] = t
+    return t
 
 
 def decide(arb: Arbiter, epoch, layer_on: bool) -> dict:
@@ -171,13 +195,34 @@ class Handler(BaseHTTPRequestHandler):
             # Our own kinematics module (mirrors console/mission.py); not vendor.
             return self._file(WEB / "route.js", "application/javascript")
         if u.path == "/mission":
-            body = json.dumps(mission.as_dict()).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            return self.wfile.write(body)
+            # Track F (tracks/TRACK_F.md §3): ?name= selects a registry mission;
+            # without it the legacy console/mission.py frame is served unchanged.
+            q = parse_qs(u.query)
+            name = q.get("name", [None])[0]
+            if name is None:
+                return self._json(mission.as_dict())
+            try:
+                return self._json(mission_registry.as_dict(mission_registry.get(name)))
+            except KeyError as e:
+                return self.send_error(404, str(e))
+        if u.path == "/missions":
+            return self._json(mission_registry.summary())
+        if u.path == "/terrain":
+            # The signed pre-map (Track E) as a class grid, for the CASEVAC
+            # environment. Mission context, not an observable: loaded with numpy
+            # straight from the .npz; nothing from backend/ is imported.
+            t = terrain_map()
+            return self._json(t) if t else self.send_error(404, "no terrain map in data/")
+        if u.path == "/home":
+            return self._file(WEB / "home.html", "text/html; charset=utf-8")
+        if u.path.startswith("/env/"):
+            name = Path(u.path[5:]).name
+            ext = Path(name).suffix.lower()
+            if not name or ext not in (".js", ".html", ".md", ".txt", ".json"):
+                return self.send_error(404)
+            return self._file(WEB / "env" / name,
+                              {".js": "application/javascript", ".html": "text/html; charset=utf-8",
+                               ".json": "application/json"}.get(ext, "text/plain; charset=utf-8"))
         if u.path == "/events":
             return self._events(parse_qs(u.query))
         if u.path.startswith("/vendor/"):
@@ -196,6 +241,15 @@ class Handler(BaseHTTPRequestHandler):
             ctype = VENDOR_MIME.get(ext, "application/octet-stream")
             return self._file(WEB.joinpath("vendor", *sub, name), ctype)
         self.send_error(404)
+
+    def _json(self, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        return self.wfile.write(body)
 
     def _file(self, path: Path, ctype):
         if not path.exists():
@@ -227,10 +281,24 @@ class Handler(BaseHTTPRequestHandler):
 
         arb = Arbiter()      # fresh per connection: reload == hard reset
         delay = 1.0 / max(rate, 0.1)
+        # Track F: ?mission=<name> replays that mission's stream (or its
+        # fallback until generated); --source still wins in tail mode.
+        src_path = Path(a.source)
+        mname = q.get("mission", [None])[0]
+        if mname and not a.tail:
+            try:
+                mm = mission_registry.get(mname)
+            except KeyError:
+                mm = None
+            if mm is not None:
+                for cand in (mm.stream, mm.fallback_stream):
+                    if cand and Path(cand).exists():
+                        src_path = Path(cand)
+                        break
         try:
             tailing = bool(a.tail)
-            source = (follow(Path(a.source), a.stale_after) if tailing
-                      else iter(read_epochs(Path(a.source))))
+            source = (follow(src_path, a.stale_after) if tailing
+                      else iter(read_epochs(src_path)))
             for epoch in source:
                 payload = decide(arb, epoch, layer_on)
                 self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())

@@ -6,3 +6,6 @@ __pycache__/
 out/
 *.mp4
 .cache/
+
+# Track F environment assets: fetched by bootstrap.sh (console/web/env/ASSETS.txt), never committed
+console/web/vendor/asset-env-*

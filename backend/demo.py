@@ -67,7 +67,7 @@ from backend.injector import (CARRY_OFF, CLEAN, inject, summarise,
 from backend.measurement.sigma_uere import load_or_measure
 from backend.rinex import ephemeris, noise
 from backend.rinex.loader import load_obs
-from backend.rinex.solve import solve_per_constellation
+from backend.rinex.solve import residual_panel, solve_per_constellation
 from backend.terrain.channel import apply_bound
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
@@ -228,15 +228,19 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
     fx, w, out = FeatureExtractor(cal), (weights or Weights()), []
     n = len(epochs)
     for i, ep in enumerate(epochs):
-        res = fx.step(ep)
+        # One per-constellation solve per epoch, shared by feature 2 (post-fit
+        # residual) and feature 4 (cross-constellation), exactly as
+        # backend.replay.run wires it. Before 2026-09-05 23:xx this called
+        # fx.step(ep) with no residual, so feature 2 read 0.0 on every epoch
+        # of every demo stream and nothing was ever excluded (TRACK_F.md F-0a).
+        sols = solve_per_constellation(ep, nav_xc) if nav_xc is not None else {}
+        res = fx.step(ep, resid=(sols.get("all") or {}).get("resid_m"))
         feats = res["features"]
         if xc is not None and nav_xc is not None:
-            # §6a.4, wired exactly as backend.replay.run does it: Eric's
-            # absolute per-constellation WLS (backend/rinex/solve.py) feeds
-            # the streaming cross-constellation scorer. The caller must
+            # §6a.4: Eric's absolute per-constellation WLS (backend/rinex/solve.py)
+            # feeds the streaming cross-constellation scorer. The caller must
             # xc.reset() before each replay so no state leaks across runs.
-            feats["cross_constellation"] = xc.score(
-                ep, solve_per_constellation(ep, nav_xc))["value"]
+            feats["cross_constellation"] = xc.score(ep, sols)["value"]
         excluded = distrusted(res["per_sv"], cal)
         geom = geometry_block(ep.time, excluded, list(ep.df.index))
         sol = positions.get(ep.time) if positions else None
@@ -317,11 +321,13 @@ def main(argv=None) -> None:
     clean = load_obs(args.obs, systems=SYSTEMS)
     floor = noise.measure(clean)
     print(" ", floor)
-    cal = fit(clean, floor)
+    # Feature 2 is the post-fit residual (commit 76293c9): the calibration needs
+    # the clean-day residual panel or it is never scored (TRACK_F.md F-0a).
+    nav_xc = ephemeris.load_nav()
+    cal = fit(clean, floor, resid_panel=residual_panel(clean, nav_xc))
     print(" ", cal)
 
     print("cross-constellation calibration (§6a.4, per-constellation WLS)", flush=True)
-    nav_xc = ephemeris.load_nav()
     xc = CrossConstellation(fit_cross(clean, nav_xc), nav_xc)
     print(" ", xc.cal)
 
