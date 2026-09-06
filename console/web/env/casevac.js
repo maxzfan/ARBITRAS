@@ -211,7 +211,8 @@
         if (nt >= TREE_CAP || rnd() > P) continue;
         const i = Math.floor(k/cols), j = k - i*cols;
         const e = oe + (j + 0.5)*cell + (rnd() - 0.5)*4.2, n = on + (i + 0.5)*cell + (rnd() - 0.5)*4.2;
-        if (inCorridor(e, n, 4) || nearProp(e, n, 8)) continue;
+        // Tall set dressing keeps clear of the chase camera's path (17-92 m behind the vehicle)
+        if (inCorridor(e, n, 22) || nearProp(e, n, 14)) continue;
         const x = e, z = -n, y = heightAt(x, z) - 0.1, conifer = rnd() < 0.42;
         const th = conifer ? 1.2 + rnd()*1.2 : 1.8 + rnd()*1.6, tr = 0.9 + rnd()*0.8;
         eu.set(0, rnd()*Math.PI*2, 0); q.setFromEuler(eu);
@@ -239,7 +240,7 @@
       for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
         const k = i*cols + j; if (grid[k] !== BUILDING) continue;
         const e = oe + (j + 0.5)*cell, n = on + (i + 0.5)*cell;
-        mask[k] = (inCorridor(e, n, 3) || nearProp(e, n, 5)) ? 0 : 1;
+        mask[k] = (inCorridor(e, n, 30) || nearProp(e, n, 18)) ? 0 : 1;   // blocks never in the camera's path
       }
       const rects = [], used = new Uint8Array(rows*cols), MAXC = 10;
       for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
