@@ -7,7 +7,7 @@ nothing on screen can be mistaken for a measurement it is not (design.md §11b).
 
 USN8 (US Naval Observatory), 2026-08-20, 2880 epochs at 30 s,
 systems GERCS. noise floor over 2880 epochs: C/N0 sigma 0.262 dB-Hz, code-minus-carrier sigma 0.204 m
-calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_anomaly 15.8  pseudorange_residual 12.7  code_carrier_divergence 5.1
+calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_anomaly 15.8  pseudorange_residual 8.4  code_carrier_divergence 5.1, resid sigma median 0.51 m
 
 ## Field classification
 
@@ -22,13 +22,13 @@ calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_a
 | `_truth` | replay metadata | the SAME solver on the CLEAN pseudoranges at the same epoch, same satellites, same weights. Atmosphere and ephemeris error are common to both fixes and cancel in the difference, so `position − _truth` is exactly the injector's effect on the fix. On clean epochs it is 0.0000 m |
 | `_solution` | replay metadata | n_sv, k, DOPs, residual RMS, per-constellation clock bias, `displacement_m` — the fix's own quality figures |
 | `geometry.sky[]` | propagated | real az/el from Track C's engine (`backend/geometry/engine.py`, own Keplerian propagator, 10° mask); trusted flags consistent with `excluded_sv` by construction |
-| `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `pseudorange_residual` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day 52.7% of epochs have ≥1 excluded SV |
+| `geometry.sky[].trusted` / `geometry.excluded_sv` | derived | satellite's own `pseudorange_residual` |z| ≥ calibrated saturation (median per-SV clean p99). No new threshold. On the clean day 17.4% of epochs have ≥1 excluded SV |
 | `geometry.information_ratio` | derived | Track C's normalised D-optimality ratio `det(H'H)^(1/(3+k))` on trusted vs full H (`backend/geometry/information.py`). No free parameter |
 | `geometry.displacement_bound_m` | derived from a **measured** input | analytic chi-square bound `sigma_UERE * sqrt(T * lambda_max)`; sigma_UERE = **1.934 m**, the MEASURED clean-day post-fit residual RMS (1646 residuals, every 30th epoch — `backend/measurement/sigma_uere.py`, cached with provenance in `out/sigma_uere.json`) |
 | `geometry.next_best_observation` | derived | rank-one determinant update over visible-but-untrusted groups (CONVERGE identity) |
 | `features.by_sv` | derived | Track D contract extension 1 (`backend/detection/features.py by_sv_scores`): per-SV max of the three per-SV features, each normalised by its calibrated saturation and clipped to [0, 1]. Cross-constellation is solution-level and does not enter |
 | `geometry.correction` | derived from **measured** thresholds | Track D weighted-RAIM block (`backend/correction/emit.py`): trusted-subset WLS re-solve (binary weights from `excluded_sv`), slope-form protection level with tau fit on the clean day (p99.9 per-SV residual, `backend.correction.validate`), five-check gate with 10-epoch grant / 1-epoch revoke hysteresis. Fail-closed: `correction_ok: false` with null position whenever the solve or any evaluated check cannot stand |
-| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (120 epochs = T_int 60 × d 2) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last 1.3 s at the 15 epochs/s demo rate; tuned to 60 × 2 so every credential state holds ≥ 8 s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. **Threshold dependency for beat 4:** in the 45 epochs (3 s) before PENDING begins, confidence min 0.691 / median 0.778; 12 of 45 sit below the placeholder NOMINAL threshold 0.75. Whether the vehicle is steadily NOMINAL when the credential lapses depends on the 21:00 threshold pick, not on this stream. |
+| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (120 epochs = T_int 60 × d 2) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last 1.3 s at the 15 epochs/s demo rate; tuned to 60 × 2 so every credential state holds ≥ 8 s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. **Threshold dependency for beat 4:** in the 45 epochs (3 s) before PENDING begins, confidence min 0.769 / median 0.789; 0 of 45 sit below the placeholder NOMINAL threshold 0.75. Whether the vehicle is steadily NOMINAL when the credential lapses depends on the 21:00 threshold pick, not on this stream. |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 
@@ -92,7 +92,7 @@ p95 1.67 m, max 2.19 m; vertical p50
 single-frequency fix; it cancels in the differential). GDOP p50 1.63,
 max 2.43.
 
-Displacement `|position − _truth|` over demo.jsonl: solved 100.0%; lead-in max 0.0000 m; first >1 m at idx 62 (2026-08-20T12:31:00Z); peak 273.5 m at idx 149 (range offset 2660 m); end 273.5 m / 2660 m; median |D|/offset 0.061; post-attack max 0.0000 m.
+Displacement `|position − _truth|` over demo.jsonl: solved 100.0%; lead-in max 0.0000 m; first >1 m at idx 61 (2026-08-20T12:30:30Z); peak 1027.0 m at idx 149 (range offset 0 m); end 1027.0 m / 0 m; median |D|/offset nan; post-attack max 0.0000 m.
 
 **Why the subset matters.** A range offset applied to every tracked GPS
 satellite is indistinguishable from a receiver-clock shift and is absorbed
@@ -104,7 +104,7 @@ The direction is set by the geometry of the spoofed subset, not chosen.
 
 ## Injector parameters (design.md §7 carry-off, Track A defaults except the subset)
 
-carry_off: 90 attack epochs {'WALK': 89, 'CAPTURE': 1}, 6 SV at peak, max range offset 2660.0 m, max code-carrier divergence 53.20 m
+carry_off (position domain): 90 attack epochs {'WALK': 89, 'CAPTURE': 1}, 6 SV at peak, max commanded displacement 2660.0 m on bearing 90 deg, max code-carrier divergence 53.20 m
 
 power_db 2.0 · walk_off_mps 1.0 · target `top6` resolved at capture and held ·
 capture_s 10 · duration_s 2700 ·
