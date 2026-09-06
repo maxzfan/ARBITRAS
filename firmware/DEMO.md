@@ -26,8 +26,8 @@ source .venv/bin/activate
 python -m console.server                       # :8420
 
 # terminal 2 — car controller + SSE tee
-python -m vehicle.controller --car-ip <IP> --id 10    # :8421
-# dry run without the car: python -m vehicle.controller --no-car
+python -m firmware.controller --car-ip <IP> --id 10    # :8421
+# dry run without the car: python -m firmware.controller --no-car
 ```
 
 Projected browser points at **http://localhost:8421** (the tee), NOT :8420.
@@ -40,7 +40,7 @@ Controller keys: `g` start main run · `o` layer-off pre-run · `r` reset ·
 ## 3. Firmware + acceptance (once per car)
 
 ```bash
-cd vehicle/firmware && pio run -e car10 -t upload && pio device monitor
+cd firmware && pio run -e car10 -t upload && pio device monitor
 ```
 
 Note the `CAR 10 READY ip=... port=4210` line — that IP goes to the
@@ -49,7 +49,7 @@ choreographed run):
 
 1. `pio run -e car10` builds clean ✅ (done)
 2. Flash; READY line appears with hotspot IP
-3. `python -m vehicle.tools.jog --ip <IP> --id 10` drives forward / reverse /
+3. `python -m firmware.tools.jog --ip <IP> --id 10` drives forward / reverse /
    arcs (wrong wheel direction → swap motor leads, do not edit code)
 4. Spacebar stops instantly
 5. Kill jog while moving → car stops within 500 ms (failsafe)
@@ -57,7 +57,7 @@ choreographed run):
 
 ## 4. Calibration (floor, before taping)
 
-Constants live at the top of `vehicle/controller.py`, marked CALIBRATE:
+Constants live at the top of `firmware/controller.py`, marked CALIBRATE:
 
 - **K_V** (m/s at throttle 1.0): timed 2.0 m full-throttle run, ×3, average.
 - **K_W** (rad/s at steer 1.0): timed 360° pivot at steer=1, ×3, average.

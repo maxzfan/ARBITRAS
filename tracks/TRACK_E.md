@@ -1,6 +1,6 @@
 # TRACK E / FIRMWARE — ESP32 car firmware scope
 
-This file is the complete specification for `vehicle/firmware/`. It is written
+This file is the complete specification for `firmware/`. It is written
 to be handed to Claude Code and executed. Everything interface-shaped in here
 is FROZEN — the controller on the laptop is built against it. Do not redesign
 the packet format, the port, the pin map, or the failsafe behaviour. If
@@ -33,7 +33,7 @@ that lives on the laptop. If a feature seems missing, it is missing on purpose.
 
 ## Project layout (PlatformIO)
 
-    vehicle/firmware/
+    firmware/
       platformio.ini
       src/main.cpp
 
@@ -138,9 +138,9 @@ Nothing else on serial — it becomes unreadable during tuning otherwise.
 
 ## Companion tool (same task, laptop side)
 
-`vehicle/tools/jog.py` — Python 3, stdlib only (socket, termios or curses):
+`firmware/tools/jog.py` — Python 3, stdlib only (socket, termios or curses):
 
-    python -m vehicle.tools.jog --ip 172.20.10.4 --id 10
+    python -m firmware.tools.jog --ip 172.20.10.4 --id 10
 
 Arrow keys set throttle/steer in 0.1 steps, spacebar zeroes both, q quits and
 sends a final zero. Sends the frozen packet format at 20 Hz continuously

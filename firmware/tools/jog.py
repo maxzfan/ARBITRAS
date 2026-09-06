@@ -1,6 +1,6 @@
 """Keyboard jogger for the ARBITER demo car. Spec: tracks/TRACK_E.md.
 
-    python -m vehicle.tools.jog --ip 172.20.10.4 --id 10
+    python -m firmware.tools.jog --ip 172.20.10.4 --id 10
 
 Arrow keys set throttle/steer in 0.1 steps, spacebar zeroes both, q quits
 and sends a final zero. Sends the frozen packet format at 20 Hz continuously.

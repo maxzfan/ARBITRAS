@@ -1,7 +1,7 @@
 """Demo car controller: rides the arbitrated epoch stream and drives the car.
 
-    python -m vehicle.controller --car-ip 172.20.10.4 --id 10
-    python -m vehicle.controller --no-car          # dry run, prints motion
+    python -m firmware.controller --car-ip 172.20.10.4 --id 10
+    python -m firmware.controller --no-car          # dry run, prints motion
 
 Architecture (see tracks/TRACK_E.md for the car side):
 
@@ -60,7 +60,7 @@ PRERUN_RATE_EPS = 8.5         # layer-off pre-run, ~35 s to the kill point
 
 FLOOR_SCALE = 1.0 / 250.0     # 820 m route -> 3.28 m; 260 m veer -> 1.04 m
 
-# Floor-calibrated kinematics (see vehicle/DEMO.md calibration procedure).
+# Floor-calibrated kinematics (see firmware/DEMO.md calibration procedure).
 K_V = 0.55                    # m/s at full throttle       -- CALIBRATE
 K_W = 3.5                     # rad/s at full steer        -- CALIBRATE
 THR_BURST = 0.45              # burst-gait throttle, clears TT-motor stall zone
