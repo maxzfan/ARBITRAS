@@ -898,6 +898,39 @@ backend.measurement.continuity`):
 > answering a question no operator asks: what an operator experiences is time
 > under unnecessary restriction, which is what §10 says it intends to measure.
 
+### The comparison is the result, not either threshold
+
+NOMINAL stays at **0.8247** (ruled 2026-09-06). The interesting finding is not
+which value is better — it is that at the state level the two candidates are
+**detection-equivalent**:
+
+| | NOMINAL 0.8247 | NOMINAL 0.80 |
+|---|---|---|
+| carry-off coherent | SURRENDERED, alerts in 1 epoch, never recovers | same |
+| carry-off at the pin | SURRENDERED, alerts in 1 epoch, never recovers | same |
+| clock-domain walk | SURRENDERED, alerts in 2 epochs, never recovers | same |
+| meaconing | DEGRADED, alerts in 0 epochs, never recovers | same |
+| **state-level FSR** | **0.0434** | **0.0125** |
+
+**All four scenarios produce identical arbitrated outcomes at both
+thresholds.** Every attack reaches the same floor state, on the same epoch,
+and none recovers at either value. The entire 3.5x difference between the two
+candidates is **false-surrender cost and nothing else** — it buys no
+detection.
+
+That is a stronger thing to report than either number: it says the detection
+side of this threshold choice is saturated, so the only axis left to trade on
+is continuity. It also means a future re-ruling toward 0.80 would be a pure
+continuity improvement with no detection risk on these four scenarios — worth
+knowing, and deliberately not acted on tonight, because the demo path is
+verified at 0.8247 and re-verifying a working demo is not worth 3 points of
+FSR.
+
+Caveat on the equivalence: it is measured on four scenarios at one onset time.
+"Detection-equivalent" means equivalent on what was run, not in general — a
+slower or weaker attack could sit between the two thresholds and separate
+them.
+
 Neither threshold ever reaches RESTRICTED or SURRENDERED on clean data — the
 clean distribution never comes near 0.50.
 
@@ -990,13 +1023,36 @@ Reported as a distribution over 1,000 Dirichlet draws, never a point (§10):
 | attack detection fraction | 0.978 | 0.989 | 1.000 |
 
 **Weight-sensitive epochs: 96.2%**, against 44.6% in the superseded README.
-That is a worse answer to arXiv 2607.05415 and it should be reported as one.
-The likely reason is mechanical rather than mysterious: feature 2 is now
-load-bearing on the walks (d' 8.59) and silent on the clock-domain attack
-(0.02), so a re-weighting moves the composite much further than it did when
-feature 2 was weak everywhere. A single fixed weight vector is doing more work
-than before, so its choice matters more.
+
+**This is not a regression, and it should not be read as one.** The number rose
+because feature 2 got stronger. Its per-scenario d' is now **8.59 on both
+carry-offs and 0.02 on the clock-domain attack** — the strongest channel in
+the set on one attack and silent on another. A feature with that profile makes
+the composite far more responsive to how it is weighted than the old feature 2
+did, which was weak (0.77) almost everywhere and therefore moved the composite
+very little however it was weighted. Higher weight sensitivity is the
+*arithmetic consequence* of having a channel worth weighting.
+
+The mechanism stated plainly:
+
+> No fixed weight vector can serve both a position walk and a clock-domain
+> attack. The feature that carries one is silent on the other (8.59 vs 0.02),
+> and the same is true in reverse for cross-constellation (7.55 on the walk,
+> 28.85 on meaconing). Any single vector is a compromise whose cost depends on
+> which attack arrives.
+
+**The conclusion, and it is the reason §10 is written the way it is: a fixed
+weight vector is not defensible across scenarios.** That is precisely why §10
+reports a **Dirichlet distribution over weightings** rather than a tuned
+vector, and why the honest headline is the arbitrated FSR *distribution*
+(min/median/max 0.0000 / 0.0344 / 0.2858) rather than the median alone. A
+project that tuned one vector and published its FSR would be reporting the
+best draw from a distribution it had not looked at.
+
+No attempt was made to reduce 96.2%. Reducing it would mean weakening the
+feature that made it rise, and the number is a property of the detector
+worth reporting rather than a defect worth hiding.
 
 At the ruled weights the arbitrated FSR median of 0.0344 sits close to the
 directly measured 0.0434 for the equal-weight vector; the spread is the answer
-to the objection, not the median alone.
+to arXiv 2607.05415, not the median.

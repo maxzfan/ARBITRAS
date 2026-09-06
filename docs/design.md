@@ -374,7 +374,11 @@ Embedded decisions, each defensible: **epoch-weighted** (what an operator cares 
 
 **Maximum adversarial displacement (integrity risk):**
 
-> Greatest position error, in metres, between believed and true position at the epoch immediately preceding the first transition out of `NOMINAL`, swept over injector parameters (walk-off rate, power advantage, spoofed SV subset size).
+> Greatest position error, in metres, between believed and true position at the epoch immediately preceding **the first transition out of `NOMINAL` that occurs within the attack window** (i.e. at or after injection onset), swept over injector parameters (walk-off rate, power advantage, spoofed SV subset size).
+
+*Scope clarified 6 Sep, and the clarification is load-bearing.* The original wording said "the first transition out of `NOMINAL`", full stop. That is only equivalent to the attack response if the clean replay never leaves `NOMINAL` — and at the ruled threshold (`NOMINAL` = 0.8247, the measured clean p1) it leaves `NOMINAL` **eight times on clean data**, the first at 00:26:30, ten hours before onset. Read literally, the definition selects a clean-day epoch and returns a displacement of 0.00 m for a reason that has nothing to do with any attacker.
+
+Both scopings happen to return 0.00 m against the current detector, so no published figure is wrong. They agree by coincidence, and the coincidence is not something to leave load-bearing: it holds only while time-to-alert is shorter than one epoch of walk-off, and it would break silently the moment either the threshold or the detector changed. The window scope is the definition; a first-transition-anywhere number is a different quantity and would need to say so.
 
 **Reported alongside the analytic bound** from §6b, computed from the trusted-subset information matrix at the same epoch. Plot both on one axis. The empirical number says *what our injector achieved*; the analytic bound says *what any attacker could achieve against this geometry*. The second is the stronger claim and does not depend on how many attack variants there was time to run. If the empirical number ever exceeds the bound, the bound is wrong — that check is worth running explicitly and mentioning that it was run.
 

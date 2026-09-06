@@ -6,6 +6,22 @@ import pytest
 from backend.beats import config as cfg
 
 
+@pytest.fixture(autouse=True)
+def _restore_console_thresholds():
+    """cfg.apply_thresholds mutates console.arbiter.states module globals --
+    that is deliberate at runtime (it is the single swap point, design.md §8)
+    and pollution inside a test session. Snapshot and restore, or these tests
+    silently re-threshold console/tests/test_machine.py when both suites run
+    together.
+    """
+    from console.arbiter import states
+    saved = dict(states.THRESHOLDS), states.THRESHOLD_PROVENANCE
+    yield
+    states.THRESHOLDS.clear()
+    states.THRESHOLDS.update(saved[0])
+    states.THRESHOLD_PROVENANCE = saved[1]
+
+
 def test_ruled_thresholds_are_the_resolved_default(monkeypatch):
     """Ruled 2026-09-06 from backend.beats.thresholds."""
     for name in cfg.THRESHOLD_NAMES:
@@ -56,14 +72,10 @@ def test_supplied_thresholds_overwrite_the_stale_provenance_string():
     """A stale measured provenance must not be displayed next to numbers it
     did not produce."""
     from console.arbiter import states
-    before = states.THRESHOLD_PROVENANCE
-    try:
-        t = cfg.Thresholds(0.8, 0.7, 0.6, source="test")
-        cfg.apply_thresholds(t)
-        assert states.THRESHOLD_PROVENANCE == t.provenance
-        assert states.THRESHOLDS[states.TrustState.NOMINAL] == 0.8
-    finally:
-        states.THRESHOLD_PROVENANCE = before
+    t = cfg.Thresholds(0.8, 0.7, 0.6, source="test")
+    cfg.apply_thresholds(t)          # restored by the autouse fixture
+    assert states.THRESHOLD_PROVENANCE == t.provenance
+    assert states.THRESHOLDS[states.TrustState.NOMINAL] == 0.8
 
 
 def test_build_is_deterministic():
