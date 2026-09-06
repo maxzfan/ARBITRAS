@@ -44,6 +44,8 @@ VENDOR_MIME = {
     ".glb": "model/gltf-binary", ".gltf": "model/gltf+json",
     ".wasm": "application/wasm",
 }
+ICON_MIME = {"/favicon.svg": "image/svg+xml", "/favicon.ico": "image/x-icon",
+             "/apple-touch-icon.png": "image/png"}
 DEFAULT_SOURCE = Path("out/demo.jsonl")   # real USN8 data (backend/demo.py); fixture retired
 
 
@@ -271,6 +273,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(home if home.exists() else WEB / "index.html", "text/html; charset=utf-8")
         if u.path in ("/console", "/index.html"):
             return self._file(WEB / "index.html", "text/html; charset=utf-8")
+        if u.path in ICON_MIME:
+            # Without these the browser probes /favicon.ico, is handed the page
+            # instead, and falls back to its own default glyph.
+            return self._file(WEB / u.path[1:], ICON_MIME[u.path])
         if u.path == "/route.js":
             # Our own kinematics module (mirrors console/mission.py); not vendor.
             return self._file(WEB / "route.js", "application/javascript")
@@ -429,8 +435,8 @@ def main():
     p.add_argument("--rate", type=float, default=5.0,
                    help="epochs/sec (design.md §5). 10-20 is the DEVELOPMENT "
                         "range; the demo replays at 5 because the guide dialogue "
-                        "(console/web/DIALOGUE.md) gates the replay and has to "
-                        "be read")
+                        "(console/web/DIALOGUE.md) runs alongside it and has "
+                        "to stay readable at that pace")
     p.add_argument("--tail", action="store_true", help="follow a growing file")
     p.add_argument("--stale-after", type=float, default=2.0, dest="stale_after",
                    help="seconds of silence before an epoch counts as missing "

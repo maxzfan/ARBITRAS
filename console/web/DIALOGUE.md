@@ -222,3 +222,78 @@ Serve `/dialogue.js` in `Handler.do_GET` alongside `/route.js`.
 
 The `explanation_verified === false` banner repoints at
 `dialogue.verified === false`.
+
+---
+
+# Revision 2 -- decided with the user, 2026-09-06
+
+The gate is removed. Everything above describing `gate` / `gate_reason` /
+`onDone` and a held replay is SUPERSEDED by this section.
+
+**Why.** Holding the epoch queue froze the vehicle on screen, and under
+`overlays/takeover.js` a human (`T`, take) or the scripted stand-in (`S`,
+simulate) is driving -- freezing the replay under a driver is wrong, and
+nobody at the controls can stop to click a text box.
+
+## The model
+
+- **The replay never pauses.** The vehicle keeps moving through every line.
+- **Lines auto-advance** on a dwell timer. Clicking (or Space) skips to the
+  next line early; it is a fast-forward, never a requirement.
+- **Checkpoints.** Dialogue is anchored at checkpoints and the box shows
+  `CHECKPOINT n / N`, so the operator can see how much story is left.
+- **Alignment.** The script is paced so the last line lands at or before the
+  END OF THE STREAM. Stream end -- not route end: in LOGISTICS the route
+  completes at epoch 276 of 510, in COMBAT at 311 of 510, and CASEVAC's route
+  does not complete inside its 300-epoch stream at all. The replay ends when
+  the stream ends, so that is the clock the operator is on.
+
+## Checkpoints, measured
+
+Waypoint epochs are `arc_length(prop) / speed_m_per_epoch`, computed from the
+registry (props lie exactly on the route; measured offset 0.0 m):
+
+| mission | stream | waypoint checkpoints (epoch · label) |
+|---|---|---|
+| RECON | 510 | 0 PATROL BASE · 75 OP-1 · 122 OP-2 · 152 OP KESTREL · 320 OP-3 |
+| LOGISTICS | 510 | 0 FOB · 140 PL AMBER · 276 RP KILO |
+| CASEVAC | 300 | 0 ROLE 1 · 187 CCP · 191 CASUALTY |
+| COMBAT | 510 | 0 LD · 60 PL AMBER · 188 PL RED · 311 OBJ HAWK |
+
+Three to five waypoints cannot carry 17-19 lines, so a checkpoint is a
+waypoint **or** a measured event (attack onset, trust-state change,
+credential change). Waypoint checkpoints carry the prop's label; event
+checkpoints are labelled by what happened. **An event checkpoint may not be
+moved to a waypoint**: its `path` claims are verified against the epoch it is
+emitted on, and the same number is not true ten epochs later.
+
+## `payload.dialogue`, revision 2
+
+```json
+{
+  "lines": [{"speaker":"ARBITRAS","text":"...","claims":[...],"tone":"alert",
+             "at":"12:30:00","epoch":60}],
+  "checkpoint": {"index": 3, "total": 11, "label": "OP-1", "kind": "waypoint"},
+  "verified": true,
+  "failures": []
+}
+```
+
+`gate` and `gate_reason` are gone. `kind` is `waypoint` | `event` | `intro` |
+`end`. **Every line carries `at` (UTC) and `epoch`** -- the epoch its claims
+were verified against. The box prints it. This closes the drift the held line
+had before: a line saying "confidence 0.91" stayed on screen while the strip
+moved to 0.92, with nothing on screen saying the number was from an earlier
+epoch. Now it says so.
+
+## Dwell
+
+The box holds each line `max(MIN_DWELL, fair share of the gap to the next
+checkpoint)`. `MIN_DWELL` is a readability floor, not a pace: at 5 epochs/s a
+60-epoch gap is 12 s, and three lines in it get 4 s each. Lines never queue
+past the end of the stream -- if a checkpoint's lines cannot all be shown
+before the next one arrives, they are shown faster, never dropped.
+
+Budget check at 5 epochs/s: RECON 19 lines over 510 epochs = 102 s of replay;
+LOGISTICS 17 over 510 = 102 s. At a 4 s dwell that is 76 s and 68 s of
+dialogue -- both finish inside the run with slack.

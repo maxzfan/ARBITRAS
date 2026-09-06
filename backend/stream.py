@@ -11,7 +11,7 @@ Design points, all from §5:
 
 - **Rate.** File time is 30 s/epoch. §5 gives 10-20 epochs/sec as the
   DEVELOPMENT range; the demo replays at 5 (§5, §11b: the guide dialogue
-  gates the replay and has to be read).
+  runs alongside it and has to stay readable at that pace).
   Default 15. `--rate` changes it live-side only — record timestamps are file
   time and are never rewritten.
 - **Hard reset under five seconds (§11a).** A fresh invocation truncates the
