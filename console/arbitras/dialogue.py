@@ -1,19 +1,20 @@
 """The ARBITRAS guide: one `Decision` -> the lines the guide speaks.
 
-`console/web/DIALOGUE.md` is the contract for this module -- §1 fixes the
-`payload.dialogue` shape, §2 fixes the gate reasons and the firing rules.
-design.md §14 ("Explanation layer, templated first", and the 22:30 explanation
-verifier) is the rule that governs every number in it.
+`console/web/DIALOGUE.md` is the contract for this module. **Revision 2 at the
+bottom of that file governs**: the gate is gone, the replay never pauses, and
+dialogue is anchored at CHECKPOINTS the operator can count down. design.md §14
+("Explanation layer, templated first", and the 22:30 explanation verifier) is
+still the rule that governs every number in it.
 
 This is the same job `console/arbitras/explain.py` does, said differently. The
 explanation layer emits one headline and one dense detail paragraph; the guide
 emits the same mechanism one thought at a time, in the order an operator can
-follow, and holds the replay while it does. `explain.py` stays on the wire --
-`test_server.py` and the verification banner read it -- and nothing here
-replaces it. Both are console-side: nothing in `backend/` produces or consumes
-`payload.dialogue`, and it is NOT part of the design.md §5 contract.
+follow. `explain.py` stays on the wire -- `test_server.py` and the verification
+banner read it -- and nothing here replaces it. Both are console-side: nothing
+in `backend/` produces or consumes `payload.dialogue`, and it is NOT part of
+the design.md §5 contract.
 
-Three rules from DIALOGUE.md govern every string below:
+Four rules from DIALOGUE.md govern every string below:
 
   - Operator language, not builder language. "The vehicle stops accepting
     waypoints," never "the state machine transitions to RESTRICTED."
@@ -24,9 +25,48 @@ Three rules from DIALOGUE.md govern every string below:
     a `path` (dug out of this epoch and compared before display) or a `source`
     (a named scenario parameter). `verify_lines()` enforces both halves and
     REPLACES any line that fails; it does not merely flag it.
+  - **Every line carries the epoch its claims were verified against** (`at`,
+    `epoch`). The box prints them. Before revision 2 a line reading
+    "confidence 0.91" stayed on screen while the strip moved to 0.92 with
+    nothing saying the number was older than the instrument beside it.
+
+## The checkpoint schedule, and why `total` is honest
+
+`index / total` is only worth showing if `total` is known before the first line
+and is still true at the last one. So the schedule is CLOSED and computed in
+`__init__`, from the mission alone:
+
+    1  intro          the first epoch of the connection
+    n  waypoints      the epoch the vehicle ARRIVES at each prop -- accrued
+                      progress (speed x the gain for the arbitrated state)
+                      first reaching the prop's arc length along the route
+       events         one per `mission["guide"]` entry, on its pinned epoch
+    1  end            `Guide.finish()`
+
+Slots sharing an epoch are one checkpoint (the epoch-0 waypoint and the
+epoch-0 script entry are absorbed by the intro). `index` is the slot's position
+in that schedule, not a running counter, so indices are strictly increasing,
+never exceed `total`, and `total` is reached exactly at `end`.
+
+Unscripted trust-state and credential changes are the one thing a mission
+cannot schedule. They are spoken IMMEDIATELY, on their own epoch, with
+`checkpoint: null` -- an interjection, not a checkpoint. That is the whole
+trick: an interjection cannot inflate the denominator, so the count the
+operator is reading is never revised mid-run. On the four mission streams there
+are one to four of them, all recovery wobbles and the PENDING blip; the
+scripted checkpoints carry the story.
+
+An event checkpoint may NOT be moved off its epoch (DIALOGUE.md revision 2):
+its `path` claims are verified against the epoch of emission and the same
+number is not true ten epochs later. So a scripted event whose claims do not
+hold at the epoch it comes due is not spoken at all -- silence, never a number
+from somewhere else.
 """
 from __future__ import annotations
 
+import json
+import math
+import os
 import re
 from typing import Any, Optional
 
@@ -41,14 +81,14 @@ from .explain import (
     SALIENCE_FLOOR,
     _dig,
 )
-from .machine import Decision
+from .machine import Arbitras, Decision
 from .states import RECOVERY_EPOCHS, TrustState
 
 SPEAKER = "ARBITRAS"
 
-# DIALOGUE.md §1: 0-3 lines per gate, empty on most epochs.
+# DIALOGUE.md §1: 0-3 lines per checkpoint, empty on most epochs.
 MAX_LINES = 3
-# The opening gate carries one more. The briefing is two thoughts and a
+# The opening checkpoint carries one more. The briefing is two thoughts and a
 # mission's own opener is usually two; at a cap of three, one of the four is
 # dropped in silence, and the line that loses is whichever sorts last.
 INTRO_MAX_LINES = 4
@@ -56,9 +96,8 @@ INTRO_MAX_LINES = 4
 # DIALOGUE.md §1: `tone` only colours the box.
 TONES = frozenset({"calm", "alert", "bad", "good", "act"})
 
-# DIALOGUE.md §2, in the order they are merged into one gate. `beat` first,
-# EXCEPT on the opening gate -- see `step`.
-GATE_REASONS = ("beat", "intro", "state", "credential", "end")
+# DIALOGUE.md revision 2: `checkpoint.kind`.
+KINDS = ("intro", "waypoint", "event", "end")
 
 STATE_TONE = {
     TrustState.NOMINAL: "calm",
@@ -95,6 +134,28 @@ CREDENTIAL_TONE = {
     "VALID": "good", "PENDING": "alert", "UNVERIFIED": "alert",
     "EXPIRED": "bad", "REVOKED": "bad",
 }
+
+# Checkpoint labels for the things a mission cannot name in advance. Operator
+# language (DIALOGUE.md invariant 3): what the vehicle does, not what the state
+# machine is called.
+STATE_LABEL_DOWN = {
+    TrustState.DEGRADED: "AUTHORITY REDUCED",
+    TrustState.RESTRICTED: "CURRENT LEG ONLY",
+    TrustState.SURRENDERED: "OPERATOR IN CONTROL",
+}
+STATE_LABEL_UP = "AUTHORITY RESTORED"
+STATE_LABEL_FULL = "FULL AUTHORITY"
+CREDENTIAL_LABEL = {
+    "VALID": "AUTHORISATION VALID",
+    "PENDING": "AWAITING KEY DISCLOSURE",
+    "UNVERIFIED": "AUTHORISATION UNVERIFIED",
+    "EXPIRED": "AUTHORISATION LAPSED",
+    "REVOKED": "AUTHORISATION REVOKED",
+}
+INTRO_LABEL = "BRIEFING"
+END_LABEL = "END OF REPLAY"
+EVENT_LABEL = "MISSION BEAT"
+LABEL_MAX = 32
 
 # What replaces a line whose claim did not check out. Deliberately carries no
 # numeral of its own, so the replacement can never itself fail verification.
@@ -147,7 +208,7 @@ def uncovered(line: dict) -> set:
 def _borrowed(text: str, source: str) -> list:
     """`source` claims for numerals inside prose the guide did not write.
 
-    Mission `behaviour` sentences and titles live in
+    Mission `behaviour` sentences, titles and prop labels live in
     `console/missions/__init__.py`; they are scenario parameters, which is
     exactly what DIALOGUE.md §1 defines a `source` claim to be. Naming the
     field keeps §14 honest without pretending a mission sentence is a
@@ -169,6 +230,165 @@ def _family(svs) -> str:
     if len(prefixes) == 1:
         return CONSTELLATION.get(prefixes.pop(), "")
     return ""
+
+
+def clock(timestamp: Any) -> Optional[str]:
+    """'2026-08-20T12:30:00Z' -> '12:30:00'. The `at` every line carries."""
+    if not timestamp:
+        return None
+    s = str(timestamp)
+    if "T" in s:
+        s = s.split("T", 1)[1]
+    for cut in ("Z", "+", "."):
+        if cut in s:
+            s = s.split(cut, 1)[0]
+    return s or None
+
+
+def _short(label: Any) -> str:
+    """Prop label -> the head an operator reads. 'FOB · SUPPLY POINT' -> 'FOB'."""
+    s = str(label or "").split("·")[0].strip()
+    return s[:LABEL_MAX].strip()
+
+
+# ------------------------------------------------ waypoints along the route
+
+def route_points(mission: Optional[dict]) -> list:
+    """The mission route as [(e, n)], from either the wire or registry shape."""
+    route = (mission or {}).get("route")
+    if route is None:
+        route = (mission or {}).get("route_enu") or ()
+    out: list = []
+    for p in route:
+        try:
+            if isinstance(p, dict):
+                out.append((float(p["e"]), float(p["n"])))
+            else:
+                out.append((float(p[0]), float(p[1])))
+        except (TypeError, ValueError, KeyError, IndexError):
+            return []
+    return out
+
+
+def project_on_route(route: list, point) -> tuple:
+    """Nearest point on the polyline. -> (arc length in m, offset in m).
+
+    The arc length is the distance the vehicle has to cover to reach the prop,
+    which is what `waypoint_checkpoints` turns into an epoch. The offset is the
+    check on that -- the contract's table is quoted for props lying exactly on
+    the route, and a prop that does not lie on it is not a waypoint on it.
+    """
+    best = (float("inf"), 0.0)
+    acc = 0.0
+    pe, pn = float(point[0]), float(point[1])
+    for (e0, n0), (e1, n1) in zip(route, route[1:]):
+        de, dn = e1 - e0, n1 - n0
+        seg = math.hypot(de, dn)
+        if seg == 0.0:
+            t = 0.0
+        else:
+            t = min(max(((pe - e0) * de + (pn - n0) * dn) / (seg * seg), 0.0), 1.0)
+        qe, qn = e0 + t * de, n0 + t * dn
+        off = math.hypot(pe - qe, pn - qn)
+        if off < best[0]:
+            best = (off, acc + t * seg)
+        acc += seg
+    return best[1], best[0]
+
+
+def mission_states(mission: Optional[dict]) -> Optional[list]:
+    """The trust state at every epoch of the mission's own stream, or None.
+
+    DIALOGUE.md revision 2 (CORRECTED): a waypoint is where the vehicle IS, and
+    the vehicle only moves at `speed_m_per_epoch * gain[state]` -- it halts in
+    SURRENDERED. So arrival cannot be read off the route alone; the stream has
+    to be replayed through `Arbitras` for the per-epoch gain. ~11 ms for a
+    510-epoch mission, once per connection.
+
+    None when the stream is not on this machine, which is not an error: the
+    caller falls back to the unimpeded schedule.
+    """
+    path = (mission or {}).get("stream")
+    if not path or not os.path.exists(path):
+        return None
+    arb = Arbitras()
+    states: list = []
+    try:
+        with open(path) as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                states.append(arb.step(json.loads(raw)).state.name)
+    except (OSError, ValueError):
+        return None
+    return states or None
+
+
+def waypoint_checkpoints(mission: Optional[dict],
+                         states: Optional[list] = None) -> list:
+    """Every prop, as a waypoint checkpoint. -> [{epoch, label, offset_m}].
+
+    DIALOGUE.md revision 2, "Checkpoints, measured". With `states` -- the
+    arbitrated state per epoch, from `mission_states` -- the epoch is ARRIVAL:
+    the first epoch at which accrued progress reaches the prop's arc length,
+    accrued exactly as index.html does it (`s += speed * gain[state]`, and
+    epoch 0 is the origin). That reproduces the contract's corrected table:
+    RECON 0/100/147/176/344, LOGISTICS 0/197/333, CASEVAC 0/275/280,
+    COMBAT 0/62/209/332.
+
+    Without `states` it is the UNIMPEDED schedule, `arc_length / speed` --
+    where the vehicle would be if nothing ever happened to it (RECON
+    0/75/122/152/320, LOGISTICS 0/140/276, CASEVAC 0/187/191,
+    COMBAT 0/60/188/311). That is the fallback when the stream is not
+    available to replay, and it is the reference column on the contract.
+
+    A prop the vehicle never reaches inside the stream is not a checkpoint: it
+    never happens, and `total` may not count it.
+    """
+    mission = mission or {}
+    route = route_points(mission)
+    try:
+        speed = float(mission.get("speed_m_per_epoch") or 0.0)
+    except (TypeError, ValueError):
+        speed = 0.0
+    if len(route) < 2 or speed <= 0.0:
+        return []
+
+    arcs: list = []
+    for prop in mission.get("props") or ():
+        try:
+            s, off = project_on_route(route, (prop["e"], prop["n"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        arcs.append((s, off, _short(prop.get("label"))))
+
+    if states is None:
+        found = [(int(round(s / speed)), off, label) for s, off, label in arcs]
+    else:
+        gain = mission.get("gain") or {}
+        arrival: dict = {}
+        travelled = 0.0
+        for k, state in enumerate(states):
+            if k:
+                try:
+                    travelled += speed * float(gain.get(state, 1.0))
+                except (TypeError, ValueError):
+                    travelled += speed
+            for i, (s, _off, _label) in enumerate(arcs):
+                if i not in arrival and travelled >= s - 1e-9:
+                    arrival[i] = k
+        found = [(arrival[i], off, label)
+                 for i, (_s, off, label) in enumerate(arcs) if i in arrival]
+
+    out: list = []
+    seen: set = set()
+    for epoch, off, label in sorted(found, key=lambda w: w[0]):
+        if epoch in seen:
+            continue                      # two props on one epoch is one arrival
+        seen.add(epoch)
+        out.append({"epoch": epoch, "label": label, "offset_m": round(off, 3)})
+    return out
 
 
 # ------------------------------------------------------------- verification
@@ -202,6 +422,30 @@ def _check_path(claim: dict, epoch: Optional[dict]) -> list:
     return []
 
 
+def line_failures(line: dict, epoch: Optional[dict]) -> list:
+    """design.md §14 for one line. Empty list means it may be shown."""
+    problems: list = []
+    for c in line.get("claims") or []:
+        if "path" in c:
+            problems.extend(_check_path(c, epoch))
+        elif not c.get("source"):
+            problems.append(f"claim {c.get('text')!r} carries neither path nor source")
+    missing = uncovered(line)
+    if missing:
+        problems.append("unsourced numerals in text: " + ", ".join(sorted(missing)))
+    return problems
+
+
+def claims_hold(lines: list, epoch: Optional[dict]) -> bool:
+    """Would every one of these lines survive verification against this epoch?
+
+    Asked BEFORE an event checkpoint is emitted. A scripted event may not be
+    moved off its epoch (DIALOGUE.md revision 2), so one whose numbers do not
+    hold where it comes due is not spoken at all.
+    """
+    return not any(line_failures(ln, epoch) for ln in lines)
+
+
 def verify_lines(lines: list, epoch: Optional[dict]) -> tuple:
     """design.md §14, applied line by line. -> (lines, ok, failures).
 
@@ -216,21 +460,13 @@ def verify_lines(lines: list, epoch: Optional[dict]) -> tuple:
     source is real -- but they must still name one.
 
     A failing line is REPLACED with the fallback, not hidden and not shown.
-    The gate still fires: the operator learns that a number was withheld,
-    which is itself the §14 behaviour worth demonstrating.
+    The checkpoint still speaks: the operator learns that a number was
+    withheld, which is itself the §14 behaviour worth demonstrating.
     """
     out: list = []
     failures: list = []
     for i, line in enumerate(lines):
-        problems: list = []
-        for c in line.get("claims") or []:
-            if "path" in c:
-                problems.extend(_check_path(c, epoch))
-            elif not c.get("source"):
-                problems.append(f"claim {c.get('text')!r} carries neither path nor source")
-        missing = uncovered(line)
-        if missing:
-            problems.append("unsourced numerals in text: " + ", ".join(sorted(missing)))
+        problems = line_failures(line, epoch)
         if problems:
             failures.extend(f"line {i}: {p}" for p in problems)
             out.append(_line(FALLBACK_TEXT, "alert"))
@@ -239,21 +475,29 @@ def verify_lines(lines: list, epoch: Optional[dict]) -> tuple:
     return out, (not failures), failures
 
 
-def _payload(lines: list, reason: Optional[str], epoch: Optional[dict]) -> dict:
-    lines, ok, failures = verify_lines(lines, epoch)
-    return {
-        "lines": lines,
-        "gate": bool(lines),
-        "gate_reason": reason if lines else None,
-        "verified": ok,
-        "failures": failures,
-    }
+def _stamp(lines: list, at: Optional[str], index: Optional[int]) -> list:
+    """DIALOGUE.md revision 2: every line carries the epoch it was checked at."""
+    return [dict(ln, at=at, epoch=index) for ln in lines]
+
+
+def _gist(text: str) -> str:
+    """A line's identity for repetition purposes: lowercase words only.
+
+    Punctuation and digits are dropped so that a generated line and a scripted
+    one saying the same thing in the same words collide even when one of them
+    spells a threshold out and the other quotes it.
+    """
+    return " ".join(re.findall(r"[a-z]+", (text or "").lower()))
+
+
+def _checkpoint(index: int, total: int, label: str, kind: str) -> dict:
+    return {"index": index, "total": total,
+            "label": str(label), "kind": kind if kind in KINDS else "event"}
 
 
 def silent() -> dict:
-    """The free-running epoch: no gate, nothing to say. Most epochs are this."""
-    return {"lines": [], "gate": False, "gate_reason": None,
-            "verified": True, "failures": []}
+    """The free-running epoch: nothing to say. Most epochs are this."""
+    return {"lines": [], "checkpoint": None, "verified": True, "failures": []}
 
 
 # -------------------------------------------------------------------- guide
@@ -261,100 +505,285 @@ def silent() -> dict:
 class Guide:
     """Stateful across epochs. One instance per SSE connection, like `Arbitras`.
 
-    A browser reload therefore replays the intro and every beat from the top,
-    which is the hard reset design.md §11a asks the console to have.
+    A browser reload therefore replays the intro and every checkpoint from the
+    top, which is the hard reset design.md §11a asks the console to have.
     """
 
     def __init__(self, mission: Optional[dict] = None) -> None:
         self.mission = mission or {}
-        # DIALOGUE.md §3 is being added to console/missions/__init__.py
-        # separately; a mission without a `guide` is not an error, it is a
+        # DIALOGUE.md §3: a mission without a `guide` is not an error, it is a
         # mission whose script has not been written yet.
         self._script = list(self.mission.get("guide") or [])
         self._behaviour = dict(self.mission.get("behaviour") or {})
-        self._fired: set = set()          # script indices already spoken
+        self._captions = {}
+        for b in self.mission.get("beats") or ():
+            try:
+                self._captions[int(b["epoch"])] = str(b.get("caption") or "")
+            except (TypeError, ValueError, KeyError):
+                continue
+        # Arrival, not the unimpeded schedule: DIALOGUE.md revision 2 as
+        # corrected. Falls back to `arc / speed` when the stream is not here.
+        self._states = mission_states(self.mission)
+        self.schedule = self._build_schedule()
+        self.total = len(self.schedule)
+        self._cursor = 0                  # next schedule slot to consider
         self._started = False
         self._finished = False
+        self._said: set = set()   # gists already spoken; see _fresh()
         self._last_credential: Optional[str] = None
+        self._last_at: Optional[str] = None
+        self._last_index: Optional[int] = None
+
+    # ------------------------------------------------------- the schedule
+
+    def _build_schedule(self) -> list:
+        """Every checkpoint this mission can produce, in order, known up front.
+
+        Waypoints and script entries that fall on one epoch are ONE checkpoint;
+        anything on the opening epoch is absorbed by the intro. That is why
+        `total` is exact rather than an upper bound.
+        """
+        slots: dict = {}
+        for w in waypoint_checkpoints(self.mission, self._states):
+            slots[w["epoch"]] = {"epoch": w["epoch"], "kind": "waypoint",
+                                 "label": w["label"], "prop": w["label"],
+                                 "entry": None}
+        for entry in self._script:
+            try:
+                at = int(entry.get("epoch"))
+            except (TypeError, ValueError):
+                continue                  # malformed entry: never scheduled
+            slot = slots.setdefault(at, {"epoch": at, "kind": "event",
+                                         "label": None, "prop": None,
+                                         "entry": None})
+            # A script entry does NOT demote the slot. When the entry lands on
+            # a waypoint the checkpoint IS that waypoint -- the vehicle is at
+            # the place -- and the mission says so with its own `kind`. Only an
+            # entry with nowhere to belong falls back to "event".
+            declared = entry.get("kind")
+            if declared in KINDS:
+                slot["kind"] = declared
+            elif slot["kind"] not in ("waypoint", "intro"):
+                slot["kind"] = "event"
+            slot["entry"] = entry
+            if entry.get("label"):
+                slot["label"] = _short(entry["label"])
+
+        ordered = [slots[e] for e in sorted(slots)]
+        # The opening epoch is the intro's; whatever else sits on it rides along.
+        intro = {"epoch": 0, "kind": "intro", "label": None, "prop": None,
+                 "entry": None}
+        if ordered and ordered[0]["epoch"] <= 0:
+            first = ordered.pop(0)
+            intro["entry"] = first["entry"]
+            intro["label"] = first["label"]
+            intro["prop"] = first["prop"]
+        intro["label"] = intro["label"] or _short(self.mission.get("title")) or INTRO_LABEL
+        end = {"epoch": None, "kind": "end", "label": END_LABEL, "prop": None,
+               "entry": None}
+        return [intro] + ordered + [end]
+
+    def checkpoints(self) -> list:
+        """The schedule as the operator will count it. Diagnostics and tests."""
+        return [{"index": i + 1, "total": self.total, "epoch": s["epoch"],
+                 "kind": s["kind"], "label": s["label"]}
+                for i, s in enumerate(self.schedule)]
 
     # ------------------------------------------------------------ the tick
 
     def step(self, d: Decision, epoch: Optional[dict]) -> dict:
         """One epoch -> `payload.dialogue`. Empty on most epochs."""
-        beat = self._beat_lines(d)
-        intro = [] if self._started else self._intro_lines()
+        at = clock(epoch.get("timestamp") if isinstance(epoch, dict) else d.timestamp)
+        self._last_at, self._last_index = at, d.epoch_index
+
         state = self._state_lines(d) if d.changed else []
-        # Reads AND advances the credential memory, so it runs exactly once
-        # per epoch and before `_started` is set.
+        # Reads AND advances the credential memory, so it runs exactly once per
+        # epoch and before `_started` is set.
         credential = self._credential_lines(d)
         self._started = True
 
-        # `beat` leads every gate but the first. On the opening gate the guide
-        # has to say what it is before it says what the mission is: a reader
-        # meeting this box for the first time is the whole reason it exists,
-        # and an unintroduced narrator opening on "Full sky, confidence 0.91"
-        # is the complexity the box was built to remove.
-        groups = (("beat", beat), ("intro", intro),
-                  ("state", state), ("credential", credential))
-        if intro:
-            groups = (("intro", intro), ("beat", beat),
-                      ("state", state), ("credential", credential))
+        slot, index = self._due(d, epoch)
+        if slot is None:
+            # No checkpoint here. A trust-state or credential change still has
+            # to be spoken on its own epoch -- but it is an interjection, not a
+            # checkpoint, so it never moves the count the operator is reading.
+            lines = self._fresh(state + credential)[:MAX_LINES]
+            # Everything here had already been said: an interjection with
+            # nothing new in it is silence, not an empty box.
+            if not lines:
+                return silent()
+            return self._payload(lines, None, epoch, d.epoch_index, at)
 
-        lines: list = []
-        origins: list = []
-        for reason, group in groups:
-            for ln in group:
-                lines.append(ln)
-                origins.append(reason)
-
-        # DIALOGUE.md §2: several reasons merge into ONE gate, capped at three
-        # lines. The reason reported is the origin of the first line, which is
-        # what the box's little label is naming.
-        cap = INTRO_MAX_LINES if intro else MAX_LINES
-        lines, origins = lines[:cap], origins[:cap]
-        return _payload(lines, origins[0] if origins else None, epoch)
+        cap = INTRO_MAX_LINES if slot["kind"] == "intro" else MAX_LINES
+        lines = self._fresh(self._slot_lines(slot, d, epoch)
+                            + state + credential)[:cap]
+        # A checkpoint whose every line was already spoken is not worth
+        # stopping on; the slot is spent either way, as an unverified one is.
+        if not lines:
+            return silent()
+        cp = _checkpoint(index, self.total,
+                         self._label(slot, d, credential), slot["kind"])
+        return self._payload(lines, cp, epoch, d.epoch_index, at)
 
     def finish(self) -> dict:
         """The caller signals the stream ended. Idempotent."""
         if self._finished:
             return silent()
         self._finished = True
+        self._cursor = len(self.schedule)
         # There is no epoch to dig against at the end of a stream, so the end
-        # lines carry no `path` claim -- and therefore no numeral at all.
-        return _payload(self._end_lines(), "end", None)
+        # lines carry no `path` claim -- and therefore no numeral at all. They
+        # are stamped with the last epoch the guide actually saw, which is when
+        # it is speaking.
+        cp = _checkpoint(self.total, self.total, END_LABEL, "end")
+        return self._payload(self._end_lines(), cp, None,
+                             self._last_index, self._last_at)
 
-    # --------------------------------------------------------------- beats
+    def _fresh(self, lines: list) -> list:
+        """Drop lines this run has already spoken.
 
-    def _beat_lines(self, d: Decision) -> list:
-        """The earliest unspoken script entry this epoch has reached.
-
-        `>=` rather than `==`, and one entry per epoch: a beat whose exact
-        index is skipped (a stale epoch, a stream that starts late) is still
-        delivered, and a backlog is paid off one gate at a time instead of
-        arriving as a wall of text. On a stream whose indices line up -- every
-        stream we ship -- this is identical to an exact match.
+        The guide generates a line for a condition (recovery gating, the
+        behaviour sentence) AND a mission may script one for the same moment in
+        nearly the same words -- RECON epoch 84 and the generated recovery line
+        were word-for-word the same sentence 5 s apart on screen. Whichever
+        arrives first wins; the duplicate is dropped rather than deduplicated
+        into a merged line, because the two are the same thought and one saying
+        of it is the correct number.
         """
-        for i, entry in enumerate(self._script):
-            if i in self._fired:
+        out = []
+        for ln in lines:
+            g = _gist(ln.get("text"))
+            if not g or g in self._said:
                 continue
-            try:
-                at = int(entry.get("epoch"))
-            except (TypeError, ValueError):
-                self._fired.add(i)          # malformed entry: never fires
+            self._said.add(g)
+            out.append(ln)
+        return out
+
+    def _payload(self, lines: list, checkpoint: Optional[dict],
+                 epoch: Optional[dict], index: Optional[int],
+                 at: Optional[str]) -> dict:
+        lines, ok, failures = verify_lines(lines, epoch)
+        if not lines:
+            return silent()
+        return {
+            "lines": _stamp(lines, at, index),
+            "checkpoint": checkpoint,
+            "verified": ok,
+            "failures": failures,
+        }
+
+    # ----------------------------------------------------------- schedule
+
+    def _due(self, d: Decision, epoch: Optional[dict]) -> tuple:
+        """The checkpoint this epoch has reached, or (None, None).
+
+        Slots fire in schedule order and at most one per epoch, so `index` is
+        strictly increasing. A scripted event whose claims do not hold HERE is
+        abandoned rather than carried forward: DIALOGUE.md revision 2 forbids
+        moving an event checkpoint, and a stale figure is exactly what §14 is
+        for.
+        """
+        while self._cursor < len(self.schedule) - 1:      # `end` is finish()'s
+            slot = self.schedule[self._cursor]
+            if slot["kind"] != "intro" and d.epoch_index < (slot["epoch"] or 0):
+                return None, None                          # still in the future
+            index = self._cursor + 1
+            self._cursor += 1
+            if slot["kind"] == "intro":
+                return slot, index
+            entry = slot["entry"]
+            if entry is not None and not claims_hold(self._entry_lines(entry), epoch):
+                # An event that cannot be told truthfully here is not told. If
+                # the slot is also a waypoint it still speaks, as a waypoint.
+                if slot["prop"]:
+                    return dict(slot, entry=None, kind="waypoint"), index
                 continue
-            if d.epoch_index < at:
-                continue
-            self._fired.add(i)
-            lines = [self._script_line(ln) for ln in (entry.get("lines") or [])]
-            return lines[:MAX_LINES]
-        return []
+            return slot, index
+        return None, None
+
+    def _slot_lines(self, slot: dict, d: Decision, epoch: Optional[dict]) -> list:
+        """What this checkpoint has to say, before state and credential lines."""
+        lines: list = []
+        if slot["kind"] == "intro":
+            lines.extend(self._intro_lines())
+        if slot["entry"] is not None:
+            # The script speaks for the epoch it was pinned to. `_due` has
+            # already refused any entry whose claims do not hold here; on the
+            # intro, which is not an event checkpoint, refuse them here so the
+            # briefing itself still opens.
+            script = self._entry_lines(slot["entry"])
+            if not claims_hold(script, epoch):
+                script = []
+            lines.extend(script)
+        elif slot["prop"]:
+            lines.extend(self._waypoint_lines(slot, d, epoch))
+        return lines
 
     @staticmethod
-    def _script_line(ln: dict) -> dict:
-        """A DIALOGUE.md §3 script line, normalised into the §1 wire shape."""
-        return _line(str(ln.get("text") or ""),
-                     ln.get("tone") or "calm",
-                     [dict(c) for c in (ln.get("claims") or [])])
+    def _entry_lines(entry: dict) -> list:
+        """A DIALOGUE.md §3 script entry, normalised into the wire shape."""
+        return [_line(str(ln.get("text") or ""),
+                      ln.get("tone") or "calm",
+                      [dict(c) for c in (ln.get("claims") or [])])
+                for ln in (entry.get("lines") or [])][:MAX_LINES]
+
+    def _label(self, slot: dict, d: Decision, credential: list) -> str:
+        """What the box calls this checkpoint.
+
+        A place if it is one, then what actually happened, then the mission's
+        own caption for the beat. Never a state name: DIALOGUE.md invariant 3
+        is operator language, and "RESTRICTED" is builder language.
+        """
+        if slot["kind"] == "intro":
+            return slot["label"] or INTRO_LABEL
+        if slot["label"]:
+            return slot["label"]
+        if d.changed:
+            if d.state > d.previous_state:
+                return (STATE_LABEL_FULL if d.state is TrustState.NOMINAL
+                        else STATE_LABEL_UP)
+            return STATE_LABEL_DOWN.get(d.state, "AUTHORITY REDUCED")
+        if credential and d.credential_status in CREDENTIAL_LABEL:
+            return CREDENTIAL_LABEL[d.credential_status]
+        return self._caption_label(slot["epoch"]) or EVENT_LABEL
+
+    def _caption_label(self, epoch_index: Optional[int]) -> Optional[str]:
+        """The mission's builder-facing beat caption, trimmed to a label."""
+        caption = self._captions.get(epoch_index)
+        if not caption:
+            return None
+        head = re.split(r"[:.;]", caption, 1)[0].strip()
+        if not head or head.upper() in {s.name for s in TrustState}:
+            return None                   # builder language; not for the screen
+        # Borrowed prose keeps the case its author gave it, exactly as a
+        # mission's own checkpoint labels do. Casing is the box's business.
+        return head[:LABEL_MAX].strip()
+
+    # ----------------------------------------------------------- waypoints
+
+    def _waypoint_lines(self, slot: dict, d: Decision,
+                        epoch: Optional[dict]) -> list:
+        """Arrival at a prop, and the state of trust at the moment of arrival."""
+        label = slot["prop"]
+        if not label:
+            return []
+        claims = _borrowed(label, "mission prop label, console/missions/__init__.py")
+        text = f"The vehicle is at {label}."
+        if epoch is not None and d.confidence is not None:
+            text += f" Position confidence {d.confidence:.2f}"
+            claims.append(_path(f"{d.confidence:.2f}", d.confidence, "confidence"))
+            excluded = list((d.geometry or {}).get("excluded_sv") or [])
+            if excluded:
+                n = len(excluded)
+                text += (f", with {n} satellite{'s' if n != 1 else ''} outside the "
+                         "trusted set.")
+                claims.append(_path(str(n), n, "geometry.excluded_sv"))
+            else:
+                text += ", and the full sky is trusted."
+        lines = [_line(text, STATE_TONE[d.state], claims)]
+        if d.state is not TrustState.NOMINAL:
+            lines.append(self._behaviour_line(d))
+        return lines
 
     # --------------------------------------------------------------- intro
 
@@ -376,8 +805,8 @@ class Guide:
         return [
             first,
             _line(
-                "Every number I say is checked against the epoch it came from. If one cannot be "
-                "sourced I withhold the line rather than show it.",
+                "Every number I say is checked against the epoch it came from, and stamped with "
+                "it. If one cannot be sourced I withhold the line rather than show it.",
                 "calm",
             ),
         ]
@@ -388,8 +817,9 @@ class Guide:
         """Why authority moved, what the vehicle does now, and what it costs.
 
         Three thoughts in the order an operator asks them. The cap means a
-        beat on the same epoch can crowd the third out; the beat is telling
-        the same story in the mission's own words, so that is the right loss.
+        checkpoint on the same epoch can crowd the third out; the script is
+        telling the same story in the mission's own words, so that is the
+        right loss.
         """
         lines = [self._cause_line(d)]
         lines.append(self._behaviour_line(d))

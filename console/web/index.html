@@ -1945,10 +1945,12 @@ function App() {
   const [envStatus, setEnvStatus] = useState({note:'loading vehicle model · loading sky'});
   const mapRef = useRef(null);
   const mapSize = useSize(mapRef);
-  // The checkpoint the guide is currently speaking (console/web/DIALOGUE.md,
-  // Revision 2). The box auto-advances through its lines and NEVER holds the
-  // replay, so there is no gate, no held ref and nothing to click past.
-  const [dlg, setDlg] = useState(null);
+  // The guide's closing lines (console/web/DIALOGUE.md, Revision 2). They
+  // belong to no epoch, so they arrive on their own event and are held here;
+  // every other delivery rides on the epoch itself and is read from `d`.
+  // The box auto-advances and NEVER holds the replay: no gate, nothing to
+  // click past, nothing for this component to sequence.
+  const [endDlg, setEndDlg] = useState(null);
 
   useEffect(() => {
     // Track F: ?mission=<name> selects a registry mission (console/missions);
@@ -1980,16 +1982,12 @@ function App() {
       // route) and the believed/true pair (-> measured displacement D).
       if (m.position) setTrail(t => [...t.slice(-2400),
         {i:m.epoch_index, ep:{position:m.position, _truth:m._truth}}]);
-      // A checkpoint with no lines is not a checkpoint: leave the box on the
-      // one it is still speaking. Absent `dialogue` (older stream, ?layer=off)
-      // leaves it alone too.
-      if (m.dialogue && m.dialogue.lines && m.dialogue.lines.length) setDlg(m.dialogue);
     };
     // The guide's closing lines belong to no epoch, so they arrive on their own
     // event after the last one.
     src.addEventListener('dialogue', e => {
       try { const dl = JSON.parse(e.data);
-            if (dl && dl.lines && dl.lines.length) setDlg(dl); } catch (_) {}
+            if (dl && dl.lines && dl.lines.length) setEndDlg(dl); } catch (_) {}
     });
     src.addEventListener('end', () => {
       src.close();
@@ -2015,6 +2013,10 @@ function App() {
   // most one display interval, except on a state/credential/layer change,
   // where it is republished on that very epoch.
   const state = d ? d.state : 'NOMINAL';
+  // The delivery the box is being handed: the epoch's own (empty between
+  // checkpoints, which is what the box expects -- it queues and dedupes), or
+  // the guide's closing lines once the stream has ended.
+  const dlg = endDlg || (d && d.dialogue) || {};
   const layerOn = !d || d.layer_on;
   const s = useThrottled(d, DISPLAY_HZ, d ? `${d.state}|${d.credential_status}|${d.layer_on}` : '');
   const sky = d && d.geometry && d.geometry.sky;
@@ -2146,9 +2148,9 @@ function App() {
          whatever it last spoke. Without /dialogue.js there is no box: the
          fallback band keeps the geometry and the key. */ null}
     ${DIALOGUE_BOX
-      ? html`<${DIALOGUE_BOX} lines=${dlg ? dlg.lines : NO_LINES}
-                              checkpoint=${dlg ? dlg.checkpoint : null}
-                              verified=${!dlg || dlg.verified !== false}
+      ? html`<${DIALOGUE_BOX} lines=${dlg.lines || NO_LINES}
+                              checkpoint=${dlg.checkpoint || null}
+                              verified=${dlg.verified !== false}
                               rate=${STREAM_HZ} state=${state} aside=${sceneKey}/>`
       : html`<div className=${'dock' + (showEnv ? ' env' : '')}>${sceneKey}</div>`}`;
 }

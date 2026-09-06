@@ -253,12 +253,30 @@ nobody at the controls can stop to click a text box.
 Waypoint epochs are `arc_length(prop) / speed_m_per_epoch`, computed from the
 registry (props lie exactly on the route; measured offset 0.0 m):
 
-| mission | stream | waypoint checkpoints (epoch · label) |
-|---|---|---|
-| RECON | 510 | 0 PATROL BASE · 75 OP-1 · 122 OP-2 · 152 OP KESTREL · 320 OP-3 |
-| LOGISTICS | 510 | 0 FOB · 140 PL AMBER · 276 RP KILO |
-| CASEVAC | 300 | 0 ROLE 1 · 187 CCP · 191 CASUALTY |
-| COMBAT | 510 | 0 LD · 60 PL AMBER · 188 PL RED · 311 OBJ HAWK |
+**CORRECTED.** The first version of this table divided arc length by
+`speed_m_per_epoch`, which is where the vehicle would be if nothing ever
+happened to it. It is not where the vehicle is. `index.html:1720` accrues
+`s += speed_m_per_epoch * gain[state]` per epoch, and every mission halts or
+slows under attack, so arrival lags the unimpeded schedule by 2 to 89 epochs.
+A checkpoint on the unimpeded epoch fires while the vehicle is still short of
+the waypoint — which defeats the reason waypoints were chosen: that the words
+and the picture agree.
+
+**Arrival is the epoch at which accrued progress first reaches the prop's arc
+length, replaying the stream through `Arbitras` for the per-epoch gain.**
+Derived twice independently, agreeing:
+
+| mission | stream | waypoint checkpoints (ARRIVAL epoch · label) | unimpeded, for reference |
+|---|---|---|---|
+| RECON | 510 | 0 PATROL BASE · 100 OP-1 · 147 OP-2 · 176 OP KESTREL · 344 OP-3 | 0 · 75 · 122 · 152 · 320 |
+| LOGISTICS | 510 | 0 FOB · 197 PL AMBER · 333 RP KILO | 0 · 140 · 276 |
+| CASEVAC | 300 | 0 ROLE 1 · 275 CCP · 280 CASUALTY | 0 · 187 · 191 |
+| COMBAT | 510 | 0 LD · 62 PL AMBER · 209 PL RED · 332 OBJ HAWK | 0 · 60 · 188 · 311 |
+
+The existing `beats` were written arrival-aware and corroborate it: RECON 100
+"OP-1 report filed", LOGISTICS 200 "crosses PL AMBER", COMBAT 344 "OBJ HAWK
+reached", CASEVAC 264 "AT CCP". A waypoint line may therefore say the vehicle
+IS there, and must not be written as though it were still approaching.
 
 Three to five waypoints cannot carry 17-19 lines, so a checkpoint is a
 waypoint **or** a measured event (attack onset, trust-state change,
@@ -280,7 +298,14 @@ emitted on, and the same number is not true ten epochs later.
 ```
 
 `gate` and `gate_reason` are gone. `kind` is `waypoint` | `event` | `intro` |
-`end`. **Every line carries `at` (UTC) and `epoch`** -- the epoch its claims
+`end`.
+
+**`checkpoint` may be `null` — an interjection.** A trust-state or credential
+change that no mission scripted cannot be in a schedule fixed at construction,
+so it is spoken immediately on its own epoch with `checkpoint: null`. The box
+renders the lines and shows NO `n / N`. This is what keeps `total` honest: an
+interjection cannot inflate the denominator, so the fraction the operator is
+reading is never revised mid-run. Measured: 1-3 per mission stream. **Every line carries `at` (UTC) and `epoch`** -- the epoch its claims
 were verified against. The box prints it. This closes the drift the held line
 had before: a line saying "confidence 0.91" stayed on screen while the strip
 moved to 0.92, with nothing on screen saying the number was from an earlier
