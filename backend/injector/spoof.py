@@ -93,8 +93,16 @@ class Spoof:
     step_displacement_m: float = 0.0
 
     # Magnitudes with no figure in §7, expressed against the measured floor.
+    # Approved by hand 2026-09-05 at these values, one epoch each.
     capture_jitter_sigma: float = 3.0   # x clean C/N0 sigma, during capture only
     liftoff_transient_sigma: float = 6.0  # x clean cmc sigma, at lift-off
+    # Master switch for both, ruled 2026-09-05: transients ON in the demo
+    # config, OFF in every sweep and measurement run. A one-epoch injected
+    # spike is a legitimate part of the §7 signature and a contaminant in a
+    # measurement -- if a reported number moves when it is switched off, the
+    # detector was partly detecting our own artefact. Every reported figure
+    # records which setting produced it.
+    transients: bool = True
 
     seed: int = 20260820
 

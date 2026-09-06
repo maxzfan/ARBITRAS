@@ -255,12 +255,10 @@ def test_composite_is_never_emitted_without_its_parts():
 
 # -- excluded_sv ---------------------------------------------------------------
 
-def test_ruled_exclusion_rule_is_disarmed_until_its_mask_is_set(day, cal):
-    """MASKED_K3 emits nothing while the mask cutoff is unset."""
-    from backend.detection import MASKED_K3, flagged_sv
+
+def test_no_rule_means_no_exclusions(day, cal):
+    from backend.detection import flagged_sv
     per_sv = FeatureExtractor(cal).run(day[:60])[-1]["per_sv"]
-    assert MASKED_K3.armed is False
-    assert flagged_sv(per_sv, cal.z_sat, MASKED_K3) == []
     assert flagged_sv(per_sv, cal.z_sat, None) == []
 
 
@@ -282,22 +280,6 @@ def test_exclusion_rule_names_only_saturated_satellites(day, cal):
         assert got == sorted(norm.index[norm >= k])
         assert set(got) <= set(per_sv.index)
 
-
-def test_armed_mask_needs_elevations_and_drops_low_satellites(day, cal):
-    from dataclasses import replace as _replace
-
-    from backend.detection import MASKED_K3, flagged_sv
-    per_sv = FeatureExtractor(cal).run(day[:200])[-1]["per_sv"]
-    rule = _replace(MASKED_K3, k=1.0, elevation_mask_deg=30.0)
-    assert rule.armed is True
-    with pytest.raises(ValueError):
-        flagged_sv(per_sv, cal.z_sat, rule)
-    unmasked = flagged_sv(per_sv, cal.z_sat, 1.0)
-    el = pd.Series({sv: (90.0 if i % 2 else 1.0)
-                    for i, sv in enumerate(per_sv.index)})
-    masked = flagged_sv(per_sv, cal.z_sat, rule, elevations=el)
-    assert set(masked) <= set(unmasked)
-    assert all(el[sv] >= 30.0 for sv in masked)
 
 
 def test_replay_emits_detector_derived_excluded_sv(day, cal, nav):
@@ -421,3 +403,81 @@ def test_record_carries_terrain_only_when_given():
     assert plain["score_detail"]["features_scored"] == list(FEATURE_NAMES)
     with_t = record(t, feats, s, n_sv=10, terrain={"available": True})
     assert with_t["terrain"] == {"available": True}
+
+# -- the elevation mask is upstream, not an exclusion exemption --------------
+
+def test_mask_drops_low_satellites_from_the_epoch_entirely(day, nav):
+    """Ruled: masked satellites are neither trusted, nor excludable, nor
+    available as cover. So they must be gone before anything scores."""
+    from backend.rinex import ephemeris
+    from backend.rinex.solve import EL_MASK_DEG, masked_epoch
+    from backend.detection.emit import USN8_ECEF
+
+    ep = day[0]
+    m = masked_epoch(ep, nav, cutoff_deg=EL_MASK_DEG)
+    el = ephemeris.elevations_at(ep.time, list(ep.df.index), USN8_ECEF, nav)
+    for sv in el.index:
+        if el[sv] < EL_MASK_DEG:
+            assert sv not in m.df.index
+        else:
+            assert sv in m.df.index
+    # satellites with no Kepler ephemeris (GLONASS, SBAS) are kept, not
+    # silently dropped -- they are not in H either way
+    assert all(sv in m.df.index for sv in ep.df.index if sv not in el.index)
+
+
+def test_exclusion_rule_has_no_elevation_term(day, cal):
+    """The safe-harbour path is gone: no satellite is exempt from flagging."""
+    from backend.detection import ExclusionRule, flagged_sv
+    import inspect
+
+    assert not hasattr(ExclusionRule(k=3.0), "elevation_mask_deg")
+    assert "elev" not in inspect.signature(flagged_sv).parameters
+
+
+def test_ruled_exclusion_k_is_three(day, cal):
+    from backend.detection import RULED_K3
+    assert RULED_K3.k == 3.0
+    assert RULED_K3.armed is True
+
+
+# -- combine modes: both available, neither picked ---------------------------
+
+def test_both_combine_modes_are_available_and_sum_is_the_default():
+    from backend.detection.confidence import COMBINE_MODES, anomaly, score
+    feats = dict(zip(FEATURE_NAMES, (0.1, 0.9, 0.1, 0.1)))
+    assert COMBINE_MODES == ("weighted_sum", "max")
+    assert score(feats, None)["combine_mode"] == "weighted_sum"
+    w = Weights()
+    assert anomaly(feats, w, "max") == pytest.approx(0.9)
+    assert anomaly(feats, w, "weighted_sum") == pytest.approx(0.3)
+    with pytest.raises(ValueError):
+        anomaly(feats, w, "median")
+
+
+def test_max_mode_is_weight_free():
+    """It has no weights, so nothing about it is weight-sensitive."""
+    from backend.detection.confidence import score
+    feats = dict(zip(FEATURE_NAMES, (0.1, 0.9, 0.1, 0.1)))
+    s = score(feats, {"information_ratio": 0.8}, Weights(beta=0.6), mode="max")
+    assert s["weight_sensitive_fraction"] == 0.0
+    assert score(feats, {"information_ratio": 0.8},
+                 Weights(beta=0.6))["weight_sensitive_fraction"] == 0.6
+
+
+def test_calibration_caches_distinguish_masked_from_unmasked_streams(day, nav):
+    """The defect that cost a set of measurements: span-keyed caches collide
+    across masked/unmasked and clean/injected variants of the same span."""
+    from backend.detection.cross import _compensated_frame
+    from backend.rinex.solve import masked_epoch, residual_panel
+
+    win = day[:80]
+    masked = [masked_epoch(e, nav) for e in win]
+    assert [e.time for e in masked] == [e.time for e in win]      # same span
+    assert sum(e.n_sv for e in masked) < sum(e.n_sv for e in win)  # different data
+
+    a, _ = _compensated_frame(win, nav)
+    b, _ = _compensated_frame(masked, nav)
+    assert not a.equals(b)
+
+    assert not residual_panel(win, nav).equals(residual_panel(masked, nav))

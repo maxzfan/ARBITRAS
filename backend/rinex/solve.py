@@ -37,6 +37,15 @@ from . import bands, ephemeris
 
 C_LIGHT = 299_792_458.0
 OMEGA_E = 7.2921151467e-5
+# Ruled by hand 2026-09-05: the standard aviation/ARAIM mask angle. Taken
+# from convention and NOT fitted to the exclusion bins it controls -- a cutoff
+# tuned on the data it governs is a threshold in disguise. The measured bins
+# (median clean exclusion at 0.4 deg elevation) confirm 5 deg is safe; they
+# did not pick it.
+#
+# This is the ONE definition. backend.replay pushes it into Track C's geometry
+# engine so the position solution and the information ratio stand on the same
+# satellite set.
 EL_MASK_DEG = 5.0
 SOLVABLE = "GEC"
 
@@ -50,6 +59,43 @@ def tropo_delay(el_deg: np.ndarray) -> np.ndarray:
     """Zenith delay mapped by 1/sin(el), the flat-earth mapping. Fine above
     the 5 degree mask; wrong below it, which is one more reason for the mask."""
     return TROPO_ZENITH_M / np.sin(np.radians(np.clip(el_deg, 3.0, None)))
+
+
+def masked_epoch(epoch, nav=None, cutoff_deg: float = EL_MASK_DEG,
+                 rx_ecef=None):
+    """Drop satellites below the mask angle from an epoch entirely.
+
+    Applied UPSTREAM of everything: feature scoring, the position solution and
+    the geometry block all see the masked epoch. A masked satellite is
+    therefore neither trusted, nor excludable, nor available as cover.
+
+    The alternative -- exempting low-elevation satellites from exclusion
+    eligibility while still solving on them -- was rejected by ruling, and the
+    reason is worth keeping: it creates a safe harbour. Satellites that can
+    never be flagged are exactly the ones an attacker would choose to capture.
+
+    Elevation is computed from the FIXED station position, not the solved one.
+    At a 5 degree cutoff a few hundred metres of position error moves the
+    elevation by under 0.01 degrees, so the borrowed-state dependency of
+    design.md §9 is real here but numerically irrelevant; Track C's engine
+    masks against its fixed rx_ecef the same way, which is what keeps the two
+    sets identical.
+    """
+    from ..detection.emit import USN8_ECEF
+    from . import ephemeris
+
+    nav = ephemeris.load_nav() if nav is None else nav
+    sta = USN8_ECEF if rx_ecef is None else rx_ecef
+    svs = list(epoch.df.index)
+    el = ephemeris.elevations_at(epoch.time, svs, sta, nav)
+    # Satellites without usable ephemeris cannot be mask-checked. They are kept
+    # rather than dropped: they are not in H either way (Kepler G/E/C only), so
+    # dropping them here would silently remove GLONASS from the C/N0 features.
+    keep = [sv for sv in svs
+            if sv not in el.index or el[sv] >= cutoff_deg]
+    if len(keep) == len(svs):
+        return epoch
+    return type(epoch)(time=epoch.time, df=epoch.df.loc[keep])
 
 
 def iono_free(df: pd.DataFrame) -> pd.Series:

@@ -80,11 +80,14 @@ def record(time: datetime, features: dict, scored: dict, n_sv: int,
         "geometry": geometry,
         "satellites_tracked": int(n_sv),
         # Not in §5, and additive rather than a change to it: the composite is
-        # never to be quoted without saying what made it (CLAUDE.md).
+        # never to be quoted without saying what made it (CLAUDE.md). That
+        # includes `combine_mode` -- weighted_sum and max produce different
+        # numbers from the same features, so a record that did not name its
+        # rule would be ambiguous.
         "score_detail": {k: scored[k] for k in
                          ("feature_score", "geometry_deficit", "beta",
                           "geometry_available", "weights_tuned", "weights",
-                          "weight_sensitive_fraction", "features_scored")},
+                          "weight_sensitive_fraction", "features_scored", "combine_mode")},
     }
     if terrain is not None:
         rec["terrain"] = terrain

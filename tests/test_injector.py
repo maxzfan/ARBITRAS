@@ -363,3 +363,43 @@ def test_clock_walk_leaves_the_solved_position_alone_while_the_set_holds(
             continue                       # set already turned over
         a, b = solve(window[i], nav=nav), solve(inj[i], nav=nav)
         assert np.linalg.norm(b["pos"] - a["pos"]) < 5.0
+
+
+# -- transients: demo only, never in measurement (ruling 2026-09-05) ----------
+
+def test_transients_off_removes_both_spikes_and_nothing_else(window, floor, nav):
+    on_e, on_t = inject(window, CARRY_OFF(onset=ONSET, carrier_rate_error=0.0136,
+                                          transients=True), floor, nav=nav)
+    off_e, off_t = inject(window, CARRY_OFF(onset=ONSET, carrier_rate_error=0.0136,
+                                            transients=False), floor, nav=nav)
+    # the lift-off CMC transient exists on exactly one epoch
+    d = (on_t["cmc_divergence_m"] - off_t["cmc_divergence_m"]).abs()
+    assert (d > 1e-9).sum() == 1
+    assert d.max() == pytest.approx(6.0 * floor.cmc_sigma, rel=1e-9)
+    # the capture C/N0 jitter exists on exactly the capture epoch
+    cap = int(np.flatnonzero((on_t["stage"] == CAPTURE).to_numpy())[0])
+    diff_cap = (on_e[cap].df["cn0_1"] - off_e[cap].df["cn0_1"]).abs()
+    assert diff_cap.max() > 0
+    # and every non-capture epoch is bit-identical between the two runs
+    for i, (a, b) in enumerate(zip(on_e, off_e)):
+        if i == cap:
+            continue
+        assert np.allclose(a.df["cn0_1"].to_numpy(), b.df["cn0_1"].to_numpy(),
+                           equal_nan=True)
+
+
+def test_transients_setting_is_recorded_in_the_truth_log(window, floor, nav):
+    """Every reported number has to say which setting produced it."""
+    for flag in (True, False):
+        _, truth = inject(window, CARRY_OFF(onset=ONSET, carrier_rate_error=0.0,
+                                            transients=flag), floor, nav=nav)
+        assert set(truth["transients"]) == {flag}
+
+
+def test_sweep_forces_transients_off(window, floor):
+    """Measurement runs must never carry the injected spike."""
+    import inspect
+
+    from backend.measurement import sweep as sweep_mod
+    src = inspect.getsource(sweep_mod.run_sweep)
+    assert "transients=False" in src

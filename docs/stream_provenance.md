@@ -108,7 +108,7 @@ carry_off (position domain): 90 attack epochs {'WALK': 89, 'CAPTURE': 1}, 6 SV a
 
 power_db 2.0 · walk_off_mps 1.0 · target `top6` resolved at capture and held ·
 capture_s 10 · duration_s 2700 ·
-**carrier_rate_error 0.02 m/s — the TEST value from
+**carrier_rate_error 0.0136 m/s — the TEST value from
 tests/test_detection.py, not the demo pin.** Eric left the pin deliberately
 unset ("picked by hand from the printed arithmetic"); replace it when given.
 Walk-off was not tuned (§7: venue).

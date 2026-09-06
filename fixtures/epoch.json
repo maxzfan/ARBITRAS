@@ -97,7 +97,8 @@
       "code_carrier_divergence",
       "cross_constellation",
       "terrain_mismatch"
-    ]
+    ],
+    "combine_mode": "weighted_sum"
   },
   "terrain": {
     "available": true,
