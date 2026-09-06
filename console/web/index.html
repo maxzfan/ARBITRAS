@@ -747,11 +747,14 @@ const ENV = {
   // satellite sprites and LOS rays stay legible (the HDRI is NOT the background).
   horizon: 0x8F94A1, mid: 0x7891B0, zenith: 0x5F7FB5, fogDensity: 0.0022,
   ground: 0x6B6A5E, rock: 0x5C574D,
-  model: '/vendor/asset-rover.glb', vehicleHeight: 2.2,   // Perseverance, mast deployed
+  // Vehicle: the 4x4 UGV from UGV.blend (own CAD), Draco-compressed and decoded by
+  // DRACOLoader. Authored in metres (tyre radius 0.376, mast head 2.39), so
+  // vehicleHeight is null: no rescale. Nose and antenna are read off its nodes.
+  model: '/vendor/asset-ugv.draco.glb', vehicleHeight: null,
   hdr: '/vendor/asset-earth-sky.hdr',
   tex: {diff:'/vendor/asset-earth-ground-diff-2k.jpg', nor:'/vendor/asset-earth-ground-nor_gl.jpg', rough:'/vendor/asset-earth-ground-rough.jpg'},
   rockTex: {diff:'/vendor/asset-ground-diff.jpg', nor:'/vendor/asset-ground-nor_gl.jpg', rough:'/vendor/asset-ground-rough.jpg'},
-  attribFull: 'Vehicle: NASA 3D Resources, public domain · Sky, ground: Poly Haven, CC0',
+  attribFull: 'Vehicle: 4x4 UGV, own CAD (Blender) · Sky, ground: Poly Haven, CC0',
   attribNoModel: 'Sky, ground: Poly Haven, CC0',
 };
 const POST = QS.get('post') !== '0';        // ?post=0 bypasses the composer if a machine misbehaves
@@ -857,29 +860,45 @@ function loadHDR(url, renderer) {
     res({env, background:tex, sunDir, sunEl:el, fog});
   }, undefined, rej));
 }
+// The UGV glb REQUIRES KHR_draco_mesh_compression (extensionsRequired): GLTFLoader
+// hands every primitive to DRACOLoader, which decodes in a worker pool using the
+// vendored decoder (/vendor/three/draco/, wasm with a JS fallback). One decoder for
+// the page: EnvScene remounts on an ?orbit toggle and must not spawn a new worker
+// pool each time. preload() fetches the decoder alongside the glb, not after it.
+let _draco = null;
+function dracoLoader() {
+  if (!_draco && typeof THREE.DRACOLoader === 'function') {
+    _draco = new THREE.DRACOLoader().setDecoderPath('/vendor/three/draco/'); _draco.preload();
+  }
+  return _draco;
+}
 function loadVehicle(url) {
   const T = THREE;
   if (typeof T.GLTFLoader !== 'function') return Promise.reject(new Error('GLTFLoader missing'));
-  const loader = new T.GLTFLoader();
-  if (typeof T.DRACOLoader === 'function') {
-    const draco = new T.DRACOLoader(); draco.setDecoderPath('/vendor/three/draco/'); loader.setDRACOLoader(draco);
-  }
-  return new Promise((res, rej) => loader.load(url, g => res(g.scene), undefined, rej));
+  const loader = new T.GLTFLoader(), draco = dracoLoader();
+  if (draco) loader.setDRACOLoader(draco);
+  else if (/draco/i.test(url)) return Promise.reject(new Error('DRACOLoader missing for a Draco-compressed glb'));
+  return new Promise((res, rej) => loader.load(url, res, undefined, rej));   // resolves the whole gltf: scene + animations
 }
-// Normalise a loaded model: scale to the real footprint, face the camera's 3/4,
-// sit on the ground, lit by the environment, and find the antenna (highest
-// point -- the mast top on Perseverance) where lines of sight terminate.
+// Normalise a loaded model: scale to a real height when one is given (null: the
+// asset is authored in metres), face the camera's 3/4, sit on the ground, lit by
+// the environment, and find the GNSS antenna where lines of sight terminate.
+// Nothing here is asset-specific. The nose is the front axle minus the rear axle
+// when the model has named wheel nodes, else the glTF +Z convention. The antenna
+// is a node named radome/gnss/gps when there is one (the UGV's deck radomes house
+// the receiver; its mast head is a camera), else the highest vertex.
 function prepareVehicle(root, heightM, faceAzDeg) {
   const T = THREE, box = new T.Box3(), v = new T.Vector3();
   root.updateMatrixWorld(true); box.setFromObject(root);
   const size = box.getSize(new T.Vector3());
-  root.scale.setScalar(heightM / Math.max(size.y, 1e-6));
+  if (heightM) root.scale.setScalar(heightM / Math.max(size.y, 1e-6));
   root.updateMatrixWorld(true); box.setFromObject(root);
   const c = box.getCenter(new T.Vector3());
-  let front = null; root.traverse(o => { if (!front && /hazcam.*front|front.*hazcam/i.test(o.name || '')) front = o; });
-  if (front) { const fp = front.getWorldPosition(new T.Vector3()).sub(c);
-    root.rotation.y = Math.atan2(fp.x, -fp.z) - faceAzDeg*D2R; }
-  else root.rotation.y = Math.atan2(Math.sin(faceAzDeg*D2R), -Math.cos(faceAzDeg*D2R));   // glTF +Z front
+  const wheels = wheelNodes(root), F = wheels.filter(w => w.front), B = wheels.filter(w => !w.front);
+  const axle = ws => ws.reduce((p, w) => p.add(w.obj.getWorldPosition(v)), new T.Vector3()).multiplyScalar(1/ws.length);
+  let noseAz = Math.PI;                                                       // glTF +Z front
+  if (F.length && B.length) { const f = axle(F).sub(axle(B)); noseAz = Math.atan2(f.x, -f.z); }
+  root.rotation.y = noseAz - faceAzDeg*D2R;                                   // a yaw about +y lowers an azimuth by that angle
   root.updateMatrixWorld(true); box.setFromObject(root); box.getCenter(c);
   root.position.set(-c.x, -box.min.y, -c.z); root.updateMatrixWorld(true); box.setFromObject(root);
   let meshes = 0;
@@ -895,16 +914,22 @@ function prepareVehicle(root, heightM, faceAzDeg) {
       if (nm !== m) { if (Array.isArray(o.material)) o.material[i] = nm; else o.material = nm; }
     });
   });
-  // highest vertex in world space, scanning only meshes that reach the top
-  let best = null, bestY = -Infinity; const mb = new T.Box3();
-  root.traverse(o => {
-    if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
-    mb.setFromObject(o); if (mb.max.y < box.max.y - 0.35) return;
-    const pa = o.geometry.attributes.position;
-    for (let i = 0; i < pa.count; i++) { v.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld);
-      if (v.y > bestY) { bestY = v.y; best = v.clone(); } }
-  });
-  return {antenna: best || new T.Vector3(0, box.max.y, 0), size: box.getSize(new T.Vector3()), meshes};
+  let ant = null; root.traverse(o => { if (!ant && /radome|gnss|gps/i.test(o.name || '')) ant = o; });
+  let antenna = null;
+  if (ant) { const ab = new T.Box3().setFromObject(ant); antenna = ab.getCenter(new T.Vector3()); antenna.y = ab.max.y; }
+  else {
+    // highest vertex in world space, scanning only meshes that reach the top
+    let best = null, bestY = -Infinity; const mb = new T.Box3();
+    root.traverse(o => {
+      if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+      mb.setFromObject(o); if (mb.max.y < box.max.y - 0.35) return;
+      const pa = o.geometry.attributes.position;
+      for (let i = 0; i < pa.count; i++) { v.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld);
+        if (v.y > bestY) { bestY = v.y; best = v.clone(); } }
+    });
+    antenna = best || new T.Vector3(0, box.max.y, 0);
+  }
+  return {antenna, antennaNode: ant ? ant.name : 'highest vertex', size: box.getSize(new T.Vector3()), meshes, wheelNodes: wheels.length};
 }
 function ghostOf(root, ghostMat) {
   const T = THREE;
@@ -912,6 +937,84 @@ function ghostOf(root, ghostMat) {
   g.traverse(o => { if (o.isMesh) { o.material = ghostMat; o.castShadow = false; o.receiveShadow = false;
     if (o.isSkinnedMesh) o.frustumCulled = false; } });
   return g;
+}
+
+// -- vehicle rig. The glb ships a bind pose with named wheel nodes (Wheel_FL/FR/
+//    RL/RR) and no clips: export_gltf.py leaves motion to three.js. Everything the
+//    rig does is derived from what the scene already knows -- the true vehicle's
+//    displacement along the route this frame, the route heading a few metres ahead,
+//    and the terrain under each wheel -- so it holds for every stream and mission:
+//      roll        theta += ds / r                   integrated from metres moved; never skates
+//      steer       delta = atan(L * dpsi / lookAhead) bicycle model on the front wheels
+//      suspension  critically damped heave, pitch and roll toward the plane through
+//                  the four contact patches; each wheel takes up the remaining slack
+//    r, wheelbase L and track are read off the wheel nodes, not typed in; the spring
+//    rates and limits are ugv-vehicle.js's. The ghost carries the same rig: the same
+//    wheel angles (it is the same vehicle) settled on the terrain it is drawn on.
+class Spring {                              // critically damped, frame-rate independent
+  constructor(k) { this.value = 0; this.vel = 0; this.k = k; }
+  step(target, dt) { const h = Math.min(dt, 1/30), d = 2*Math.sqrt(this.k);
+    this.vel += (this.k*(target - this.value) - d*this.vel)*h; this.value += this.vel*h; return this.value; }
+}
+const RIG = {steerMax:0.30, lookAhead:4, maxTravel:0.16, kBody:22, kAngle:30, kWheel:40};   // rad; m; m; 1/s^2
+function wheelNodes(root) {
+  const out = [];
+  root.traverse(o => { const mm = /^wheel[_\- ]?([FR])([LR])$/i.exec(o.name || '');
+    if (mm) out.push({obj:o, front:mm[1].toUpperCase() === 'F', left:mm[2].toUpperCase() === 'L'}); });
+  return out;
+}
+// Wrap a prepared model (scaled, yawed, grounded; its parent will be the pivot) in a
+// chassis group that carries the sprung motion. Rest geometry is read once, here.
+function makeRig(root, faceAzDeg) {
+  const T = THREE, up = new T.Vector3(0, 1, 0);
+  const chassis = new T.Group(); chassis.name = 'chassis'; chassis.add(root); chassis.updateMatrixWorld(true);
+  const fwd = new T.Vector3(Math.sin(faceAzDeg*D2R), 0, -Math.cos(faceAzDeg*D2R));   // nose, pivot frame at rest
+  const right = new T.Vector3().crossVectors(fwd, up);
+  const sc = root.getWorldScale(new T.Vector3()).y || 1;
+  const wheels = wheelNodes(root).map(w => {
+    const wb = new T.Box3().setFromObject(w.obj);
+    return {...w, rest:w.obj.getWorldPosition(new T.Vector3()), restPos:w.obj.position.clone(),
+            radius:(wb.max.y - wb.min.y)/2, travel:new Spring(RIG.kWheel), g:0};
+  });
+  const mean = ws => ws.reduce((p, w) => p.add(w.rest), new T.Vector3()).multiplyScalar(1/ws.length);
+  const F = wheels.filter(w => w.front), B = wheels.filter(w => !w.front),
+        L = wheels.filter(w => w.left), Rt = wheels.filter(w => !w.left);
+  const a = F.length && B.length ? Math.abs(mean(F).sub(mean(B)).dot(fwd))/2 : 0;      // half wheelbase, m
+  const b = L.length && Rt.length ? Math.abs(mean(L).sub(mean(Rt)).dot(right))/2 : 0;  // half track, m
+  const radius = wheels.length ? wheels.reduce((t, w) => t + w.radius, 0)/wheels.length : 0;
+  // Nose and up in a wheel node's own frame (the nodes carry no rotation of their own,
+  // so this is the glb's authoring frame): spin is about the wheel's left axis, steer about up.
+  const wf = new T.Vector3(0, 0, 1), wu = new T.Vector3(0, 1, 0), wl = new T.Vector3();
+  if (wheels.length) { const inv = wheels[0].obj.matrixWorld.clone().invert();
+    wf.copy(fwd).transformDirection(inv); wu.copy(up).transformDirection(inv); }
+  wl.crossVectors(wu, wf).normalize();                                                   // left = up x nose
+  return {chassis, root, wheels, radius, a, b, fwd, right, up, wu, wl, sc, spin:0, steer:0,
+          heave:new Spring(RIG.kBody), pitch:new Spring(RIG.kAngle), roll:new Spring(RIG.kAngle),
+          q1:new T.Quaternion(), q2:new T.Quaternion(), p:new T.Vector3()};
+}
+// One frame for one rig. The wheel angles are given (the true vehicle integrates
+// them; the ghost copies them). groundRel(x, z) is the terrain height under a scene
+// point RELATIVE to the pivot's own height, so a flat corridor is all zeros.
+function stepRig(rig, pivot, spin, steer, dt, groundRel) {
+  rig.spin = spin; rig.steer = steer;
+  let sum = 0, n = 0, f = 0, nf = 0, bk = 0, nb = 0, l = 0, nl = 0, r = 0, nr = 0;
+  for (const w of rig.wheels) {
+    const p = rig.p.copy(w.rest).applyAxisAngle(rig.up, pivot.rotation.y).add(pivot.position);
+    w.g = groundRel(p.x, p.z); sum += w.g; n++;
+    if (w.front) { f += w.g; nf++; } else { bk += w.g; nb++; }
+    if (w.left) { l += w.g; nl++; } else { r += w.g; nr++; }
+  }
+  const h = rig.heave.step(n ? sum/n : 0, dt);
+  const pt = rig.pitch.step(rig.a > 0 && nf && nb ? Math.atan2(f/nf - bk/nb, 2*rig.a) : 0, dt);   // + = nose up
+  const rl = rig.roll.step(rig.b > 0 && nl && nr ? Math.atan2(l/nl - r/nr, 2*rig.b) : 0, dt);     // + = left up
+  rig.chassis.position.y = h;
+  rig.chassis.quaternion.setFromAxisAngle(rig.right, pt).multiply(rig.q2.setFromAxisAngle(rig.fwd, rl));
+  for (const w of rig.wheels) {
+    const got = h + (w.front ? 1 : -1)*rig.a*Math.sin(pt) + (w.left ? 1 : -1)*rig.b*Math.sin(rl);
+    const t = w.travel.step(Math.max(-RIG.maxTravel, Math.min(RIG.maxTravel, w.g - got)), dt);
+    w.obj.position.copy(w.restPos).addScaledVector(rig.wu, t/rig.sc);
+    w.obj.quaternion.copy(rig.q1.setFromAxisAngle(rig.wu, w.front ? steer : 0)).multiply(rig.q2.setFromAxisAngle(rig.wl, spin));
+  }
 }
 
 function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
@@ -960,7 +1063,7 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
                 gPrev:new T.Vector3(), gTgt:new T.Vector3(), gCur:new T.Vector3(), Dmag:0,
                 truePos:new T.Vector3(), prevTrue:new T.Vector3(), travelAz:0,
                 camOff:new T.Vector3(), lookOff:new T.Vector3(), camInit:false, userCam:false,
-                antennaLocal:new T.Vector3(0, 2.2, 0), antW:new T.Vector3(), cred:'VALID', passes:[]};
+                antennaLocal:new T.Vector3(0, 2.2, 0), antW:new T.Vector3(), cred:'VALID', passes:[], rig:null, ghostRig:null};
     S.current = st;
 
     // -- lights: warm key for shadows (re-aimed at the HDRI sun once it loads) --
@@ -1083,9 +1186,13 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
     const veh = new T.Group(), ghostG = new T.Group(); ghostG.visible = false;
     scene.add(veh); scene.add(ghostG);
     let modelRoot = null;
-    const install = (root, antennaLocal) => {
+    const install = (root, antennaLocal, rigged) => {
       if (modelRoot) { veh.clear(); ghostG.clear(); }
-      modelRoot = root; veh.add(root); ghostG.add(ghostOf(root, ghostMat));
+      modelRoot = root;
+      if (rigged) {                                     // wheel nodes present: sprung chassis + rolling wheels, both vehicles
+        st.rig = makeRig(root, ENV.faceAz); veh.add(st.rig.chassis);
+        st.ghostRig = makeRig(ghostOf(root, ghostMat), ENV.faceAz); ghostG.add(st.ghostRig.chassis);
+      } else { st.rig = st.ghostRig = null; veh.add(root); ghostG.add(ghostOf(root, ghostMat)); }
       st.antennaLocal.copy(antennaLocal);
     };
     // Dome: satellite az/el do not change measurably over an 800 m route, so the
@@ -1108,10 +1215,13 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
     st.lblGhost = {el: mkLabel('env x lb', ''), p: new T.Vector3()};
     st.lblGS    = {el: mkLabel('env gs lb', 'GROUND STATION · MISSION AUTHORISATION'), p: new T.Vector3()};
 
-    withTimeout(loadVehicle(ENV.model), 25000, 'vehicle model').then(root => {
+    withTimeout(loadVehicle(ENV.model), 25000, 'vehicle model').then(gltf => {
       if (!alive) return;
-      const info = prepareVehicle(root, ENV.vehicleHeight, ENV.faceAz);
-      install(root, info.antenna); st.model = {source:'glb', ...info};
+      const root = gltf.scene, info = prepareVehicle(root, ENV.vehicleHeight, ENV.faceAz);
+      install(root, info.antenna, info.wheelNodes > 0);
+      st.model = {source:'glb', draco:/draco/i.test(ENV.model), clips:gltf.animations.length, ...info,
+                  rig: st.rig ? {wheels:st.rig.wheels.length, radius:+st.rig.radius.toFixed(3),
+                                 wheelbase:+(2*st.rig.a).toFixed(3), track:+(2*st.rig.b).toFixed(3)} : null};
       status.model = 'loaded'; report();
     }).catch(err => {
       if (!alive) return;
@@ -1200,6 +1310,14 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       composer.addPass(new T.RenderPass(scene, cam));
       ssao = new T.SSAOPass(scene, cam, 2, 2);
       ssao.kernelRadius = 0.7; ssao.minDistance = 0.00005; ssao.maxDistance = 0.0025;
+      // SSAOPass hides points and lines from its normal/depth pass ("do not contribute
+      // to SSAO") but not sprites, so the receiver glow -- a screen-facing quad -- is
+      // baked into the depth buffer as a solid rectangle and darkens what is behind it.
+      // Against the sky (the old mast-top antenna) that was invisible; on the UGV's
+      // deck radome the ground is behind it. Sprites here are additive glows: hide them
+      // too. restoreVisibility() restores from the cache the original call filled.
+      const ov = ssao.overrideVisibility.bind(ssao);
+      ssao.overrideVisibility = () => { ov(); scene.traverse(o => { if (o.isSprite) o.visible = false; }); };
       composer.addPass(ssao);
       bloom = new T.UnrealBloomPass(new T.Vector2(2, 2), 0.32, 0.45, 0.80); composer.addPass(bloom);
       composer.addPass(new T.ShaderPass(T.GammaCorrectionShader));
@@ -1244,6 +1362,11 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
     // Verification hooks for the headless audit.
     window.__envProject = (az, el) => project(azel(az, el).multiplyScalar(ENV.R).add(st.truePos));
     window.__envInfo = () => ({...renderer.info.render, passes:st.passes, model:st.model, status:{...status},
+      rig: st.rig ? {wheels:st.rig.wheels.length, spin:+st.rig.spin.toFixed(2), steer:+st.rig.steer.toFixed(3),
+                     heave:+st.rig.heave.value.toFixed(3), pitch:+st.rig.pitch.value.toFixed(4), roll:+st.rig.roll.value.toFixed(4)} : null,
+      ghostRig: st.ghostRig ? {spin:+st.ghostRig.spin.toFixed(2), steer:+st.ghostRig.steer.toFixed(3), heave:+st.ghostRig.heave.value.toFixed(3),
+                     pitch:+st.ghostRig.pitch.value.toFixed(4), roll:+st.ghostRig.roll.value.toFixed(4),
+                     travel:st.ghostRig.wheels.map(w => +w.travel.value.toFixed(3))} : null,
       sunAz:st.sunAz, sunEl:st.sunEl, sunCheck:st.sunCheck, D:st.Dmag, envSet:!!scene.environment, exposure:renderer.toneMappingExposure, key:key.intensity, hemi:hemi.intensity, groundMap:!!groundMat.map, epoch:st.lastEpoch, ghostVisible:ghostG.visible, cred:st.cred,
       veh:{e:+st.truePos.x.toFixed(2), n:+(-st.truePos.z).toFixed(2), az:+st.travelAz.toFixed(1), s:+st.sCur.toFixed(1),
            px:project(st.truePos).slice(0, 2).map(x => Math.round(x))},      // rover base on screen, CSS px
@@ -1269,15 +1392,29 @@ function EnvScene({sky, epochIndex, D, mission, orbit, onStatus, credential}) {
       st.travelAz = azDeg;
       st.prevTrue.copy(st.truePos);
       st.truePos.set(P.e, terrainHeight(P.e, -P.n), -P.n);
-      veh.position.copy(st.truePos); veh.rotation.y = (ENV.faceAz - azDeg) * D2R; veh.updateMatrixWorld(true);
-      st.antW.copy(st.antennaLocal).applyMatrix4(veh.matrixWorld);
+      veh.position.copy(st.truePos); veh.rotation.y = (ENV.faceAz - azDeg) * D2R;
+      if (st.rig) {
+        // -- rig: roll by the metres actually moved this frame (signed along the
+        //    heading), steer at the heading 4 m ahead, settle on the terrain. ---------
+        const r = st.rig, ds = st.frames ? Math.max(-5, Math.min(5,
+          (st.truePos.x - st.prevTrue.x)*Math.sin(az) - (st.truePos.z - st.prevTrue.z)*Math.cos(az))) : 0;
+        const ahead = R.routePoint(m, st.sCur + RIG.lookAhead).heading;
+        const dpsi = Math.atan2(Math.sin(ahead - P.heading), Math.cos(ahead - P.heading));   // wrapped; CCW = left
+        const steerT = Math.max(-RIG.steerMax, Math.min(RIG.steerMax, Math.atan(2*r.a*dpsi/RIG.lookAhead)));
+        stepRig(r, veh, r.spin + (r.radius ? ds/r.radius : 0), r.steer + (steerT - r.steer)*Math.min(1, dt*8), dt,
+                (x, z) => terrainHeight(x, z) - st.truePos.y);
+      }
+      veh.updateMatrixWorld(true);
+      st.antW.copy(st.antennaLocal).applyMatrix4(st.rig ? st.rig.chassis.matrixWorld : veh.matrixWorld);
       rxGlow.position.copy(st.antW); st.lblTruth.p.copy(st.antW).y += 0.9;
       const show = st.Dmag > 0.5 && !!modelRoot;          // same D the readout shows
       ghostG.visible = gGlow.visible = show;
       if (show) {
         const gx = st.truePos.x + st.gCur.x, gz = st.truePos.z + st.gCur.z;
-        ghostG.position.set(gx, terrainHeight(gx, gz), gz); ghostG.rotation.y = veh.rotation.y; ghostG.updateMatrixWorld(true);
-        gAnt.copy(st.antennaLocal).applyMatrix4(ghostG.matrixWorld); gGlow.position.copy(gAnt);
+        ghostG.position.set(gx, terrainHeight(gx, gz), gz); ghostG.rotation.y = veh.rotation.y;
+        if (st.ghostRig) stepRig(st.ghostRig, ghostG, st.rig.spin, st.rig.steer, dt, (x, z) => terrainHeight(x, z) - ghostG.position.y);
+        ghostG.updateMatrixWorld(true);
+        gAnt.copy(st.antennaLocal).applyMatrix4(st.ghostRig ? st.ghostRig.chassis.matrixWorld : ghostG.matrixWorld); gGlow.position.copy(gAnt);
         st.lblGhost.p.copy(gAnt).y += 1.1;
       }
       st.lblGhost.el.style.display = show ? '' : 'none';

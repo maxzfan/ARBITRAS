@@ -1,7 +1,9 @@
 # Earth backdrop for `?view=env` — spec for the index.html owner
 
 Goal: the environment must read as **Earth, temperate northern plains** (Camp Grafton, ND — design.md §1),
-not another planet. Current combo (Perseverance + `rocky_terrain_02` + `belfast_sunset_puresky`) reads as Mars.
+not another planet. The combo this was written against (the NASA Perseverance glb + `rocky_terrain_02` +
+`belfast_sunset_puresky`) read as Mars. The vehicle has since been replaced by the 4x4 UGV
+(`/vendor/asset-ugv.draco.glb`, own CAD, Draco-compressed; see `ENV.model` in index.html).
 Assets below are vendored and committed; nothing in index.html has been changed. Old assets are left in place.
 
 ## Assets (all Poly Haven, CC0; flat in /vendor/ — server handler is basename-only)
@@ -78,7 +80,7 @@ Either way the dome's N/E/S/W and the ground compass are unchanged — the sun p
 consistent with the HDRI.
 
 ## Attribution (HUD corner line, replace the current one)
-`Vehicle: NASA 3D Resources, public domain · Sky, ground: Poly Haven, CC0`
+`Vehicle: 4x4 UGV, own CAD (Blender) · Sky, ground: Poly Haven, CC0`
 
 ## What a viewer should now perceive
 Open temperate plains under a blue, partly-cloudy mid-morning sky, a dirt track through short dry grass and
