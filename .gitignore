@@ -1,4 +1,18 @@
-data/
+# The RINEX day and the Overpass response stay out (hundreds of MB). The
+# SIGNED PRE-MAP does not: it is 114 kB, it is deterministic for a fixed
+# station and radius, and the deploy cannot build without it. Fetching it in
+# CI made the Pages publish depend on a free public Overpass endpoint, which
+# failed the deploy twice running -- HTTP 504, then [Errno 101] Network is
+# unreachable. Committed, the workflow's `[ -s data/terrain_usn8.npz ]` guard
+# short-circuits and no build touches the network.
+#
+# The PRIVATE signing key is NOT here and must never be: nothing in the build
+# re-signs. Verification needs the map, its detached signature and the public
+# key, all three of which are public by construction.
+data/*
+!data/terrain_usn8.npz
+!data/terrain_usn8.npz.sig
+!data/terrain_map_pub.pem
 .venv/
 __pycache__/
 *.pyc
