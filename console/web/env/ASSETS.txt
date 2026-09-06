@@ -1,0 +1,11 @@
+https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/kiara_2_sunrise_2k.hdr	asset-env-combat-sky.hdr
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/dry_ground_01/dry_ground_01_diff_2k.jpg	asset-env-combat-ground-diff.jpg
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dry_ground_01/dry_ground_01_nor_gl_1k.jpg	asset-env-combat-ground-nor_gl.jpg
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dry_ground_01/dry_ground_01_rough_1k.jpg	asset-env-combat-ground-rough.jpg
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/brown_mud_leaves_01/brown_mud_leaves_01_diff_2k.jpg	asset-env-recon-ground-diff.jpg
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brown_mud_leaves_01/brown_mud_leaves_01_nor_gl_1k.jpg	asset-env-recon-ground-nor_gl.jpg
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brown_mud_leaves_01/brown_mud_leaves_01_rough_1k.jpg	asset-env-recon-ground-rough.jpg
+https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/kloofendal_overcast_puresky_2k.hdr	asset-env-casevac-sky.hdr
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/gravel_road/gravel_road_diff_2k.jpg	asset-env-casevac-ground-diff.jpg
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/gravel_road/gravel_road_nor_gl_1k.jpg	asset-env-casevac-ground-nor_gl.jpg
+https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/gravel_road/gravel_road_rough_1k.jpg	asset-env-casevac-ground-rough.jpg
