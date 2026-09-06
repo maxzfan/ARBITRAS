@@ -122,7 +122,9 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
     "weights_tuned": false,
     "weights": { "cn0_anomaly": 0.25, "pseudorange_residual": 0.25,
                  "code_carrier_divergence": 0.25, "cross_constellation": 0.25 },
-    "weight_sensitive_fraction": 0.5
+    "weight_sensitive_fraction": 0.5,
+    "features_scored": ["cn0_anomaly", "pseudorange_residual",
+                        "code_carrier_divergence", "cross_constellation"]
   }
 }
 ```
@@ -143,7 +145,10 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
   `geometry_available`, `weights_tuned` (**false until the threshold session —
   any number produced while false is a placeholder**), `weights`, and
   `weight_sensitive_fraction` (the share of the composite a re-weighting can
-  move; the answer to the arXiv 2607.05415 objection). Additive: the composite
+  move; the answer to the arXiv 2607.05415 objection), and `features_scored`
+  *(added 5 Sep, Track E)* — the features that actually entered the weighted
+  sum this epoch; weights are renormalised over that list, so an absent
+  feature is not scored rather than read as zero. Additive: the composite
   is never shipped without the parts that made it.
 - `geometry` — the weight-independent half of the score. `information_ratio` ∈ [0,1] is the determinant ratio of the trusted-subset information matrix against the full solution. `excluded_sv` is which satellites the detector stopped trusting and therefore which rows came out. `displacement_bound_m` is the analytic bound at this epoch. `next_best_observation` is the observation that would recover the most information — consumed by the console in `DEGRADED`, ignored elsewhere.
 

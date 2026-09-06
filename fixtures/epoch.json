@@ -85,6 +85,12 @@
       "code_carrier_divergence": 0.25,
       "cross_constellation": 0.25
     },
-    "weight_sensitive_fraction": 0.5
+    "weight_sensitive_fraction": 0.5,
+    "features_scored": [
+      "cn0_anomaly",
+      "pseudorange_residual",
+      "code_carrier_divergence",
+      "cross_constellation"
+    ]
   }
 }

@@ -352,13 +352,17 @@ def test_contract_doc_and_fixture_match_the_emitted_record():
 
     # features.by_sv (TRACK_D.md contract extension 1) is additive and
     # optional — emitted only when the caller passes it — and its per-SV
-    # keys are data, not schema. Exempt like the geometry subkeys.
+    # keys are data, not schema. Exempt like the geometry subkeys. The same
+    # holds for Track E's `terrain` block and `features.terrain_mismatch`
+    # (tracks/TRACK_E.md): present only when the channel ran.
     geom = lambda ps: {x for x in ps if not x.startswith("geometry.")
-                       and not x.startswith("features.by_sv")}
+                       and not x.startswith("features.by_sv")
+                       and not x.startswith("terrain")
+                       and x != "features.terrain_mismatch"}
     assert geom(paths(spec)) == geom(paths(live))
     assert geom(paths(spec)) == geom(paths(fixture))
     assert set(spec["features"]) == set(FEATURE_NAMES)
-    assert set(fixture["features"]) - {"by_sv"} == set(FEATURE_NAMES)
+    assert set(fixture["features"]) - {"by_sv", "terrain_mismatch"} == set(FEATURE_NAMES)
 
 
 # --- Track E seams (tracks/TRACK_E.md E3) ----------------------------------
