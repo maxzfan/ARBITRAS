@@ -41,7 +41,7 @@ You own `backend/geometry/` and `backend/measurement/`. You produce the
 the confidence score and it is NOT on the cut list.
 
 ## Setup (~10 min, unattended)
-    git clone https://github.com/maxzfan/HOLDFAST.git && cd HOLDFAST
+    git clone https://github.com/maxzfan/ARBITER.git && cd ARBITER
     bash bootstrap.sh
     source .venv/bin/activate
 

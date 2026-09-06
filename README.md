@@ -1,9 +1,11 @@
-# HOLDFAST
+# ARBITER
+
+**A**uthenticated **R**anging, **B**ounded **I**ntegrity, **T**iered **E**xecution **R**ights.
 
 Spoof detection is solved. What happens in the ninety seconds after detection
 is not.
 
-HOLDFAST sits between a GNSS receiver and an autonomy stack and continuously
+ARBITER sits between a GNSS receiver and an autonomy stack and continuously
 scores positional trust, then degrades the vehicle's authority in stages —
 full autonomy, coast on inertial, finish the leg, hold position — rather than
 making one binary trust decision.
@@ -224,7 +226,7 @@ Stated properly, not softened:
 
 The Stoics distinguish the impression (*phantasia*) from the assent
 (*sunkatathesis*). A spoofed vehicle's error is not in perceiving — the
-spoofed signal is genuinely there — but in assenting to it. HOLDFAST is a
+spoofed signal is genuinely there — but in assenting to it. ARBITER is a
 discipline of assent: perception continues under attack; authority is what
 gets withdrawn. (Epictetus, tr. Carter 1758; Marcus Aurelius, tr. Long
 1877 — both public domain.)

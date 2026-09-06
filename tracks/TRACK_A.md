@@ -4,7 +4,7 @@ You own `backend/rinex/`, `backend/injector/`, `backend/detection/`.
 You produce `confidence` and `features`. You never touch state names.
 
 ## Setup (~10 min, unattended)
-    git clone https://github.com/maxzfan/HOLDFAST.git && cd HOLDFAST
+    git clone https://github.com/maxzfan/ARBITER.git && cd ARBITER
     bash bootstrap.sh
     source .venv/bin/activate
 

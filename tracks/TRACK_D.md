@@ -25,7 +25,7 @@ only inside the alert limit.** That is a threshold with a derivation, not a
 policy bolt-on.
 
 ## Setup (~10 min, unattended)
-    git clone https://github.com/maxzfan/HOLDFAST.git && cd HOLDFAST
+    git clone https://github.com/maxzfan/ARBITER.git && cd ARBITER
     bash bootstrap.sh
     source .venv/bin/activate
     python -m pytest console/tests -q      # must be green before you start
