@@ -58,22 +58,30 @@
   /* ---- missions ---- */
   .missions{position:relative;background:#F4F5F7;color:#0B0D0F;padding:70px 16px 60px}
   .missions .tag{font-family:var(--sans);font-size:19px;line-height:1.45;max-width:520px;margin:0 0 42px;color:#1B2027}
-  .missions .row{position:relative;display:grid;grid-template-columns:repeat(4,1fr);gap:0}
-  .missions .col{position:relative;cursor:pointer;user-select:none}
-  .missions .lbl{font-family:var(--sans);font-weight:700;font-size:18px;letter-spacing:.22em;text-transform:uppercase;height:52px;display:flex;align-items:center;color:#0B0D0F}
-  .missions .lbl::before{content:'▸';margin-right:12px;font-size:14px;transition:transform .2s}
-  .missions .col:hover .lbl::before,.missions .col.active .lbl::before{transform:rotate(90deg)}
+  .missions .row{position:relative;display:flex;align-items:stretch;gap:0}
+  /* accordion: flex-grow is the only animated property, so the WebGL scissor rects (re-read per frame) follow the layout.
+     hovered/keyboard-focused column takes ~2.2 shares; the selected column keeps a mild 1.25 when nothing is hovered. */
+  .missions .col{position:relative;flex:1 1 0;min-width:0;cursor:pointer;user-select:none;outline:0;transition:flex-grow .45s cubic-bezier(.2,.7,.2,1)}
+  .missions .col.active{flex-grow:1.25}
+  .missions .row.hovering .col{flex-grow:1}
+  .missions .row.hovering .col.hover{flex-grow:2.2}
+  .missions .col:focus-visible .lbl{text-decoration:underline;text-underline-offset:7px;text-decoration-thickness:2px}
+  .missions .lbl{font-family:var(--sans);font-weight:700;font-size:18px;letter-spacing:.22em;text-transform:uppercase;height:52px;display:flex;align-items:center;color:#0B0D0F;white-space:nowrap;overflow:hidden}
+  .missions .lbl::before{content:'▸';flex:0 0 auto;margin-right:12px;font-size:14px;transition:transform .2s}
+  .missions .col.hover .lbl::before,.missions .col.active .lbl::before{transform:rotate(90deg)}
   .missions .tile{position:relative;height:min(62vh,640px);background:#0E1114;overflow:hidden;border-right:1px solid #F4F5F7}
   .missions .col:last-child .tile{border-right:0}
   .missions .tile .cap{position:absolute;left:0;right:0;bottom:0;padding:14px 16px 16px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.78) 40%);
     color:#EEF2F6;font-family:var(--sans);font-size:12.5px;line-height:1.45;opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s}
-  .missions .col:hover .tile .cap,.missions .col.active .tile .cap{opacity:1;transform:none}
+  .missions .col.hover .tile .cap,.missions .col.active .tile .cap{opacity:1;transform:none}
   .missions .tile .cap b{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#E8A21C;margin-bottom:6px}
   .missions .tile .mech{position:absolute;left:14px;top:12px;font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
-    padding:5px 8px;border:1px solid rgba(255,255,255,.35);color:#fff;background:rgba(0,0,0,.35)}
+    padding:5px 8px;border:1px solid rgba(255,255,255,.35);color:#fff;background:rgba(0,0,0,.35);
+    max-width:calc(100% - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transform-origin:left top;transition:transform .45s cubic-bezier(.2,.7,.2,1)}
+  .missions .col.hover .tile .mech{transform:scale(1.06)}   /* overlay-only zoom; the 3D camera is never touched */
   .missions .tile .note{position:absolute;right:12px;top:44px;font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#C9D1DB;text-shadow:0 1px 2px #000;max-width:70%;text-align:right}
   .missions .tile .scoped{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;letter-spacing:.2em;color:#8794A2}
-  .missions .col:hover .tile{filter:brightness(1.12)}
+  .missions .col.hover .tile{filter:brightness(1.12)}
   /* one canvas behind the four tiles, positioned inside the ROW so its top is the tiles' top (below the 52px labels) */
   .missions canvas#tilesCanvas{position:absolute;left:0;top:52px;width:100%;height:min(62vh,640px);display:block;pointer-events:none;z-index:0}
   .missions .col .lbl,.missions .col .tile{position:relative;z-index:1}
@@ -103,7 +111,7 @@
   footer ol{max-width:900px;margin:0;padding-left:18px}
   footer li{margin-bottom:8px}
   footer .fine{margin-top:28px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:#5C6875}
-  @media (max-width:1100px){.missions .row{grid-template-columns:repeat(2,1fr)} .missions canvas#tilesCanvas{display:none} .hero .spec{display:none} .hero .down{right:28px}}
+  @media (max-width:1100px){.missions .row{flex-wrap:wrap} .missions .col,.missions .col.active,.missions .row.hovering .col,.missions .row.hovering .col.hover{flex:0 0 50%} .missions canvas#tilesCanvas{display:none} .hero .spec{display:none} .hero .down{right:28px}}
 </style>
 
 <nav>
@@ -423,7 +431,7 @@
   let missionsData = [];
   function selectMission(name, scroll = true) {
     const ms = missionsData.find(x => x.name === name); if (!ms) return;
-    for (const c of document.querySelectorAll('.missions .col')) c.classList.toggle('active', c.dataset.mission === name);
+    for (const c of document.querySelectorAll('.missions .col')) { const on = c.dataset.mission === name; c.classList.toggle('active', on); c.setAttribute('aria-pressed', String(on)); }
     const [cls, label] = MECH[ms.mechanism] || ['', ms.mechanism];
     document.getElementById('mTitle').innerHTML = `${ms.title}<small>${ms.tagline}</small>`;
     document.getElementById('mAttack').innerHTML = `<b>${ms.attack.name}.</b> ${ms.attack.mechanism} <b>Response:</b> ${ms.attack.response}`;
@@ -443,7 +451,7 @@
   fetch('/missions').then(r => r.json()).then(async ms => {
     missionsData = ms;
     const row = document.getElementById('missionRow'), tc = document.getElementById('tilesCanvas');
-    row.innerHTML = ms.map(x => `<div class="col" data-mission="${x.name}">
+    row.innerHTML = ms.map(x => `<div class="col" data-mission="${x.name}" tabindex="0" role="button" aria-pressed="false" aria-label="${x.title} mission: ${x.attack.name}">
         <div class="lbl">${x.title}</div>
         <div class="tile">
           <span class="mech">${(MECH[x.mechanism] || ['', x.mechanism])[1]}</span>
@@ -451,7 +459,22 @@
           <div class="cap"><b>${x.attack.name}</b>${x.tagline}<br>${x.attack.response}</div>
         </div></div>`).join('');
     row.insertBefore(tc, row.firstChild);                       // the canvas survives the innerHTML rebuild
-    for (const col of row.querySelectorAll('.col')) col.addEventListener('click', () => selectMission(col.dataset.mission));
+    const cols = [...row.querySelectorAll('.col')], canHover = matchMedia('(hover:hover)').matches;
+    const setHover = col => { for (const c of cols) c.classList.toggle('hover', c === col); row.classList.toggle('hovering', !!col); };
+    for (const col of cols) {
+      col.addEventListener('click', () => selectMission(col.dataset.mission));
+      if (canHover) {
+        col.addEventListener('mouseenter', () => setHover(col));
+        col.addEventListener('mousemove', () => { if (!col.classList.contains('hover')) setHover(col); });
+      }
+      col.addEventListener('focus', () => { if (col.matches(':focus-visible')) setHover(col); });   // keyboard focus expands; mouse/touch focus is handled by hover/click
+      col.addEventListener('blur', () => { if (!row.matches(':hover')) setHover(null); });
+      col.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMission(col.dataset.mission); }
+        else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); cols[(cols.indexOf(col) + (e.key === 'ArrowRight' ? 1 : cols.length - 1)) % cols.length].focus(); }
+      });
+    }
+    row.addEventListener('mouseleave', () => setHover(cols.find(c => c.matches(':focus-visible')) || null));   // ease back to equal widths unless a keyboard focus is holding one open
     const want = QS.get('mission');
     if (want && ms.some(x => x.name === want)) { selectMission(want, false); setTimeout(() => document.getElementById('method').scrollIntoView(), 50); }
     tiles(ms).catch(e => console.warn('tiles failed', e));
