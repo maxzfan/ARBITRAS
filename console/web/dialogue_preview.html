@@ -2,24 +2,43 @@
 <meta charset="utf-8">
 <title>ARBITRAS dialogue preview</title>
 <!--
-  Standalone harness for the dialogue box (console/web/DIALOGUE.md §4), modelled
-  on console/web/env/preview.html: it develops and screenshots the box WITHOUT
-  the backend, the SSE stream or the 3D console.
+  Standalone harness for the dialogue box (console/web/DIALOGUE.md, Revision 2),
+  modelled on console/web/env/preview.html: it develops and screenshots the box
+  WITHOUT the backend, the SSE stream or the 3D console.
 
     cd console/web && python3 -m http.server 8412
-    open http://127.0.0.1:8412/dialogue_preview.html?gate=state&state=SURRENDERED
+    open http://127.0.0.1:8412/dialogue_preview.html?script=recon&rate=5
 
-  Query: ?gate=<intro|beat|state|credential|end|long|unverified|free>
+  Revision 2 removed the gate, so this harness is no longer a set of static
+  fixtures with a click to advance: it RUNS A CLOCK. A simulated epoch counter
+  ticks at ?rate= epochs/s, checkpoints are delivered on the epoch they belong
+  to, and `msToNext` is handed to the box exactly as console/server.py's script
+  spacing will hand it over. Watching it do nothing is the test: the lines must
+  advance on their own.
+
+  Query: ?script=<recon|dense|long|unverified|free>
+         &rate=<epochs per second, default 5>
          &state=<NOMINAL|DEGRADED|RESTRICTED|SURRENDERED>
          &verified=0        force the unverified treatment
          &aside=1           mount with the env view's scene-key column
+         &hint=1            also pass msToNext (the integration does NOT: it
+                            passes `rate`, and the box measures the spacing)
+         &play=0            start paused (deliver only with the fire button)
          &chrome=0          hide the harness controls (clean capture)
 
   Everything above the box is harness scaffolding standing in for the console's
   instrument strip and stage. The stage reports its own live height and the
   min/max it has ever measured: if those three numbers are not identical after
-  clicking through every fixture, the band reflowed and the box is wrong.
-  window.__dlgInfo() is the audit hook, like the console's window.__envInfo().
+  a whole script has run, the band reflowed and the box is wrong.
+
+  Audit hooks, like the console's window.__envInfo():
+    window.__dlgInfo()   everything on screen, plus delivered/seen/missing
+    window.__dlgFire()   deliver the next checkpoint immediately
+    window.__dlgSkip()   click the box (skip ahead one line)
+    window.__dlgReset()  restart the script at epoch 0
+  `missing` is the load-bearing one: every line DELIVERED must appear in `seen`
+  even when checkpoints arrive on top of each other (DIALOGUE.md: shown faster,
+  never dropped).
 -->
 <style>
   /* Vendored, offline (index.html declares the same faces; this is the harness
@@ -69,11 +88,14 @@
   .h-mid .u{font-weight:600;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
             color:var(--faint)}
   .h-mid .u b{color:var(--degraded);font-weight:600}
+  .h-mid .u b.ok{color:#6FCF97}
   .h-ctl{position:absolute;left:20px;top:18px;z-index:5;display:flex;flex-direction:column;
-         gap:8px;max-width:520px}
+         gap:8px;max-width:620px}
   .h-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   .h-row>span{font-weight:600;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
               color:var(--faint);margin-right:4px}
+  .h-num{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.02em}
+  .h-num b{color:var(--fg);font-weight:500}
   button{font-family:var(--sans);font-weight:600;font-size:10px;letter-spacing:.1em;
          text-transform:uppercase;color:var(--dim);background:#0B0D0Fcc;
          border:1px solid var(--keyline);padding:5px 9px;cursor:pointer}
@@ -105,50 +127,138 @@ if (!Box) throw new Error('dialogue.js did not register window.ARBITRAS_DIALOGUE
 
 const QS = new URLSearchParams(location.search);
 
-/* Hand-written fixtures in the DIALOGUE.md voice (three of them are the
-   contract's own worked examples). Claims carry a real contract path from
-   fixtures/epoch.json, or a named scenario source -- never both. */
-const GATES = {
-  intro: {reason: 'intro', verified: true, lines: [
-    {tone: 'calm', text: 'I am ARBITRAS. I sit between the receiver and the vehicle, and I decide how much authority the position deserves.',
-     claims: []},
-    {tone: 'calm', text: 'Right now the sky is clean: confidence 0.98, five constellations, nothing excluded. The vehicle has full authority.',
-     claims: [{text: '0.98', value: 0.98, path: 'confidence'}]},
-  ]},
-  beat: {reason: 'beat', verified: true, lines: [
-    {tone: 'alert', text: 'Six GPS satellites got louder at the same instant, +8 dB. Real satellites drift apart -- these moved together. That is one transmitter, not six.',
-     claims: [{text: '+8 dB', value: 8.0, source: 'injector parameter, backend/missions.py recon'}]},
-  ]},
-  state: {reason: 'state', verified: true, lines: [
-    {tone: 'bad', text: 'I have dropped GPS entirely and I am navigating on Galileo. Losing a whole constellation costs me geometry: my information ratio is 0.80 of the full sky.',
-     claims: [{text: '0.80', value: 0.80, path: 'geometry.information_ratio'}]},
-    {tone: 'bad', text: 'The box an attacker could still move me inside is 41.2 m wide, so the vehicle stops accepting waypoints and finishes the leg it is on.',
-     claims: [{text: '41.2 m', value: 41.2, path: 'geometry.displacement_bound_m'}]},
-    {tone: 'act', text: 'Control is with you. Drive by what you can see; I will hand autonomy back when I have seen clean signals for 10 straight epochs.',
-     claims: [{text: '10', value: 10, source: 'hysteresis window, docs/design.md §8'}]},
-  ]},
-  credential: {reason: 'credential', verified: true, lines: [
-    {tone: 'act', text: 'The ground station revoked this mission authorisation. The sky is still clean, but a clean sky does not outrank a withdrawn credential: the vehicle holds.',
-     claims: [{text: 'clean', value: 'VALID', source: 'operator action, backend/missions.py combat'}]},
-  ]},
-  end: {reason: 'end', verified: true, lines: [
-    {tone: 'good', text: 'Authority is back one step, not all the way. I have to see clean signals for 10 straight epochs before each step up, so nothing recovers on a lucky reading.',
-     claims: [{text: '10', value: 10, source: 'hysteresis window, docs/design.md §8'}]},
-  ]},
+/* Data time, not wall-clock time: the IGS files are 30 s epochs (CLAUDE.md
+   "Data"), so a line's `at` is base + 30 s per epoch. The box only formats it. */
+const T0 = Date.UTC(2026, 7, 20, 12, 0, 0);
+const at = ep => new Date(T0 + ep * 30000).toISOString().slice(11, 19);
+
+/* Hand-written scripts in the DIALOGUE.md voice (three lines are the contract's
+   own worked examples). Claims carry a real contract path from
+   fixtures/epoch.json, or a named scenario source -- never both. Each entry is
+   a CHECKPOINT: an epoch, a label naming where the vehicle is or what happened,
+   a kind, and its lines. `at`/`epoch` are stamped onto every line below. */
+const SCRIPTS = {
+  /* Realistic pacing, RECON's measured ARRIVAL waypoints (DIALOGUE.md revision 2, corrected table), with
+     event checkpoints where the attack and the state change actually happen.
+     Note checkpoints 2 and 3 are 6 epochs apart: at 5/s that is 1.2 s for three
+     lines, which is where MIN_DWELL and the catch-up floor do their work. */
+  recon: [
+    {epoch: 0, label: 'PATROL BASE', kind: 'intro', lines: [
+      {tone: 'calm', text: 'I am ARBITRAS. I sit between the receiver and the vehicle, and I decide how much authority the position deserves.'},
+      {tone: 'calm', text: 'Right now the sky is clean: confidence 0.98, five constellations, nothing excluded. The vehicle has full authority.',
+       claims: [{text: '0.98', value: 0.98, path: 'confidence'}]},
+      {tone: 'calm', text: 'I will speak at each checkpoint on the route. The replay does not wait for me; click a line if you want the next one sooner.'},
+    ]},
+    {epoch: 60, label: 'SPOOF ONSET', kind: 'event', lines: [
+      {tone: 'alert', text: 'Six GPS satellites got louder at the same instant, +8 dB. Real satellites drift apart -- these moved together. That is one transmitter, not six.',
+       claims: [{text: '+8 dB', value: 8.0, source: 'injector parameter, backend/missions.py recon'}]},
+    ]},
+    {epoch: 66, label: 'AUTHORITY CUT', kind: 'event', lines: [
+      {tone: 'bad', text: 'I have dropped GPS entirely and I am navigating on Galileo. Losing a whole constellation costs me geometry: my information ratio is 0.80 of the full sky.',
+       claims: [{text: '0.80', value: 0.80, path: 'geometry.information_ratio'}]},
+      {tone: 'bad', text: 'The box an attacker could still move me inside is 41.2 m wide, so the vehicle stops accepting waypoints and finishes the leg it is on.',
+       claims: [{text: '41.2 m', value: 41.2, path: 'geometry.displacement_bound_m'}]},
+      {tone: 'act', text: 'Control is with you. Drive by what you can see; I will hand autonomy back when I have seen clean signals for 10 straight epochs.',
+       claims: [{text: '10', value: 10, source: 'hysteresis window, docs/design.md §8'}]},
+    ]},
+    {epoch: 100, label: 'OP-1', kind: 'waypoint', lines: [
+      {tone: 'alert', text: 'We are at the first observation post on the believed track, but the believed track is the one being pushed. Treat the map as advisory until I say otherwise.'},
+      {tone: 'calm', text: 'Galileo alone still fixes us. The next best observation is a Beidou satellite low in the north-east: it buys back the most independent geometry.'},
+    ]},
+    {epoch: 147, label: 'OP-2', kind: 'waypoint', lines: [
+      {tone: 'good', text: 'The loud six have gone quiet and the residuals are back inside the noise floor of +/-0.5 dB. I am counting clean epochs, not celebrating yet.',
+       claims: [{text: '+/-0.5 dB', value: 0.5, source: 'measured C/N0 noise floor, CLAUDE.md Data'}]},
+      {tone: 'good', text: 'Authority is back one step, not all the way. I have to see clean signals for 10 straight epochs before each step up, so nothing recovers on a lucky reading.',
+       claims: [{text: '10', value: 10, source: 'hysteresis window, docs/design.md §8'}]},
+    ]},
+    /* Not in the schedule and not in the denominator: the credential moved and
+       no mission wrote a line for it (DIALOGUE.md revision 2, interjections). */
+    {epoch: 160, interjection: true, lines: [
+      {tone: 'act', text: 'The ground station just re-authorised this mission, and the signature checks. That is a credential change, not a checkpoint: I am speaking out of turn.'},
+    ]},
+    {epoch: 176, label: 'OP KESTREL', kind: 'waypoint', lines: [
+      {tone: 'calm', text: 'Full authority restored at the kestrel post. Five constellations, nothing excluded, and the displacement bound is back under a metre.'},
+    ]},
+    {epoch: 200, label: 'STAND DOWN', kind: 'end', lines: [
+      {tone: 'calm', text: 'That is the whole run: one transmitter, one constellation dropped, authority cut in stages and handed back in stages. Nothing here was a threshold I guessed.'},
+    ]},
+  ],
+  /* Checkpoints on top of each other: 4 checkpoints x 3 lines in 15 epochs.
+     At 5/s the fair share is far under the floor, so the box must compress and
+     still show all twelve -- __dlgInfo().missing must stay empty. */
+  dense: [
+    {epoch: 0, label: 'LD', kind: 'intro', lines: [
+      {tone: 'calm', text: 'Line of departure. Five constellations, confidence 0.98, full authority.',
+       claims: [{text: '0.98', value: 0.98, path: 'confidence'}]},
+      {tone: 'calm', text: 'This checkpoint is deliberately crowded: four of them land inside fifteen epochs.'},
+      {tone: 'calm', text: 'Nothing here may be dropped. The remainder is shown faster instead.'},
+    ]},
+    {epoch: 5, label: 'MEACONING', kind: 'event', lines: [
+      {tone: 'alert', text: 'The whole GPS constellation arrived late together, by a constant 1.7 us. A delay that every satellite shares is a repeater, not the sky.',
+       claims: [{text: '1.7 us', value: 1.7, source: 'injector parameter, backend/missions.py combat'}]},
+      {tone: 'alert', text: 'That is why I distrust the constellation rather than a satellite: the common-mode delay is in the clock column, not the geometry.'},
+      {tone: 'bad', text: 'Dropping GPS drops its clock column with it, so the information matrix stays full rank and the ratio still means something.'},
+    ]},
+    {epoch: 10, label: 'PL AMBER', kind: 'waypoint', lines: [
+      {tone: 'bad', text: 'At phase line amber the vehicle stops accepting new waypoints and finishes the leg it is on.'},
+      {tone: 'bad', text: 'Information ratio 0.80 of the full sky; the box an attacker could still move me inside is 41.2 m wide.',
+       claims: [{text: '0.80', value: 0.80, path: 'geometry.information_ratio'},
+                {text: '41.2 m', value: 41.2, path: 'geometry.displacement_bound_m'}]},
+      {tone: 'act', text: 'Control is with you from here. I advise; I do not drive.'},
+    ]},
+    {epoch: 15, label: 'CREDENTIAL PULLED', kind: 'event', lines: [
+      {tone: 'act', text: 'The ground station revoked this mission authorisation. A clean sky does not outrank a withdrawn credential: the vehicle holds.'},
+      {tone: 'act', text: 'The revocation was signed and the signature checks, so this is an order, not an outage.'},
+      {tone: 'calm', text: 'I will keep scoring the sky while we hold, so the moment authorisation returns I can say what the geometry is worth.'},
+    ]},
+  ],
   /* Worst case for the fixed height: the 220-character cap in DIALOGUE.md's
-     rules of thumb, which is what the three-line text area is sized for. */
-  long: {reason: 'beat', verified: true, lines: [
-    {tone: 'alert', text: 'The believed position has walked 41.2 m off the route while the wheels say the vehicle is on gravel and the signed pre-map says the believed fix is in scrub, so the two disagree and I trust the ground under the wheels.',
-     claims: [{text: '41.2 m', value: 41.2, path: 'geometry.displacement_bound_m'}]},
-  ]},
-  unverified: {reason: 'beat', verified: false, lines: [
-    {tone: 'alert', text: 'A number in this line did not match the epoch it was measured against, so it is shown without a source and nothing downstream may act on it.',
-     claims: [{text: 'did not match', value: null, path: 'geometry.protection_level_m'}]},
-  ]},
-  free: {reason: null, verified: true, lines: []},
+     rules of thumb, which is what the three-line text area is sized for, plus
+     the longest label a checkpoint can carry. */
+  long: [
+    {epoch: 0, label: 'CCP CASUALTY COLLECTION', kind: 'waypoint', lines: [
+      {tone: 'alert', text: 'The believed position has walked 41.2 m off the route while the wheels say the vehicle is on gravel and the signed pre-map says the believed fix is in scrub, so the two disagree and I trust the ground under the wheels.',
+       claims: [{text: '41.2 m', value: 41.2, path: 'geometry.displacement_bound_m'}]},
+      {tone: 'alert', text: 'Short.'},
+      {tone: 'calm', text: 'The terrain sensor is simulated and stamped as such; its figure is a curve over the confusion diagonal, never a point.'},
+    ]},
+  ],
+  /* A line whose path claim failed verification: dimmed, note across the text
+     column, claim underline dropped -- and the band the same height as ever. */
+  unverified: [
+    {epoch: 0, label: 'OP-3', kind: 'waypoint', verified: false, lines: [
+      {tone: 'alert', text: 'A number in this line did not match the epoch it was measured against, so it is shown without a source and nothing downstream may act on it.',
+       claims: [{text: 'did not match', value: null, path: 'geometry.protection_level_m'}]},
+    ]},
+  ],
+  /* Nothing is ever delivered: the empty state, which is what the console shows
+     before the first checkpoint of a run. */
+  free: [],
 };
-const ORDER = ['intro', 'beat', 'state', 'credential', 'end', 'long', 'unverified', 'free'];
+const ORDER = ['recon', 'dense', 'long', 'unverified', 'free'];
 const STATES = ['NOMINAL', 'DEGRADED', 'RESTRICTED', 'SURRENDERED'];
+
+/* Stamp `at` and `epoch` onto every line, and number the checkpoints. The
+   backend does this in console/arbitras/dialogue.py; the harness does it here so
+   the fixtures above stay readable.
+
+   `interjection: true` is a delivery with NO checkpoint (DIALOGUE.md revision 2:
+   a trust-state or credential change nobody scripted). It is excluded from the
+   numbering AND from `total` -- inflating the denominator mid-run would revise
+   the fraction the operator is already reading. */
+function build(name) {
+  const src = SCRIPTS[name] || [];
+  const total = src.filter(c => !c.interjection).length;
+  let i = 0;
+  return src.map(c => ({
+    checkpoint: c.interjection ? null
+      : {index: ++i, total: total, label: c.label, kind: c.kind},
+    epoch: c.epoch,
+    verified: c.verified !== false,
+    lines: c.lines.map(l => Object.assign({speaker: 'ARBITRAS', claims: []}, l,
+                                          {at: at(c.epoch), epoch: c.epoch})),
+  }));
+}
 
 /* The env view's scene key, copied from index.html's .expkey, so ?aside=1
    shows what the taller band looks like with a right-hand column in it. */
@@ -163,12 +273,73 @@ function SceneKey() {
 }
 
 function Harness() {
-  const [gate, setGate] = useState(GATES[QS.get('gate')] ? QS.get('gate') : 'intro');
+  const [script, setScript] = useState(SCRIPTS[QS.get('script')] ? QS.get('script') : 'recon');
   const [state, setState] = useState(STATES.includes(QS.get('state')) ? QS.get('state') : 'NOMINAL');
   const [aside, setAside] = useState(QS.get('aside') === '1');
-  const [dones, setDones] = useState(0);
+  const [play, setPlay] = useState(QS.get('play') !== '0');
+  const rate = QS.has('rate') && +QS.get('rate') > 0 ? +QS.get('rate') : 5;
+  const hint = QS.get('hint') === '1';
+
+  const [clock, setClock] = useState({epoch: 0, sent: 0});
+  const [feed, setFeed] = useState({lines: [], checkpoint: null, verified: true, msToNext: 0});
   const stageRef = useRef(null);
   const [h, setH] = useState({now: 0, min: Infinity, max: 0});
+  const cps = useRef(build(script));
+  const epochRef = useRef(0);
+  const sentRef = useRef(0);
+  const seen = useRef([]);                             // distinct lines the box has SHOWN
+  const delivered = useRef([]);                        // distinct lines the box was GIVEN
+  const epoch = clock.epoch, sent = clock.sent;
+
+  /* Deliver checkpoint `k` (0-based) and hand the box the gap to the next one,
+     in wall-clock ms at the harness's epoch rate -- which is what
+     console/server.py knows too, since the script's checkpoint epochs and the
+     stream rate are both its own. */
+  const deliver = useCallback(k => {
+    const list = cps.current;
+    if (k >= list.length) return;
+    const c = list[k];
+    const next = list[k + 1];
+    const gap = next ? (next.epoch - c.epoch) / rate * 1000 : 0;
+    c.lines.forEach(l => { if (delivered.current.indexOf(l.text) < 0) delivered.current.push(l.text); });
+    sentRef.current = k + 1;
+    epochRef.current = Math.max(epochRef.current, c.epoch);
+    setFeed({lines: c.lines, checkpoint: c.checkpoint, verified: c.verified,
+             msToNext: hint ? gap : undefined});
+    setClock({epoch: epochRef.current, sent: sentRef.current});
+  }, [rate, hint]);
+
+  /* Restart on a script change: the clock, the ledgers, the feed. The box keeps
+     its last line dimmed by design, so the ledgers are reset here, not there. */
+  const reset = useCallback(() => {
+    cps.current = build(script);
+    seen.current = []; delivered.current = [];
+    epochRef.current = 0; sentRef.current = 0;
+    setClock({epoch: 0, sent: 0});
+    setFeed({lines: [], checkpoint: null, verified: true, msToNext: 0});
+    const list = cps.current;
+    if (list.length && list[0].epoch <= 0) deliver(0);   // epoch-0 checkpoint, before the first tick
+  }, [script, deliver]);
+  useEffect(reset, [reset]);
+
+  /* The clock. One epoch per 1/rate s; a checkpoint is delivered on the epoch it
+     belongs to. `lines` goes back to [] on the next tick, exactly as
+     payload.dialogue does on the epochs between checkpoints -- and the box must
+     keep speaking through them from its own queue. */
+  useEffect(() => {
+    if (!play) return;
+    const iv = setInterval(() => {
+      epochRef.current += 1;
+      const list = cps.current;
+      if (sentRef.current < list.length && list[sentRef.current].epoch <= epochRef.current) {
+        deliver(sentRef.current);
+      } else {
+        setFeed(f => (f.lines.length ? Object.assign({}, f, {lines: []}) : f));
+        setClock({epoch: epochRef.current, sent: sentRef.current});
+      }
+    }, 1000 / rate);
+    return () => clearInterval(iv);
+  }, [play, rate, deliver]);
 
   /* The reflow check: watch the stage, not the band. If the band ever grows,
      the stage above it shrinks, and min !== max says so for the rest of the
@@ -184,36 +355,63 @@ function Harness() {
     return () => ro.disconnect();
   }, []);
 
-  const g = GATES[gate];
-  const verified = QS.get('verified') === '0' ? false : g.verified;
-  const onDone = useCallback(() => setDones(n => n + 1), []);
-
-  /* Audit hook, in the manner of window.__envInfo(). */
+  /* Poll what the box has on screen. The text node carries the whole line --
+     the unrevealed tail is laid out and transparent, not absent -- so this
+     ledger records lines as they APPEAR, and `missing` is delivered-minus-seen.
+     Nothing here touches the box; it only reads the DOM. */
   useEffect(() => {
+    const iv = setInterval(() => {
+      const el = document.querySelector('.adlg-text');
+      const box = document.querySelector('.adlg-box');
+      if (!el || !box || box.classList.contains('adlg-held')) return;
+      const t = el.textContent;
+      if (t && seen.current.indexOf(t) < 0) seen.current.push(t);
+    }, 40);
+    return () => clearInterval(iv);
+  }, []);
+
+  const verified = QS.get('verified') === '0' ? false : feed.verified;
+
+  /* Audit hooks, in the manner of window.__envInfo(). */
+  useEffect(() => {
+    const txt = sel => { const e = document.querySelector(sel); return e ? e.textContent.trim() : null; };
     window.__dlgInfo = () => {
       const box = document.querySelector('.adlg-box');
       const band = document.querySelector('.adlg-band');
       const text = document.querySelector('.adlg-text');
-      const seen = box ? Array.from(text.childNodes)
-                             .filter(n => !(n.classList && n.classList.contains('adlg-veil')))
-                             .map(n => n.textContent).join('') : '';
+      const fill = document.querySelector('.adlg-fill');
+      const track = document.querySelector('.adlg-track');
+      const rev = text ? Array.from(text.childNodes)
+                              .filter(n => !(n.classList && n.classList.contains('adlg-veil')))
+                              .map(n => n.textContent).join('') : '';
+      const missing = delivered.current.filter(t => !seen.current.some(s => s === t));
       return {
-        gate, gateReason: g.reason, state, verified, aside, dones,
-        lines: g.lines.length,
-        revealedChars: seen.length,
-        revealed: seen,
-        complete: !!document.querySelector('.adlg-chev'),
+        script, state, aside, rate, hint, epoch, checkpointsSent: sent,
+        checkpoints: cps.current.length,
+        line: text ? text.textContent : null,
+        revealedChars: rev.length,
+        complete: !!text && rev.length >= text.textContent.length,
+        cpText: txt('.adlg-cp'), whereText: txt('.adlg-where'),
+        footText: txt('.adlg-foot'), stampText: txt('.adlg-stamp'),
         held: !!(box && box.classList.contains('adlg-held')),
         unverified: !!(box && box.classList.contains('adlg-unver')),
         claims: document.querySelectorAll('.adlg-cl:not(.adlg-veil)').length,
+        fill: fill && track
+          ? +(fill.getBoundingClientRect().width / track.getBoundingClientRect().width).toFixed(3)
+          : null,
         bandHeight: band ? +band.getBoundingClientRect().height.toFixed(2) : null,
         textHeight: text ? +text.getBoundingClientRect().height.toFixed(2) : null,
         textScroll: text ? text.scrollHeight : null,
         stage: {now: h.now, min: h.min === Infinity ? null : h.min, max: h.max},
         stageStable: h.min === h.max,
+        delivered: delivered.current.length, seen: seen.current.length,
+        missing: missing,
       };
     };
-  }, [gate, state, verified, aside, dones, h, g]);
+    window.__dlgFire = () => deliver(sentRef.current);
+    window.__dlgSkip = () => { const b = document.querySelector('.adlg-box'); if (b) b.click(); };
+    window.__dlgReset = () => reset();
+  }, [script, state, aside, rate, hint, epoch, sent, h, deliver, reset]);
 
   const pick = (fn, v) => () => { fn(v); if (document.activeElement) document.activeElement.blur(); };
   const chrome = QS.get('chrome') !== '0';
@@ -234,26 +432,33 @@ function Harness() {
         <div className="u">stage height ·
           min <b>${h.min === Infinity ? '—' : h.min}</b> · max <b>${h.max}</b> ·
           ${h.min === h.max ? 'no reflow' : 'REFLOWED'}</div>
+        <div className="u">epoch <b className="ok">${epoch}</b> ·
+          checkpoint <b className="ok">${sent}</b> / ${cps.current.length} ·
+          lines delivered <b className="ok">${delivered.current.length}</b>,
+          shown <b className="ok">${seen.current.length}</b></div>
       </div>
       ${chrome && html`<div className="h-ctl">
-        <div className="h-row"><span>gate</span>
-          ${ORDER.map(k => html`<button key=${k} className=${k === gate ? 'on' : ''}
-             onClick=${pick(setGate, k)}>${k}</button>`)}
+        <div className="h-row"><span>script</span>
+          ${ORDER.map(k => html`<button key=${k} className=${k === script ? 'on' : ''}
+             onClick=${pick(setScript, k)}>${k}</button>`)}
         </div>
         <div className="h-row"><span>state</span>
           ${STATES.map(s => html`<button key=${s} className=${s === state ? 'on' : ''}
              onClick=${pick(setState, s)}>${s}</button>`)}
           <button className=${aside ? 'on' : ''} onClick=${pick(setAside, !aside)}>aside</button>
         </div>
-        <div className="h-row"><span>onDone</span>
-          <span style=${{fontFamily: 'var(--mono)', color: 'var(--dim)', textTransform: 'none',
-                         letterSpacing: 0}}>called ${dones}x · click the box or press Space</span>
+        <div className="h-row"><span>clock</span>
+          <button className=${play ? 'on' : ''} onClick=${pick(setPlay, !play)}>${play ? 'running' : 'paused'}</button>
+          <button onClick=${() => { deliver(sentRef.current); document.activeElement && document.activeElement.blur(); }}>fire next</button>
+          <button onClick=${() => { reset(); document.activeElement && document.activeElement.blur(); }}>reset</button>
+          <span className="h-num">${rate}/s${hint ? ' · msToNext passed' : ' · rate only'}</span>
         </div>
       </div>`}
     </div>
 
-    <${Box} lines=${g.lines} gateReason=${g.reason} verified=${verified}
-            state=${state} onDone=${onDone} aside=${aside ? html`<${SceneKey}/>` : null} />`;
+    <${Box} lines=${feed.lines} checkpoint=${feed.checkpoint} verified=${verified}
+            state=${state} rate=${rate} msToNext=${feed.msToNext}
+            aside=${aside ? html`<${SceneKey}/>` : null} />`;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(html`<${Harness}/>`);
