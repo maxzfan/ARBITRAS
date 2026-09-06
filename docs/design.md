@@ -153,7 +153,7 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
 - `geometry` — the weight-independent half of the score. `information_ratio` ∈ [0,1] is the determinant ratio of the trusted-subset information matrix against the full solution. `excluded_sv` is which satellites the detector stopped trusting and therefore which rows came out. `displacement_bound_m` is the analytic bound at this epoch. `next_best_observation` is the observation that would recover the most information — consumed by the console in `DEGRADED`, ignored elsewhere.
 
 **Transport:** JSON Lines appended to a file; console tails it.
-**Replay rate:** file time is 30 s/epoch; demo replays at 10–20 epochs/sec.
+**Replay rate:** file time is 30 s/epoch; 10–20 epochs/sec is the DEVELOPMENT range and the demo replays at **5 epochs/sec**, because the console's guide dialogue (`console/web/DIALOGUE.md`) holds the replay at each mission beat and state change and its lines have to be read. `console/server.py --rate` governs it; `backend.demo DEMO_RATE_EPS` (epoch counts → on-screen seconds in the provenance tables), `backend/stream.py` and the console's own consumer seed mirror it, and the four must not drift apart.
 **Ownership:** backend produces `confidence`, `features` and `geometry`; console owns the thresholds mapping confidence to state and owns what to do with `next_best_observation`. The console still never touches an observable.
 
 **Stale-epoch behaviour:** a missing or malformed epoch is evidence of degradation, not a no-op. If the stream goes silent the console steps state down on a timeout rather than freezing. Silence is not consent.
@@ -513,7 +513,7 @@ Rewrite in the narrator's own voice. Read aloud before recording; anything that 
 
 - 1920×1080, 30fps, screen capture only
 - Console in dark mode, browser chrome hidden, no notifications, no dock, clean desktop
-- **Confirm the replay rate reads as intelligible on video.** 10–20 epochs/sec is a development setting; beats 2 and 3 may need it slower. Test this Saturday evening, not Sunday morning.
+- **Confirm the replay rate reads as intelligible on video.** It is 5 epochs/sec (§5), down from the 10–20 development range because the guide dialogue gates the replay and must be read. Slow further with `--rate 3` if beats 2 and 3 need it. Test this Saturday evening, not Sunday morning.
 - One continuous take per beat. Cuts between beats, never within.
 - At least three clean takes of beat 2 before moving on.
 

@@ -27,7 +27,6 @@ const SPEC = {
   sky: { horizon: '#6E7A8C', mid: '#4E5E7C', zenith: '#2F3C5C' },   // procedural gradient sphere, ~2 stops under the HDR
   sun: { az: 265.0, el: 9.0 },                  // fallback key-light direction until the HDR's brightest pixel overrides it
   palette: { ground: '#4F5A3F', rock: '#5C574D', accent: '#7FA8CC' },
-  attribution: 'Sky, ground: Poly Haven, CC0',  // shown in the HUD corner
   hero_camera: { az: 200, el: 22, dist: 140, dolly: 0.6 },   // for the hero/tile framing
   // optional -- a rendered equirectangular backdrop as the VISIBLE sky (see below)
   backdrop: { url: '/vendor/asset-backdrop-recon.jpg', sun_u: 0.633, sun_el: 34.0, dim: 0.58 },

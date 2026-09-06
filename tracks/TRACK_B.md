@@ -112,8 +112,8 @@ Epoch 445 is video beat 4: clean sky, confidence 0.93, stands down anyway.
       geometry against the last-NOMINAL snapshot. Track C item 4 additionally
       recomputes the ratio against the frozen LOS set. **Reconcile at 18:30 so
       it is not built twice.**
-- [ ] Replay rate reads at 15 epochs/sec in a terminal; §11b says confirm it is
-      intelligible on video and slow beats 2 and 3 if not. `--rate 8`.
+- [ ] Replay rate reads at 5 epochs/sec in a terminal; §11b says confirm it is
+      intelligible on video and slow beats 2 and 3 if not. `--rate 3`.
 - [ ] `EMIT_LATERAL_ADVISORY` in machine.py is the cut-order item 3 switch.
 
 ## FIXED — tail-mode staleness was tick-based (2026-09-05 11:1x)

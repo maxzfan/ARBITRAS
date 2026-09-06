@@ -10,7 +10,12 @@
  * Every number on screen carries its contract path. The only arithmetic here
  * is the frame conversion the contract allows (ENU of a lat/lon): the anchor
  * is placed exactly as the console places any stream position,
- * TRUE + (ENU(anchor) - ENU(_truth)). Nothing here moves the vehicle.
+ * TRUE + (ENU(anchor) - ENU(_truth)). TRUE is the LIVE vehicle (ctx.live), read
+ * every frame: the odometry that carries the anchor forward is the route itself
+ * in the presentation frame (backend/missions_recon.py "Frames"), so the ring
+ * rides with the vehicle, held or live, offset by the anchor fix's own error.
+ * Placing it from the epoch() snapshot would leave it one epoch's travel behind
+ * the vehicle for the whole interval. Nothing here moves the vehicle.
  */
 (function () {
   const BLOCK = 'geometry.correction.stationary';
@@ -45,10 +50,14 @@
     const lblAnchor = mk(C.corrected), lblOffset = mk(C.amber), lblArrow = mk(C.red);
 
     // -- per-epoch targets and the lerp state (no allocation in tick) -------
+    // The anchor is kept as an OFFSET from TRUE (scene metres, ENU(anchor) - ENU(_truth));
+    // tick() adds it to the live vehicle. Only the offset lerps between epochs.
+    const live = ctx.live || null;      // {truePos, ghostPos}: live scene vectors the console mutates each frame
     const st = {
       block: null, epoch: null, state: null, anchorEpoch: null,
-      prevA: new T.Vector3(), tgtA: new T.Vector3(), curA: new T.Vector3(),
-      prevG: new T.Vector3(), tgtG: new T.Vector3(), curG: new T.Vector3(),
+      prevOff: new T.Vector3(), tgtOff: new T.Vector3(), curOff: new T.Vector3(),
+      snapT: new T.Vector3(), snapG: new T.Vector3(),      // epoch() snapshots: fallback when ctx.live is absent
+      curA: new T.Vector3(), curG: new T.Vector3(),
       dir: new T.Vector3(1, 0, 0), t0: 0, interval: 70, lastEpochAt: 0,
       showRing: false, showLine: false, showArrow: false, offBearing: false, drawnOnce: false,
     };
@@ -69,15 +78,14 @@
       const corr = ((payload.geometry || {}).correction) || {};
       const b = corr.stationary || null;
       st.block = b;
-      st.prevA.copy(st.drawnOnce ? st.curA : frame.truePos);
-      st.prevG.copy(st.drawnOnce ? st.curG : frame.ghostPos);
+      st.prevOff.copy(st.drawnOnce ? st.curOff : st.tgtOff);
+      st.snapT.copy(frame.truePos); st.snapG.copy(frame.ghostPos);
       st.showRing = st.showLine = st.showArrow = false;
       if (!b || !b.anchor || !payload._truth) { st.drawnOnce = false; return; }
-      // anchor in the scene: TRUE + (ENU(anchor) - ENU(_truth)) -- the console's own placement rule
+      // anchor in the scene: TRUE + (ENU(anchor) - ENU(_truth)) -- the console's own placement
+      // rule; the offset is set here, TRUE is read live in tick()
       const a = ctx.latLonToEnu(b.anchor.lat, b.anchor.lon), t = ctx.latLonToEnu(payload._truth.lat, payload._truth.lon);
-      st.tgtA.set(frame.truePos.x + (a.e - t.e), 0, frame.truePos.z - (a.n - t.n));
-      st.tgtA.y = ctx.heightAt(st.tgtA.x, st.tgtA.z) + 0.12;
-      st.tgtG.copy(frame.ghostPos); st.tgtG.y = ctx.heightAt(st.tgtG.x, st.tgtG.z) + 0.9;
+      st.tgtOff.set(a.e - t.e, 0, -(a.n - t.n));
       st.anchorEpoch = b.anchor_epoch;
       st.showRing = true;
       st.showLine = !!(b.anchored && b.deduced_offset);
@@ -94,7 +102,7 @@
       lblArrow.textContent = st.showArrow
         ? 'EMITTER BEARING ' + fmt(b.emitter_bearing_deg, 0) + '° · PATH DELAY ' + fmt(b.path_delay_m, 0) + ' M · '
           + BLOCK + '.emitter_bearing_deg / .path_delay_m' : '';
-      if (!st.drawnOnce) { st.prevA.copy(st.tgtA); st.prevG.copy(st.tgtG); }
+      if (!st.drawnOnce) st.prevOff.copy(st.tgtOff);
       st.drawnOnce = true;
       if (ctx.report) ctx.report(b.anchored
         ? 'anchor held · offset ' + fmt(b.deduced_offset && b.deduced_offset.mag_m, 0) + ' m · agreement ' + fmt(b.agreement_m, 1) + ' m'
@@ -107,8 +115,11 @@
         hide(lblAnchor); hide(lblOffset); hide(lblArrow); return;
       }
       const t = Math.min(1, (performance.now() - st.t0) / st.interval);
-      st.curA.lerpVectors(st.prevA, st.tgtA, t);
-      st.curG.lerpVectors(st.prevG, st.tgtG, t);
+      st.curOff.lerpVectors(st.prevOff, st.tgtOff, t);
+      st.curA.copy(live ? live.truePos : st.snapT).add(st.curOff);
+      st.curA.y = ctx.heightAt(st.curA.x, st.curA.z) + 0.12;
+      st.curG.copy(live ? live.ghostPos : st.snapG);
+      st.curG.y = ctx.heightAt(st.curG.x, st.curG.z) + 0.9;
       ring.visible = ring2.visible = true;
       ring.position.copy(st.curA); ring2.position.copy(st.curA);
       tmp.copy(st.curA); tmp.y += 1.6; put(lblAnchor, tmp);
@@ -159,6 +170,8 @@
         stationary: b.frame ? b.frame.stationary : null, reason: b.frame ? b.frame.reason : null,
         drawn: {ring: ring.visible, line: line.visible, arrow: arrow.visible},
         anchor_px: ring.visible ? ctx.project(ring.position).slice(0, 2).map(x => Math.round(x)) : null,
+        // horizontal metres between the drawn ring and the live vehicle (audit: LIVE ~ the anchor fix's error)
+        anchor_from_true_m: ring.visible && live ? +Math.hypot(ring.position.x - live.truePos.x, ring.position.z - live.truePos.z).toFixed(2) : null,
         labels: [lblAnchor, lblOffset, lblArrow].map(l => l.style.opacity === '1' || l.style.opacity === 1 ? l.textContent : null)};
     }
 

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from console.arbitras.dialogue import Guide
 from console.arbitras.machine import Arbitras
 from console.arbitras.states import TrustState
 from console.replay import arbitrate, false_surrender_rate, time_to_alert
@@ -167,6 +168,41 @@ def test_threshold_provenance_is_stamped_on_every_epoch():
     payload = decide(Arbitras(), json.loads(line(0.9)), layer_on=True)
     assert payload["threshold_provenance"]
     assert payload["thresholds"]["NOMINAL"]
+
+
+# --------------------------------------------------------------------- dialogue
+
+GUIDE_SCRIPT = {"guide": [{"epoch": 0, "lines": [
+    {"text": "The convoy is leaving the supply point on satellite navigation.",
+     "tone": "calm", "claims": []}]}]}
+
+
+def test_decide_attaches_the_dialogue_beside_the_explanation():
+    """console/web/DIALOGUE.md §1. The explanation stays on the wire EXACTLY as it
+    was -- the verification banner and the tests above read it. Only the console's
+    rendering of the headline/detail pair went away."""
+    payload = decide(Arbitras(), json.loads(line(0.9)), layer_on=True,
+                     guide=Guide(GUIDE_SCRIPT))
+    dl = payload["dialogue"]
+    assert set(dl) >= {"lines", "gate", "gate_reason", "verified", "failures"}
+    assert dl["gate"] is True and dl["lines"], "the epoch-0 beat opens a gate"
+    assert payload["explanation"]["headline"], "still on the wire, untouched"
+    assert payload["explanation_verified"] is True
+
+
+def test_decide_without_a_guide_leaves_the_field_off_the_payload():
+    """Every other caller here passes no guide and must not acquire the key."""
+    assert "dialogue" not in decide(Arbitras(), json.loads(line(0.9)), layer_on=True)
+
+
+def test_layer_off_takes_the_dialogue_off_the_wire():
+    """Beat 2 again: the guide is trust-layer output like the explanation, so it is
+    NULLED, not merely left unrendered. An empty box under an OFF badge is the
+    argument -- a console that still narrates while the badge reads OFF is not."""
+    payload = decide(Arbitras(), json.loads(line(0.05)), layer_on=False,
+                     guide=Guide(GUIDE_SCRIPT))
+    assert payload["dialogue"] is None
+    assert payload["explanation"] is None
 
 
 # ----------------------------------------------------------------------- replay

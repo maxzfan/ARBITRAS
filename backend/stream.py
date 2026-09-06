@@ -9,7 +9,9 @@ line, so `tail -f` / the console's follower sees epochs arrive live.
 
 Design points, all from §5:
 
-- **Rate.** File time is 30 s/epoch; the demo replays at 10-20 epochs/sec.
+- **Rate.** File time is 30 s/epoch. §5 gives 10-20 epochs/sec as the
+  DEVELOPMENT range; the demo replays at 5 (§5, §11b: the guide dialogue
+  gates the replay and has to be read).
   Default 15. `--rate` changes it live-side only — record timestamps are file
   time and are never rewritten.
 - **Hard reset under five seconds (§11a).** A fresh invocation truncates the
@@ -30,7 +32,7 @@ import time
 from pathlib import Path
 
 
-def stream(source: Path, dest: Path, rate: float = 15.0,
+def stream(source: Path, dest: Path, rate: float = 5.0,
            start: int = 0, count: int | None = None,
            stall_s: float = 0.0, echo: bool = False) -> int:
     lines = Path(source).read_text().splitlines()
@@ -57,8 +59,11 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--source", default="out/clean.jsonl")
     ap.add_argument("--dest", default="out/live.jsonl")
-    ap.add_argument("--rate", type=float, default=15.0,
-                    help="epochs per second (§5 demo rate 10-20)")
+    ap.add_argument("--rate", type=float, default=5.0,
+                    help="epochs per second. §5: 10-20 is the DEVELOPMENT "
+                         "range; the demo replays at 5, matching "
+                         "console/server.py --rate and backend.demo "
+                         "DEMO_RATE_EPS")
     ap.add_argument("--start", type=int, default=0,
                     help="first epoch index of the slice to stream")
     ap.add_argument("--count", type=int, default=None,

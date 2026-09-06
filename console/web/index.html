@@ -175,29 +175,32 @@
            font-family:var(--sans);font-weight:500;color:var(--faint);font-size:11px;
            letter-spacing:.16em;text-transform:uppercase;pointer-events:none}
 
-  /* ---- explanation ----------------------------------------------------- */
-  /* Always rendered, at a FIXED height, so the flex .stage above it -- and the
-     WebGL canvas inside it -- never change size as the text re-wraps from epoch
-     to epoch (a canvas resize clears the drawing buffer and paints one black
-     frame, and the scene jumps when the pane's aspect changes). The height is
-     the tallest layout observed: every §5 record in out/{demo,carryoff,clean,
-     live}.jsonl replayed through the arbitras (641 distinct explanations) and
-     rendered at viewport widths 1100-1920 needs at most 3 headline lines and
-     4 detail lines; 4 detail lines (13px x 1.62) is the taller column, plus the
-     15px vertical padding and the 1px top border (border-box). Longer text is
-     clamped with an ellipsis rather than allowed to grow the bar. */
-  .expbar{flex:0 0 auto;border-top:1px solid var(--keyline);background:#0A0C0E;
-          padding:15px 24px;display:grid;grid-template-columns:minmax(260px,26%) 1fr;
-          gap:30px;align-items:start;overflow:hidden;
-          height:calc(4 * 13px * 1.62 + 30px + 1px)}
-  /* env view: three columns -- summary | detail | scene key -- at a FIXED height
-     (8 lines of the 15px key: five items, then the counts line wrapping to at most
-     three), so the bar is still a constant height in every configuration and
-     nothing above it can resize. The detail column is narrower here, so it may
-     clamp at 5 lines instead of 4. */
-  .expbar.env{height:calc(8 * 15px + 30px + 1px);grid-template-columns:minmax(220px,22%) 1fr auto;gap:24px}
-  .expbar.env .d{-webkit-line-clamp:5}
-  .expkey{height:120px;max-width:380px;overflow:hidden;
+  /* ---- dialogue dock ---------------------------------------------------- */
+  /* The band below the stage. It holds the dialogue box (console/web/dialogue.js,
+     DIALOGUE.md §4) and, in the env view, the scene key.
+
+     FIXED height, so the flex .stage above it -- and the WebGL canvas inside it --
+     never change size as the box types a line out (a canvas resize clears the
+     drawing buffer and paints one black frame, and the scene jumps when the pane's
+     aspect changes). The two heights are the ones the explanation bar it replaces
+     used, unchanged, so nothing above the band moved when the bar became the box:
+     4 lines of 13px x 1.62 plus 15px x 2 padding plus the 1px top border, and in
+     the env view the 8 lines of the 15px scene key instead.
+
+     The box brings its own namespaced style and its own height (DIALOGUE.md §4);
+     the dock fixes the band and clips, so a box of any height can never reflow the
+     stage. The scene key is NOT the explanation text that was removed -- it is the
+     legend that makes the 3D view readable -- and keeps its place at the right. */
+  /* The box draws its own band (`.adlg-band` in dialogue.js: same two heights,
+     computed the same way, with the scene key as its `aside` column). The only
+     thing left here is the FALLBACK band for a console served without
+     /dialogue.js -- same geometry, so the stage above starts at the same y
+     whether the box loaded or not. */
+  .dock{flex:0 0 auto;display:flex;gap:24px;align-items:stretch;overflow:hidden;
+        padding:12px 24px;border-top:1px solid var(--keyline);background:#0A0C0E;
+        height:calc(4 * 13px * 1.62 + 30px + 1px)}
+  .dock.env{height:calc(8 * 15px + 30px + 1px)}
+  .expkey{flex:0 0 auto;height:120px;max-width:380px;overflow:hidden;
           font-family:var(--sans);font-weight:500;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
   .expkey .keys div{display:flex;align-items:center;gap:8px;white-space:nowrap;line-height:15px}
   .expkey i{width:8px;height:8px;display:inline-block;flex:0 0 auto}
@@ -206,12 +209,6 @@
               text-transform:none;line-height:15px}
   .expkey .n2 b{color:var(--fg);font-weight:500}
   .expkey .st{color:var(--degraded);letter-spacing:.04em}
-  .expbar .h{font-family:var(--sans);font-weight:700;font-size:19px;line-height:1.28;
-           letter-spacing:-.005em;display:-webkit-box;-webkit-box-orient:vertical;
-           -webkit-line-clamp:3;overflow:hidden}
-  .expbar .d{font-family:var(--sans);font-weight:400;font-size:13px;color:var(--dim);
-           line-height:1.62;max-width:132ch;display:-webkit-box;-webkit-box-orient:vertical;
-           -webkit-line-clamp:4;overflow:hidden}
 
   /* ---- 3D environment ------------------------------------------------- */
   .skl.env{text-shadow:0 1px 2px #000,0 0 6px #000c}
@@ -223,13 +220,12 @@
   .stage.env::after{bottom:0;height:150px;background:linear-gradient(rgba(6,8,10,0),rgba(6,8,10,.78))}
   .stage.env .readout .n.safe{color:var(--fg)}
   .stage.env .readout .n,.stage.env .readout .u,.stage.env .hint{text-shadow:0 1px 3px #000c,0 0 10px #0009}
-  /* Bottom band of the env stage: caption + attribution bottom-left, the satellite
-     view in the actual bottom-right corner; the hint moves under the trust-layer
-     box and the scene key lives in the footer bar (.expkey). --insetW is the inset
+  /* Bottom band of the env stage: the satellite view in the actual bottom-right
+     corner; the hint moves under the trust-layer
+     box and the scene key lives in the dock below the stage (.expkey). --insetW is the inset
      MAP width; the panel adds 2x8px padding + 2x1px border. */
   .stage.env{--insetW:260px}
   .stage.env .hint{top:64px;bottom:auto}
-  .stage.env .rcap{bottom:36px}
   /* satellite-view inset: a rendered top-down of the scene, not imagery. The only
      measured thing in it is the offset between the two pins (st.Dmag, as the readout). */
   .inset{position:absolute;right:20px;bottom:18px;z-index:5;width:calc(var(--insetW) + 18px);
@@ -252,8 +248,6 @@
   .rcap{position:absolute;bottom:18px;left:20px;z-index:5;font-family:var(--mono);font-size:10px;max-width:calc(100% - 360px);line-height:1.5;
         letter-spacing:.08em;text-transform:uppercase;color:var(--faint);text-shadow:0 1px 2px #000c,0 0 8px #0008}
   .stage:not(.env) .pane .rcap{bottom:46px}   /* map pane: clear the scale bar */
-  .attrib{position:absolute;bottom:18px;left:20px;z-index:5;font-family:var(--mono);font-size:9.5px;
-          letter-spacing:.04em;color:var(--faint);text-shadow:0 1px 2px #000c,0 0 8px #0008}
   .skl.gs{color:var(--truth);opacity:.9}
   .legend i.dash{border-top-style:dashed}
   .legend i.band{height:6px;border:0;background:#E8A21C33;outline:1px dashed #E8A21C;outline-offset:-1px}
@@ -321,9 +315,14 @@ setTimeout(function () {
 <script src="/overlays/takeover.js" onerror="this.remove()"></script>
 <script src="/overlays/recon.js" onerror="this.remove()"></script>
 <script src="/overlays/casevac.js" onerror="this.remove()"></script>
+<!-- The dialogue box (console/web/DIALOGUE.md §4): a classic script like the
+     overlays, registering window.ARBITRAS_DIALOGUE against the React global above.
+     onerror keeps a missing file from being fatal -- the console then runs with no
+     box, and, because there would be no way to click past a gate, never holds. -->
+<script src="/dialogue.js" onerror="this.remove()"></script>
 <script type="module">
 import htmMod from '/vendor/htm.js';
-const {useState, useEffect, useRef} = React;
+const {useState, useEffect, useRef, useCallback} = React;
 const html = htmMod.bind(React.createElement);
 
 const QS = new URLSearchParams(window.location.search);
@@ -340,13 +339,24 @@ const LOCK = QS.get('lock') === '1';     // ?lock=1: no user camera input (video
 // reading a 3-5 glyph token is one fixation plus a saccade, roughly 250-350 ms;
 // a 333 ms hold is therefore the fastest cadence at which each value is legible
 // before it is replaced (bench instruments settle on 2-4 readings/s for the
-// same reason). At --rate 15 this is every 5th epoch. Measured (headless
-// Chromium, --rate 15): unthrottled, the confidence digits changed 12-13x/s and
+// same reason). At --rate 5 this is every 2nd epoch. Measured (headless
+// Chromium, at the former --rate 15): unthrottled, the confidence digits changed 12-13x/s and
 // the strip saw ~63 text mutations/s; at 3 Hz, ~3x/s and ~18/s, with the scene
 // still taking all ~14/s and state changes still landing on their own epoch.
 const DISPLAY_HZ_DEFAULT = 3;
 const DISPLAY_HZ = QS.has('hz') && Number.isFinite(+QS.get('hz')) ? +QS.get('hz') : DISPLAY_HZ_DEFAULT;
 const R = window.Route;                   // console/web/route.js -- mirrors console/mission.py
+// The dialogue box, console/web/DIALOGUE.md §4. Absent (404, or a file still being
+// written) means no box AND no gate: the epoch queue never holds, and the console
+// is exactly what it was minus the bottom text.
+const DIALOGUE_BOX = (window.ARBITRAS_DIALOGUE || {}).Box || null;
+const NO_LINES = [];                      // stable identity: `lines=[]` must not
+                                          // look like a new gate on every render
+// Seed for the epoch consumer's cadence. ?rate= is passed to /events verbatim, so
+// when it is present it IS the server's rate; the server's own default is 5/s
+// (console/server.py --rate, design.md §5). Only a seed -- the real interval
+// is measured below.
+const STREAM_HZ = QS.has('rate') && +QS.get('rate') > 0 ? +QS.get('rate') : 5;
 
 const COLOR = {NOMINAL:'var(--nominal)', DEGRADED:'var(--degraded)',
                RESTRICTED:'var(--restricted)', SURRENDERED:'var(--surrendered)'};
@@ -744,8 +754,7 @@ function SkyDome({sky, orbit}) {
    surveyed position, the ghost at the believed position (real displacement in
    metres from /mission's scale), the alert ring, and every satellite overhead
    with its line of sight to the antenna. What is illustrative: terrain, sky,
-   and the vehicle model itself. The on-screen caption says exactly that
-   (design.md §11b), and the attribution line names the asset sources. */
+   and the vehicle model itself. The scene key (.expkey) names what is drawn. */
 
 // Deterministic noise: the terrain renders identically on every machine and
 // every take, so frames are comparable between beats.
@@ -791,8 +800,6 @@ const ENV = {
   hdr: '/vendor/asset-earth-sky.hdr',
   tex: {diff:'/vendor/asset-earth-ground-diff-2k.jpg', nor:'/vendor/asset-earth-ground-nor_gl.jpg', rough:'/vendor/asset-earth-ground-rough.jpg'},
   rockTex: {diff:'/vendor/asset-ground-diff.jpg', nor:'/vendor/asset-ground-nor_gl.jpg', rough:'/vendor/asset-ground-rough.jpg'},
-  attribFull: 'Vehicle: 4x4 UGV, own CAD (Blender) · Sky, ground: Poly Haven, CC0',
-  attribNoModel: 'Sky, ground: Poly Haven, CC0',
 };
 const POST = QS.get('post') !== '0';        // ?post=0 bypasses the composer if a machine misbehaves
 // Satellite-view inset (bottom-right of the env view): ONE north-up orthographic
@@ -1076,10 +1083,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
       if (status.backdrop === 'loading') notes.push('loading backdrop');
       if (status.backdrop === 'fallback') notes.push('BACKDROP FALLBACK · gradient');
       if (status.ground === 'fallback') notes.push('GROUND FALLBACK · untextured');
-      statusRef.current({note: notes.join(' · '),
-        attrib: (status.model === 'loaded' ? 'Vehicle: 4x4 UGV, own CAD (Blender) · ' : '')
-                + ((m.scene && (window.ARBITRAS_ENV || {})[m.scene.env] && (window.ARBITRAS_ENV || {})[m.scene.env].spec.attribution) || 'Sky, ground: Poly Haven, CC0'),
-        ...status}); };
+      statusRef.current({note: notes.join(' · '), ...status}); };
     report();
 
     T.ColorManagement.legacyMode = false;
@@ -1111,6 +1115,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
                 gPrev:new T.Vector3(), gTgt:new T.Vector3(), gCur:new T.Vector3(), Dmag:0,
                 cPrev:new T.Vector3(), cTgt:new T.Vector3(), cCur:new T.Vector3(), Dc:null,   // corrected track (Track F)
                 truePos:new T.Vector3(), prevTrue:new T.Vector3(), travelAz:0,
+                ghostLive:new T.Vector3(),   // TRUE + gCur every frame, shown or not (overlays read it via ctx.live)
                 camOff:new T.Vector3(), lookOff:new T.Vector3(), camInit:false, userCam:false,
                 antennaLocal:new T.Vector3(0, 2.2, 0), antW:new T.Vector3(), cred:'VALID', passes:[], rig:null, ghostRig:null};
     S.current = st;
@@ -1498,6 +1503,11 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
         st.overlay = ovMod.mount({THREE:T, scene, mission:m, helpers: ARBITRAS_HELPERS.forMission(m),
           heightAt: (x, z) => terrainHeight(x, z), latLonToEnu: (la, lo) => R.latLonToEnu(m, la, lo), enuToLatLon: (e, n) => R.enuToLatLon(m, e, n),
           labels: lab.current, project, glowTexture,
+          // live scene positions, mutated in place every frame (read-only for overlays): the
+          // `frame` passed to epoch() is a snapshot at epoch arrival and the vehicle keeps
+          // moving along the route through the interval, so anything that rides with the
+          // vehicle must be placed from these in tick(), not from the snapshot.
+          live: {truePos: st.truePos, ghostPos: st.ghostLive},
           colors: {truth:'#7FA8CC', believed:'#E4551F', corrected:'#6FCF97', amber:'#E8A21C', red:'#D62119', dim:'#8794A2'},
           report: note => { status.overlay = note; report(); },
           setProgress: sv => { st.sPrev = st.sTgt = st.sCur = sv; }});
@@ -1556,6 +1566,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
       veh.updateMatrixWorld(true);
       st.antW.copy(st.antennaLocal).applyMatrix4(st.rig ? st.rig.chassis.matrixWorld : veh.matrixWorld);
       rxGlow.position.copy(st.antW); st.lblTruth.p.copy(st.antW).y += 0.9;
+      st.ghostLive.set(st.truePos.x + st.gCur.x, st.truePos.y, st.truePos.z + st.gCur.z);   // y: overlays refit with heightAt
       const show = st.Dmag > 0.5 && !!modelRoot;          // same D the readout shows
       ghostG.visible = gGlow.visible = show;
       if (show) {
@@ -1743,7 +1754,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
 function Authority({state}) {
   return html`
     <div className="cell c-auth">
-      <div className="lbl">Positional authority</div>
+      <div className="lbl">Authority</div>
       <div className="state" style=${{color:COLOR[state]}}>${state}</div>
       <div className="sub">${BEHAVIOUR[state]}</div>
     </div>`;
@@ -1775,7 +1786,7 @@ function Features({features, terrain}) {
   const labels = terrain && terrain.available ? {...FEATURE_LABEL, ...TERRAIN_FEATURE} : FEATURE_LABEL;
   return html`
     <div className="cell c-feat">
-      <div className="lbl">Which signal diverged</div>
+      <div className="lbl">Signal checks</div>
       <div className=${'frows' + (Object.keys(labels).length > 4 ? ' five' : '')}>
         ${Object.keys(labels).map(k => {
           const v = features && typeof features[k] === 'number' ? features[k] : null;
@@ -1804,7 +1815,7 @@ function Geometry({geometry, divergence, tracked, terrain}) {
   const otherK = src === 'terrain' ? 'residual' : 'map extent';
   return html`
     <div className="cell c-geom">
-      <div className="lbl">Trusted geometry</div>
+      <div className="lbl">Trusted satellites</div>
       <div className="geo">
         <div className="boundwrap">
           <div className=${'bound' + (g.displacement_bound_m != null ? '' : ' none')}
@@ -1819,9 +1830,9 @@ function Geometry({geometry, divergence, tracked, terrain}) {
           <div className="kv"><span>information ratio</span>
             <b>${g.information_ratio != null ? g.information_ratio.toFixed(3) : '—'}</b></div>
           <div className="kv"><span>satellites tracked</span><b>${tracked ?? '—'}</b></div>
-          <div className="kv"><span>next best observation</span>
+          <div className="kv"><span>next best satellite</span>
             <b>${g.next_best_observation || '—'}</b></div>
-          <div className="kv"><span>drift from last trusted</span>
+          <div className="kv"><span>drift since last trusted</span>
             <b>${drift != null ? drift.toFixed(3) : '—'}</b></div>
         </div>
       </div>
@@ -1886,7 +1897,7 @@ function Dropped({geometry}) {
   const ex = (geometry || {}).excluded_sv || [];
   return html`
     <div className="cell c-drop">
-      <div className="lbl">Dropped from trusted set</div>
+      <div className="lbl">Excluded satellites</div>
       <div className="sv">
         ${ex.length
           ? ex.map(s => html`<span key=${s}>${s}</span>`)
@@ -1928,9 +1939,15 @@ function App() {
   const [mission, setMission] = useState(null);
   const [terrain, setTerrain] = useState(null);      // class grid for missions with scene.terrain_map
   const [hud, setHud] = useState(null);              // mission overlay HUD (Track F)
-  const [envStatus, setEnvStatus] = useState({note:'loading vehicle model · loading sky', attrib:ENV.attribNoModel});
+  const [envStatus, setEnvStatus] = useState({note:'loading vehicle model · loading sky'});
   const mapRef = useRef(null);
   const mapSize = useSize(mapRef);
+  // The gate the operator is reading, or null while the replay free-runs
+  // (console/web/DIALOGUE.md §5). Held state lives in a ref as well because the
+  // consumer below is a timer closure and must read it without re-subscribing.
+  const [gate, setGate] = useState(null);
+  const heldRef = useRef(false);
+  const closeGate = useCallback(() => { heldRef.current = false; setGate(null); }, []);
 
   useEffect(() => {
     // Track F: ?mission=<name> selects a registry mission (console/missions);
@@ -1944,20 +1961,82 @@ function App() {
       }).catch(() => {});
   }, []);
 
+  // The stream is SERVER-paced (console/server.py `_events`: time.sleep(1/rate)),
+  // so a gate cannot stop the server -- the client buffers. `onmessage` enqueues;
+  // a consumer applies ONE epoch per stream interval; an epoch carrying
+  // dialogue.gate opens the gate and the consumer holds; the box's onDone closes
+  // it and the backlog drains at the normal rate (console/web/DIALOGUE.md §5).
+  //
+  // NO EPOCH IS EVER SKIPPED. The 3D scene lerps between consecutive epochs and
+  // the arbitras's state machine is a sequence: dropping one corrupts both. This is
+  // a replay, so lagging wall-clock is the right trade and the queue is bounded by
+  // the file (a few thousand epochs).
+  //
+  // Only the epoch stream is paused. The WebGL loop and the takeover overlay's
+  // tick are requestAnimationFrame-driven inside EnvScene and keep running: a
+  // held replay looks paused, not hung.
   useEffect(() => {
-    const src = new EventSource('/events' + window.location.search);
-    src.onopen = () => setConn('live');
-    src.onmessage = e => {
-      const m = JSON.parse(e.data);
+    const q = [];                  // pending: {m} epoch payloads, {dl} guide tails
+    let ended = false;             // server sent `end`; the backlog may still drain
+    let timer = null, lastAt = 0;
+    // Consumer cadence, MEASURED from inter-arrival time rather than assumed. The
+    // server sleeps 1/rate between writes, so the gap between arrivals IS the
+    // stream interval -- and it stays right when the server was started with
+    // --rate N and the URL carries no ?rate, and in --tail mode where the pace is
+    // the producer's, neither of which the query string knows. Seeded from ?rate
+    // (server default 15/s) so the first epochs already move at the right speed;
+    // median of the first 12 gaps, then frozen, so one scheduling hiccup or a
+    // bunched pair of arrivals cannot skew it.
+    const gaps = []; let iv = 1000 / STREAM_HZ;
+    const measure = g => {
+      if (!(g > 4 && g < 4000) || gaps.length >= 12) return;
+      gaps.push(g);
+      if (gaps.length >= 5) {
+        const a = gaps.slice().sort((x, y) => x - y);
+        iv = Math.min(2000, Math.max(16, a[a.length >> 1]));
+      }
+    };
+    const openGate = dl => {
+      // No box mounted means no way to click past a gate: never hold.
+      const lines = (DIALOGUE_BOX && dl && dl.lines) || NO_LINES;
+      if (!lines.length) return;
+      heldRef.current = true;
+      setGate({lines, reason: dl.gate_reason || null, verified: dl.verified !== false});
+    };
+    const apply = it => {
+      if (it.dl) return openGate(it.dl);          // the guide's closing lines
+      const m = it.m;
       setD(m);
       // Trail keeps only what the frame math needs: epoch index (-> s along the
       // route) and the believed/true pair (-> measured displacement D).
       if (m.position) setTrail(t => [...t.slice(-2400),
         {i:m.epoch_index, ep:{position:m.position, _truth:m._truth}}]);
+      if (m.dialogue && m.dialogue.gate) openGate(m.dialogue);   // absent/null: free-run
     };
-    src.addEventListener('end', () => { setConn('ended'); src.close(); });
+    const tick = () => {
+      timer = setTimeout(tick, Math.max(16, iv));
+      if (heldRef.current) return;
+      if (q.length) return apply(q.shift());
+      // `end` arrives while the backlog is still draining, so 'replay complete'
+      // waits for the queue to empty and for the last gate to be clicked past.
+      if (ended) setConn(c => (c === 'live' || c === 'connecting') ? 'ended' : c);
+    };
+    timer = setTimeout(tick, Math.max(16, iv));
+
+    const src = new EventSource('/events' + window.location.search);
+    src.onopen = () => setConn('live');
+    src.onmessage = e => {
+      const now = performance.now();
+      if (lastAt) measure(now - lastAt);
+      lastAt = now;
+      q.push({m: JSON.parse(e.data)});
+    };
+    // The guide's `end` lines belong to no epoch, so they arrive on their own
+    // event and queue BEHIND the backlog rather than jumping it.
+    src.addEventListener('dialogue', e => { try { q.push({dl: JSON.parse(e.data)}); } catch (_) {} });
+    src.addEventListener('end', () => { ended = true; src.close(); });
     src.onerror = () => setConn(src.readyState === 2 ? 'lost' : 'connecting');
-    return () => src.close();
+    return () => { src.close(); clearTimeout(timer); };
   }, []);
 
   useEffect(() => {
@@ -2001,6 +2080,24 @@ function App() {
   const showMap = VIEW === 'map' || VIEW === 'split', showSky = VIEW === 'sky' || VIEW === 'split';
   const showEnv = VIEW === 'env';
   const orbitHint = (showEnv || showSky) && !LOCK ? 'drag to orbit · ' : '';
+  // The scene key: the legend that makes the 3D view readable, NOT the explanation
+  // text that was removed. It keeps its place at the right of the bottom band, now
+  // as the dialogue box's `aside` column.
+  const sceneKey = showEnv ? html`<div className="expkey">
+    <div className="keys">
+      <div><i style=${{background:'#8A857A'}}></i>true</div>
+      <div><i className="gh"></i>believed</div>
+      <div><i style=${{background:'#A9CCEA'}}></i>satellite</div>
+      <div><i style=${{background:'var(--accent)'}}></i>excluded satellite</div>
+      <div><i style=${{background:'#6FCF97'}}></i>corrected</div>
+      <div><i style=${{background:'none',borderTop:'2px solid #A9CCEA',height:0}}></i>ground uplink</div>
+    </div>
+    <div className="n2"><b>${nTrusted}</b> trusted · <b>${nExcl}</b> excluded · real ephemeris, ${ts}</div>
+    <div className="n2">route <b>${routeM.toFixed(0)}</b> / ${mission ? mission.route_length_m.toFixed(0) : '—'} m
+      ${mission && sep < 0.5 && html`<span className="st" style=${{color:'var(--truth)'}}> · believed = true · no measured displacement</span>`}
+      ${envStatus.note && html`<span className="st"> · ${envStatus.note}</span>`}
+    </div>
+  </div>` : null;
 
   return html`
     <div className="banners">
@@ -2013,8 +2110,8 @@ function App() {
       ${conn === 'lost' && html`<div className="banner unverified">
         Stream disconnected — this display is stale — press R to reconnect
       </div>`}
-      ${d && d.explanation_verified === false && html`<div className="banner unverified">
-        Explanation claim failed verification — numeric detail withheld
+      ${d && d.dialogue && d.dialogue.verified === false && html`<div className="banner unverified">
+        Dialogue claim failed verification — the line was withheld
       </div>`}
     </div>
 
@@ -2041,17 +2138,15 @@ function App() {
                                 orbit=${ORBIT} onStatus=${setEnvStatus} credential=${credShown} terrain=${terrain || null}
                                 payload=${d} state=${state} onHud=${setHud} Dc=${Dc}/>`
             : html`<div className="idle">loading mission</div>`}
-          <div className="rcap">Rendered scene · route and motion are a presentation frame; the receiver is static · position divergence and satellites are from data · terrain and vehicle model illustrative${d && d.terrain && d.terrain.available ? ' · terrain sensor simulated' : ''}</div>
-          <div className="attrib">${envStatus.attrib}</div>
         </div>`}
       ${showMap && html`
         <div className="pane" ref=${mapRef}>
           <${Plot} trail=${trail} mission=${mission} size=${mapSize} credential=${credShown}/>
           <div className="legend">
-            <div><i style=${{borderColor:'var(--truth)'}}></i>true · route frame</div>
-            <div><i style=${{borderColor:'var(--accent)'}}></i>believed · true + measured displacement</div>
-            <div><i className="band"></i>corridor · alert limit ${mission ? mission.corridor_half_width_m : '—'} m half-width</div>
-            <div><i className="dash" style=${{borderColor:'var(--truth)'}}></i>ground uplink · mission authorisation</div>
+            <div><i style=${{borderColor:'var(--truth)'}}></i>true</div>
+            <div><i style=${{borderColor:'var(--accent)'}}></i>believed</div>
+            <div><i className="band"></i>corridor</div>
+            <div><i className="dash" style=${{borderColor:'var(--truth)'}}></i>ground uplink</div>
           </div>
           <div className="rcap">Route and motion are a presentation frame · the receiver is static · divergence is measured</div>
         </div>`}
@@ -2076,29 +2171,26 @@ function App() {
       <div className=${'layer kbox' + (layerOn ? '' : ' off')}>
         Trust layer <b>${layerOn ? 'ON' : 'OFF'}</b></div>
       <div className="hint">
-        ${conn === 'ended' ? 'replay complete · ' : ''}${conn === 'connecting' ? 'connecting · ' : ''}${orbitHint}press R to reset
+        ${conn === 'ended' ? 'replay complete · ' : ''}${conn === 'connecting' ? 'connecting · ' : ''}${gate ? 'paused · ' : ''}${orbitHint}press R to reset
       </div>
     </div>
 
-    <div className=${'expbar' + (showEnv ? ' env' : '')}>
-      <div className="h">${d && d.explanation ? d.explanation.headline : ''}</div>
-      <div className="d">${d && d.explanation ? d.explanation.detail : ''}</div>
-      ${showEnv && html`<div className="expkey">
-        <div className="keys">
-          <div><i style=${{background:'#8A857A'}}></i>solid · true (route frame)</div>
-          <div><i className="gh"></i>ghost · believed = true + measured displacement</div>
-          <div><i style=${{background:'#A9CCEA'}}></i>satellite links · ranging (position)</div>
-          <div><i style=${{background:'var(--accent)'}}></i>excluded satellite · link dropped</div>
-          <div><i style=${{background:'#6FCF97'}}></i>corrected · trusted-subset fix + protection-level ring · while the gate passes</div>
-          <div><i style=${{background:'none',borderTop:'2px solid #A9CCEA',height:0}}></i>ground uplink · TESLA mission authorisation (authority)</div>
-        </div>
-        <div className="n2"><b>${nTrusted}</b> trusted · <b>${nExcl}</b> excluded · real ephemeris, ${ts}</div>
-        <div className="n2">route <b>${routeM.toFixed(0)}</b> / ${mission ? mission.route_length_m.toFixed(0) : '—'} m
-          ${mission && sep < 0.5 && html`<span className="st" style=${{color:'var(--truth)'}}> · believed = true · no measured displacement</span>`}
-          ${envStatus.note && html`<span className="st"> · ${envStatus.note}</span>`}
-        </div>
-      </div>`}
-    </div>`;
+    ${/* The dialogue box replaces the explanation bar that stood here. It draws
+         its own band, at exactly the two heights the bar used, and takes the env
+         view's scene key as its right-hand `aside` column (DIALOGUE.md §4), so
+         the band is one fixed-height element as before and nothing above it moved.
+         payload.explanation is still on the wire (server.py decide()) and still
+         feeds the verification banner above -- only its RENDERING is gone.
+         `lines` empty is the free-running state: the box holds its last line,
+         dimmed. A payload with no `dialogue` at all (an older stream, or
+         ?layer=off) simply never gates. Without /dialogue.js there is no box and
+         no gate: the fallback band keeps the geometry and the key. */ null}
+    ${DIALOGUE_BOX
+      ? html`<${DIALOGUE_BOX} lines=${gate ? gate.lines : NO_LINES}
+                              gateReason=${gate ? gate.reason : null}
+                              verified=${gate ? gate.verified : true}
+                              state=${state} onDone=${closeGate} aside=${sceneKey}/>`
+      : html`<div className=${'dock' + (showEnv ? ' env' : '')}>${sceneKey}</div>`}`;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);

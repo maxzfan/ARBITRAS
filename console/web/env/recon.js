@@ -63,7 +63,6 @@
     sky: { horizon: '#B2B2B3', mid: '#B6B8BA', zenith: '#B4B7BB' },   // first paint and fallback: the backdrop's bands at dim 0.58 (uniform mist)
     sun: { az: 126.0, el: 2.6 },                          // az: measured from the HDR, the aim for the backdrop's sun; el from backdrop.sun_el at load
     palette: { ground: '#4A4633', rock: '#34312E', accent: '#7FA8CC' },   // olive-brown, dark rock, cold blue
-    attribution: 'Ground: Poly Haven, CC0 · sky: rendered scene (Blender), lit by a Poly Haven HDR',
     // Harness convention (preview.html): the camera sits at compass bearing
     // (180 - az) from the route box centre, dist metres away at elevation el, and
     // OrbitControls aim it at the route start. az 294 -> camera ~(-40, -80) ENU,

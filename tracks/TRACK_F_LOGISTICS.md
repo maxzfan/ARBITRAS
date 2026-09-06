@@ -29,7 +29,7 @@ signal alone (VERIFIED) — so no mission should regenerate its stream before F-
 
 ### The mission
 A resupply UGV convoy leaves a forward operating base and drives a ~830 m trafficable
-corridor to a resupply point — PROJECT.md §1 verbatim ("resupply forward, casualty
+corridor to a resupply point — design.md §1 verbatim ("resupply forward, casualty
 evacuation back, across the segment under the greatest threat from enemy observation and
 fires"; GroundBreaker 1, Camp Grafton). The corridor is the only ground the vehicle may
 drive: a single-track unimproved road whose half-width is the alert limit. A position error

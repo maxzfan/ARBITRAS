@@ -88,11 +88,17 @@ TARGETS = {"top6": top_n_by_elevation(6), "top8": top_n_by_elevation(8),
 DEFAULT_TARGET = "top6"
 
 EPOCH_S = 30
-DEMO_RATE_EPS = 15.0     # §5 demo replay rate (10-20 epochs/s); legibility budget below
-LEGIBLE_EPOCHS = 120     # 8.0 s on screen at DEMO_RATE_EPS -- the minimum a credential
+# §5: 10-20 epochs/s is the DEVELOPMENT range; the demo replays at 5 because
+# the guide dialogue (console/web/DIALOGUE.md) gates the replay and has to be
+# read. console/server.py --rate, backend/stream.py and the console consumer
+# seed carry the same number and must not drift. Purely a reporting constant
+# here: it converts epoch counts to on-screen seconds in the provenance
+# tables and changes no emitted data.
+DEMO_RATE_EPS = 5.0
+LEGIBLE_EPOCHS = 120     # 24.0 s on screen at DEMO_RATE_EPS -- the minimum a credential
                          # state must hold for video beat 4 to be readable (§11b):
                          # long enough to read the legend and understand PENDING
-PRE_LAPSE_EPOCHS = 45    # 3.0 s before PENDING begins; reported for the threshold pick
+PRE_LAPSE_EPOCHS = 45    # 9.0 s before PENDING begins; reported for the threshold pick
 
 # Team demo window built around Track A's code-default onset of 12:30, so every
 # file on the team attacks at the same epoch. Lead-in and attack are unchanged
@@ -105,7 +111,7 @@ ATTACK_EPOCHS = 90       # beats 2/3: 12:30:00 -> 13:14:30
 # TESLA parameters -- VENUE-TUNED, per design.md §9 ("Parameters (tune at venue)";
 # known weaknesses: "interval length and disclosure lag become operational
 # parameters tuned against comms reliability"). The §9 defaults (T_int 10, d 2
-# -> PENDING 20 epochs) flash past in 1.3 s at DEMO_RATE_EPS and beat 4 is
+# -> PENDING 20 epochs) flash past in 4.0 s at DEMO_RATE_EPS and beat 4 is
 # illegible. Tuned to T_int 60 x d 2 = 120 epochs (8.0 s). d stays at the §9
 # default: d is the disclosure lag -- the forgery window a clock-dragging
 # spoofer has to work with (§9 clock coupling) -- and lengthening it weakens the
@@ -548,7 +554,7 @@ systems {SYSTEMS}. {floor}
 | `geometry.next_best_observation` | derived | rank-one determinant update over visible-but-untrusted groups (CONVERGE identity) |
 | `features.by_sv` | derived | Track D contract extension 1 (`backend/detection/features.py by_sv_scores`): per-SV max of the three per-SV features, each normalised by its calibrated saturation and clipped to [0, 1]. Cross-constellation is solution-level and does not enter |
 | `geometry.correction` | derived from **measured** thresholds | Track D weighted-RAIM block (`backend/correction/emit.py`): trusted-subset WLS re-solve (binary weights from `excluded_sv`), slope-form protection level with tau fit on the clean day (p99.9 per-SV residual, `backend.correction.validate`), five-check gate with 10-epoch grant / 1-epoch revoke hysteresis. Fail-closed: `correction_ok: false` with null position whenever the solve or any evaluated check cannot stand |
-{terrain_rows}| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last {20 / DEMO_RATE_EPS:.1f} s at the {DEMO_RATE_EPS:.0f} epochs/s demo rate; tuned to {T_INT_EPOCHS} × {DISCLOSURE_LAG_INTERVALS} so every credential state holds ≥ {LEGIBLE_EPOCHS / DEMO_RATE_EPS:.0f} s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. {pre_lapse} |
+{terrain_rows}| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING ({n_pending} epochs = T_int {T_INT_EPOCHS} × d {DISCLOSURE_LAG_INTERVALS}) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last {20 / DEMO_RATE_EPS:.1f} s at the {DEMO_RATE_EPS:g} epochs/s demo rate; tuned to {T_INT_EPOCHS} × {DISCLOSURE_LAG_INTERVALS} so every credential state holds ≥ {LEGIBLE_EPOCHS / DEMO_RATE_EPS:.0f} s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. {pre_lapse} |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 
@@ -600,7 +606,7 @@ plots on one axis.
 demo.jsonl beats: {PRE_EPOCHS} clean · {ATTACK_EPOCHS} attack ({ta0} → {ta1}) ·
 {POST_EPOCHS} post-attack clean with credential {POST_VALID_EPOCHS} VALID ({tv0} → {tp0}) /
 {n_pending} PENDING ({tp0} → {te0}) / {POST_EXPIRED_EPOCHS} EXPIRED ({te0} → {t1}).
-At {DEMO_RATE_EPS:.0f} epochs/s: VALID tail {POST_VALID_EPOCHS / DEMO_RATE_EPS:.1f} s ·
+At {DEMO_RATE_EPS:g} epochs/s: VALID tail {POST_VALID_EPOCHS / DEMO_RATE_EPS:.1f} s ·
 PENDING {n_pending / DEMO_RATE_EPS:.1f} s · EXPIRED {POST_EXPIRED_EPOCHS / DEMO_RATE_EPS:.1f} s.
 
 ## Position solution — is the solver right, and what did the attack do to the fix

@@ -86,7 +86,7 @@ def test_credential_schedule_is_ordered_with_the_tesla_lag(demo):
 
 def test_each_credential_state_is_legible_at_demo_rate(demo):
     """Video beat 4 (design.md section 11a/11b): each credential state must hold
-    >= LEGIBLE_EPOCHS (3 s at the 15 epochs/s demo rate) so it reads on screen."""
+    >= LEGIBLE_EPOCHS (24 s at the 5 epochs/s demo rate) so it reads on screen."""
     creds = [r["credential_status"] for r in demo]
     tail = creds[PRE_EPOCHS + ATTACK_EPOCHS:]
     assert tail.count("VALID") == POST_VALID_EPOCHS >= LEGIBLE_EPOCHS

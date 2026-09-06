@@ -1,0 +1,260 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ARBITRAS dialogue preview</title>
+<!--
+  Standalone harness for the dialogue box (console/web/DIALOGUE.md §4), modelled
+  on console/web/env/preview.html: it develops and screenshots the box WITHOUT
+  the backend, the SSE stream or the 3D console.
+
+    cd console/web && python3 -m http.server 8412
+    open http://127.0.0.1:8412/dialogue_preview.html?gate=state&state=SURRENDERED
+
+  Query: ?gate=<intro|beat|state|credential|end|long|unverified|free>
+         &state=<NOMINAL|DEGRADED|RESTRICTED|SURRENDERED>
+         &verified=0        force the unverified treatment
+         &aside=1           mount with the env view's scene-key column
+         &chrome=0          hide the harness controls (clean capture)
+
+  Everything above the box is harness scaffolding standing in for the console's
+  instrument strip and stage. The stage reports its own live height and the
+  min/max it has ever measured: if those three numbers are not identical after
+  clicking through every fixture, the band reflowed and the box is wrong.
+  window.__dlgInfo() is the audit hook, like the console's window.__envInfo().
+-->
+<style>
+  /* Vendored, offline (index.html declares the same faces; this is the harness
+     copy so the box renders in Plex outside the console). */
+  @font-face{font-family:'IBM Plex Sans';font-weight:400;font-display:block;
+             src:url('/vendor/plex-sans-400.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:500;font-display:block;
+             src:url('/vendor/plex-sans-500.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:600;font-display:block;
+             src:url('/vendor/plex-sans-600.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Sans';font-weight:700;font-display:block;
+             src:url('/vendor/plex-sans-700.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Mono';font-weight:400;font-display:block;
+             src:url('/vendor/plex-mono-400.woff2') format('woff2')}
+  @font-face{font-family:'IBM Plex Mono';font-weight:500;font-display:block;
+             src:url('/vendor/plex-mono-500.woff2') format('woff2')}
+  /* The console's custom properties, copied from index.html so the box is
+     judged against the real palette. */
+  :root{
+    --bg:#0B0D0F; --panel:#0E1114; --line:#1C222A; --keyline:#2B333D;
+    --fg:#EEF2F6; --dim:#8794A2; --faint:#4E5A67;
+    --accent:#E4551F;
+    --nominal:#D8E2EC; --degraded:#E8A21C; --restricted:#E4551F; --surrendered:#D62119;
+    --believed:#E4551F; --truth:#7FA8CC;
+    --display:"Helvetica Neue","Arial Narrow",Impact,system-ui,sans-serif;
+    --sans:'IBM Plex Sans','Inter',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--fg);font:13px/1.5 var(--sans);
+       -webkit-font-smoothing:antialiased;overflow:hidden}
+  #root{height:100vh;display:flex;flex-direction:column}
+  /* stand-in for the instrument strip: same fixed 156px, so the proportions of
+     the capture match the console. */
+  .h-strip{flex:0 0 auto;height:156px;background:var(--panel);
+           border-bottom:1px solid var(--keyline);display:flex;align-items:center;
+           padding:0 24px;gap:24px}
+  .h-lbl{font-weight:600;font-size:10px;letter-spacing:.16em;color:var(--faint);
+         text-transform:uppercase}
+  .h-stage{flex:1;position:relative;min-height:0;overflow:hidden;
+           background:linear-gradient(#10151A,#0A0D10)}
+  .h-mid{position:absolute;inset:0;display:flex;flex-direction:column;
+         align-items:center;justify-content:center;gap:10px;pointer-events:none}
+  .h-mid .n{font-family:var(--display);font-weight:900;font-size:54px;line-height:1;
+            letter-spacing:-.03em;color:var(--faint);font-variant-numeric:tabular-nums}
+  .h-mid .u{font-weight:600;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+            color:var(--faint)}
+  .h-mid .u b{color:var(--degraded);font-weight:600}
+  .h-ctl{position:absolute;left:20px;top:18px;z-index:5;display:flex;flex-direction:column;
+         gap:8px;max-width:520px}
+  .h-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .h-row>span{font-weight:600;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+              color:var(--faint);margin-right:4px}
+  button{font-family:var(--sans);font-weight:600;font-size:10px;letter-spacing:.1em;
+         text-transform:uppercase;color:var(--dim);background:#0B0D0Fcc;
+         border:1px solid var(--keyline);padding:5px 9px;cursor:pointer}
+  button:hover{color:var(--fg);border-color:#3A434F}
+  button.on{color:var(--bg);background:var(--dim);border-color:var(--dim)}
+  .h-key{font-family:var(--sans);font-weight:500;font-size:10px;letter-spacing:.08em;
+         text-transform:uppercase;color:var(--dim);white-space:nowrap;line-height:15px}
+  .h-key .n2{font-family:var(--mono);font-weight:400;font-size:10px;color:var(--faint);
+             letter-spacing:.02em;text-transform:none;line-height:15px}
+</style>
+<div id="root"></div>
+<pre id="err" style="position:absolute;inset:auto 0 0 0;display:none;padding:14px;margin:0;
+     background:#3d1f1f;color:#f0b3b0;white-space:pre-wrap;z-index:9"></pre>
+<script>
+window.addEventListener('error', e => { const el = document.getElementById('err');
+  el.style.display = 'block';
+  el.textContent += (e.message || 'error') + '\n  at ' + (e.filename || '?') + ':' + (e.lineno || '?') + '\n'; });
+</script>
+<script src="/vendor/react.js"></script>
+<script src="/vendor/react-dom.js"></script>
+<script src="/dialogue.js"></script>
+<script type="module">
+/* Mounted exactly as index.html will mount it: React + htm globals, one tag. */
+import htmMod from '/vendor/htm.js';
+const html = htmMod.bind(React.createElement);
+const {useState, useEffect, useRef, useCallback} = React;
+const {Box} = window.ARBITRAS_DIALOGUE || {};
+if (!Box) throw new Error('dialogue.js did not register window.ARBITRAS_DIALOGUE.Box');
+
+const QS = new URLSearchParams(location.search);
+
+/* Hand-written fixtures in the DIALOGUE.md voice (three of them are the
+   contract's own worked examples). Claims carry a real contract path from
+   fixtures/epoch.json, or a named scenario source -- never both. */
+const GATES = {
+  intro: {reason: 'intro', verified: true, lines: [
+    {tone: 'calm', text: 'I am ARBITRAS. I sit between the receiver and the vehicle, and I decide how much authority the position deserves.',
+     claims: []},
+    {tone: 'calm', text: 'Right now the sky is clean: confidence 0.98, five constellations, nothing excluded. The vehicle has full authority.',
+     claims: [{text: '0.98', value: 0.98, path: 'confidence'}]},
+  ]},
+  beat: {reason: 'beat', verified: true, lines: [
+    {tone: 'alert', text: 'Six GPS satellites got louder at the same instant, +8 dB. Real satellites drift apart -- these moved together. That is one transmitter, not six.',
+     claims: [{text: '+8 dB', value: 8.0, source: 'injector parameter, backend/missions.py recon'}]},
+  ]},
+  state: {reason: 'state', verified: true, lines: [
+    {tone: 'bad', text: 'I have dropped GPS entirely and I am navigating on Galileo. Losing a whole constellation costs me geometry: my information ratio is 0.80 of the full sky.',
+     claims: [{text: '0.80', value: 0.80, path: 'geometry.information_ratio'}]},
+    {tone: 'bad', text: 'The box an attacker could still move me inside is 41.2 m wide, so the vehicle stops accepting waypoints and finishes the leg it is on.',
+     claims: [{text: '41.2 m', value: 41.2, path: 'geometry.displacement_bound_m'}]},
+    {tone: 'act', text: 'Control is with you. Drive by what you can see; I will hand autonomy back when I have seen clean signals for 10 straight epochs.',
+     claims: [{text: '10', value: 10, source: 'hysteresis window, docs/design.md §8'}]},
+  ]},
+  credential: {reason: 'credential', verified: true, lines: [
+    {tone: 'act', text: 'The ground station revoked this mission authorisation. The sky is still clean, but a clean sky does not outrank a withdrawn credential: the vehicle holds.',
+     claims: [{text: 'clean', value: 'VALID', source: 'operator action, backend/missions.py combat'}]},
+  ]},
+  end: {reason: 'end', verified: true, lines: [
+    {tone: 'good', text: 'Authority is back one step, not all the way. I have to see clean signals for 10 straight epochs before each step up, so nothing recovers on a lucky reading.',
+     claims: [{text: '10', value: 10, source: 'hysteresis window, docs/design.md §8'}]},
+  ]},
+  /* Worst case for the fixed height: the 220-character cap in DIALOGUE.md's
+     rules of thumb, which is what the three-line text area is sized for. */
+  long: {reason: 'beat', verified: true, lines: [
+    {tone: 'alert', text: 'The believed position has walked 41.2 m off the route while the wheels say the vehicle is on gravel and the signed pre-map says the believed fix is in scrub, so the two disagree and I trust the ground under the wheels.',
+     claims: [{text: '41.2 m', value: 41.2, path: 'geometry.displacement_bound_m'}]},
+  ]},
+  unverified: {reason: 'beat', verified: false, lines: [
+    {tone: 'alert', text: 'A number in this line did not match the epoch it was measured against, so it is shown without a source and nothing downstream may act on it.',
+     claims: [{text: 'did not match', value: null, path: 'geometry.protection_level_m'}]},
+  ]},
+  free: {reason: null, verified: true, lines: []},
+};
+const ORDER = ['intro', 'beat', 'state', 'credential', 'end', 'long', 'unverified', 'free'];
+const STATES = ['NOMINAL', 'DEGRADED', 'RESTRICTED', 'SURRENDERED'];
+
+/* The env view's scene key, copied from index.html's .expkey, so ?aside=1
+   shows what the taller band looks like with a right-hand column in it. */
+function SceneKey() {
+  return html`<div className="h-key">
+    <div>trusted · line of sight kept</div>
+    <div>excluded · line of sight dropped</div>
+    <div>corrected · trusted-subset fix</div>
+    <div>ground uplink · TESLA authorisation</div>
+    <div className="n2">harness stand-in for .expkey</div>
+  </div>`;
+}
+
+function Harness() {
+  const [gate, setGate] = useState(GATES[QS.get('gate')] ? QS.get('gate') : 'intro');
+  const [state, setState] = useState(STATES.includes(QS.get('state')) ? QS.get('state') : 'NOMINAL');
+  const [aside, setAside] = useState(QS.get('aside') === '1');
+  const [dones, setDones] = useState(0);
+  const stageRef = useRef(null);
+  const [h, setH] = useState({now: 0, min: Infinity, max: 0});
+
+  /* The reflow check: watch the stage, not the band. If the band ever grows,
+     the stage above it shrinks, and min !== max says so for the rest of the
+     session. */
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || !window.ResizeObserver) return;
+    const ro = new ResizeObserver(() => {
+      const v = Math.round(el.getBoundingClientRect().height);
+      setH(p => ({now: v, min: Math.min(p.min, v), max: Math.max(p.max, v)}));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const g = GATES[gate];
+  const verified = QS.get('verified') === '0' ? false : g.verified;
+  const onDone = useCallback(() => setDones(n => n + 1), []);
+
+  /* Audit hook, in the manner of window.__envInfo(). */
+  useEffect(() => {
+    window.__dlgInfo = () => {
+      const box = document.querySelector('.adlg-box');
+      const band = document.querySelector('.adlg-band');
+      const text = document.querySelector('.adlg-text');
+      const seen = box ? Array.from(text.childNodes)
+                             .filter(n => !(n.classList && n.classList.contains('adlg-veil')))
+                             .map(n => n.textContent).join('') : '';
+      return {
+        gate, gateReason: g.reason, state, verified, aside, dones,
+        lines: g.lines.length,
+        revealedChars: seen.length,
+        revealed: seen,
+        complete: !!document.querySelector('.adlg-chev'),
+        held: !!(box && box.classList.contains('adlg-held')),
+        unverified: !!(box && box.classList.contains('adlg-unver')),
+        claims: document.querySelectorAll('.adlg-cl:not(.adlg-veil)').length,
+        bandHeight: band ? +band.getBoundingClientRect().height.toFixed(2) : null,
+        textHeight: text ? +text.getBoundingClientRect().height.toFixed(2) : null,
+        textScroll: text ? text.scrollHeight : null,
+        stage: {now: h.now, min: h.min === Infinity ? null : h.min, max: h.max},
+        stageStable: h.min === h.max,
+      };
+    };
+  }, [gate, state, verified, aside, dones, h, g]);
+
+  const pick = (fn, v) => () => { fn(v); if (document.activeElement) document.activeElement.blur(); };
+  const chrome = QS.get('chrome') !== '0';
+
+  return html`
+    <div className="h-strip">
+      <div>
+        <div className="h-lbl">harness · instrument strip stand-in</div>
+        <div style=${{marginTop: '10px', color: 'var(--faint)', fontSize: '12px'}}>
+          The real strip is untouched: composite confidence, four sub-scores, geometry block.
+        </div>
+      </div>
+    </div>
+
+    <div className="h-stage" ref=${stageRef}>
+      <div className="h-mid">
+        <div className="n">${h.now}</div>
+        <div className="u">stage height ·
+          min <b>${h.min === Infinity ? '—' : h.min}</b> · max <b>${h.max}</b> ·
+          ${h.min === h.max ? 'no reflow' : 'REFLOWED'}</div>
+      </div>
+      ${chrome && html`<div className="h-ctl">
+        <div className="h-row"><span>gate</span>
+          ${ORDER.map(k => html`<button key=${k} className=${k === gate ? 'on' : ''}
+             onClick=${pick(setGate, k)}>${k}</button>`)}
+        </div>
+        <div className="h-row"><span>state</span>
+          ${STATES.map(s => html`<button key=${s} className=${s === state ? 'on' : ''}
+             onClick=${pick(setState, s)}>${s}</button>`)}
+          <button className=${aside ? 'on' : ''} onClick=${pick(setAside, !aside)}>aside</button>
+        </div>
+        <div className="h-row"><span>onDone</span>
+          <span style=${{fontFamily: 'var(--mono)', color: 'var(--dim)', textTransform: 'none',
+                         letterSpacing: 0}}>called ${dones}x · click the box or press Space</span>
+        </div>
+      </div>`}
+    </div>
+
+    <${Box} lines=${g.lines} gateReason=${g.reason} verified=${verified}
+            state=${state} onDone=${onDone} aside=${aside ? html`<${SceneKey}/>` : null} />`;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${Harness}/>`);
+</script>

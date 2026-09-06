@@ -42,15 +42,15 @@ mission, including #1; COMBAT is the mission whose experiment exposed it.
 
 ### The mission
 An armed UGV advances from a line of departure through phase lines PL AMBER and PL RED
-toward an objective, in the segment PROJECT.md §1 calls the most exposed to enemy
+toward an objective, in the segment design.md §1 calls the most exposed to enemy
 observation and fires. Its reported position does two things no other mission's does: it
 is the origin of every target grid it lases and reports, and the basis on which it reports
 crossing a phase line — the control measure that coordinates fires and manoeuvre behind
 it. A 98 m error is a wrong grid and a false "crossed PL AMBER" report.
 
-The operator's question is PROJECT.md §1's, sharpened: *may this vehicle's position feed
+The operator's question is design.md §1's, sharpened: *may this vehicle's position feed
 fire control right now, and who says so?* ARBITRAS answers with two independent inputs
-(PROJECT.md §2, Claim 1): a signal-derived confidence and a cryptographic credential.
+(design.md §2, Claim 1): a signal-derived confidence and a cryptographic credential.
 COMBAT alone shows the credential dominate in the direction no signal can override — the
 operator withdraws authorisation under a clean sky and the vehicle holds anyway.
 
@@ -220,8 +220,8 @@ target_svs="all_gps"), onset=datetime(2026,8,20,12,30), attack_epochs=20
 if j >= 250 else "VALID", out="out/combat.jsonl")`. Slice [1440, 1810) = 370 epochs,
 12:00:00 → 15:04:30; attack 12:30:00–12:39:30; RESTRICTED 12:55:00, DEGRADED 13:00:00,
 NOMINAL 13:05:00 (held 120 epochs ≥ LEGIBLE_EPOCHS); REVOKED 14:05:00, held 120 epochs
-(confidence there 0.854, VERIFIED at idx 250). At 15 epochs/s: lead-in 4.0 s, attack
-1.3 s, hold 3.3 s, staircase 1.3 s, NOMINAL 8 s, REVOKED 8 s; recommend `?rate=10`.
+(confidence there 0.854, VERIFIED at idx 250). At 5 epochs/s: lead-in 12.0 s, attack
+4.0 s, hold 10.0 s, staircase 4.0 s, NOMINAL 24 s, REVOKED 24 s; recommend `?rate=3`.
 Shared load / floor / calibration (with `resid_panel`) / xc / nav / sigma_UERE (item C);
 `xc.reset()` and `corrector.reset()` before the run.
 
