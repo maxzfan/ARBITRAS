@@ -74,6 +74,7 @@
       for (let i = 0; i < 20; i++) { const a = rnd()*Math.PI*2, d = 160 + rnd()*200;   // skyline outcrops
         put(TCx + Math.sin(a)*d, TCz + Math.cos(a)*d, 5 + rnd()*9); }
       rocks.count = n; rocks.castShadow = true; rocks.receiveShadow = true; rocks.layers.enable(H.INSET_LAYER);
+      rocks.frustumCulled = false;   // r147 culls InstancedMesh on the single-instance bounds at the origin
       scene.add(rocks); own.push(rocks);
     }
 

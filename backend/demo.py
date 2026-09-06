@@ -246,6 +246,13 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
             # xc.reset() before each replay so no state leaks across runs.
             xc_result = xc.score(ep, sols)
             feats["cross_constellation"] = xc_result["value"]
+            # Track F (TRACK_F_RECON.md F-R6): the compensated channel z-scores
+            # behind the feature, so a mission post-pass can attribute a
+            # disagreement (which constellation, clock or position) without
+            # re-solving. Not a scored feature: confidence.anomaly() sums only
+            # the names in the weight vector.
+            feats["cross_constellation_detail"] = {
+                k: round(float(v), 3) for k, v in (xc_result.get("channels") or {}).items()}
         excluded = (distrusted(res["per_sv"], cal) if exclude is None
                     else exclude(res["per_sv"], cal, xc_result, ep))
         geom = geometry_block(ep.time, excluded, list(ep.df.index))

@@ -53,6 +53,11 @@ class Mission:
     gain: dict = field(default_factory=lambda: {
         "NOMINAL": 1.0, "DEGRADED": 1.0, "RESTRICTED": 1.0, "SURRENDERED": 0.0})
     built: bool = False
+    # Half-width of the TRACK the terrain is flattened along (environment
+    # modules, contract invariant 1). Defaults to the alert limit, which is the
+    # corridor for a road-bound convoy; a scout's 100 m grid-square limit is not
+    # a road, so RECON sets it to a single-track width.
+    corridor_half_width_m: float | None = None
 
 
 # ----------------------------------------------------------------- kinematics
@@ -175,6 +180,8 @@ RECON = Mission(
         "SURRENDERED": "Holding at the observation point. Control is with the operator.",
     },
     scene={"env": "recon", "time": "dusk", "ambience": "hills"},
+    built=True,
+    corridor_half_width_m=12.0,        # single-track patrol path; the 100 m limit is a grid square, not a road
 )
 
 CASEVAC = Mission(
@@ -214,6 +221,7 @@ CASEVAC = Mission(
         "SURRENDERED": "Holding. Control is with the operator.",
     },
     scene={"env": "casevac", "time": "overcast", "ambience": "valley", "terrain_map": True},
+    built=True,
 )
 
 COMBAT = Mission(
@@ -257,6 +265,7 @@ COMBAT = Mission(
     },
     scene={"env": "combat", "time": "dawn", "ambience": "broken_ground"},
     gain={"NOMINAL": 1.0, "DEGRADED": 1.0, "RESTRICTED": 0.25, "SURRENDERED": 0.5},
+    built=True,
 )
 
 REGISTRY = {m.name: m for m in (LOGISTICS, RECON, CASEVAC, COMBAT)}
@@ -297,7 +306,7 @@ def as_dict(m: Mission) -> dict:
         "route_length_m": round(route_length(m.route_enu), 3),
         "speed_m_per_epoch": m.speed_m_per_epoch,
         "gain": dict(m.gain),
-        "corridor_half_width_m": m.alert_limit_m,
+        "corridor_half_width_m": (m.corridor_half_width_m if m.corridor_half_width_m is not None else m.alert_limit_m),
         "heading_convention": "radians, 0=east, pi/2=north, CCW positive",
         "ground_station": {"e": m.ground_station_enu[0], "n": m.ground_station_enu[1],
                            "lat": round(gs_lat, 8), "lon": round(gs_lon, 8)},

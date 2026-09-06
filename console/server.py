@@ -267,6 +267,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(t) if t else self.send_error(404, "no terrain map in data/")
         if u.path == "/home":
             return self._file(WEB / "home.html", "text/html; charset=utf-8")
+        if u.path.startswith("/overlays/"):
+            name = Path(u.path[10:]).name
+            if not name or Path(name).suffix.lower() not in (".js", ".md"):
+                return self.send_error(404)
+            return self._file(WEB / "overlays" / name,
+                              "application/javascript" if name.endswith(".js") else "text/plain; charset=utf-8")
         if u.path.startswith("/env/"):
             name = Path(u.path[5:]).name
             ext = Path(name).suffix.lower()
