@@ -840,3 +840,163 @@ recur: *span-keyed caches over mutated epoch streams are unsafe in this
 codebase* — clean vs injected, masked vs unmasked, and any future filtered
 variant all collide. Both caches now fingerprint the observables; any new one
 must too.
+
+
+---
+
+# Thresholds ruled 2026-09-06, and the state-level continuity cost
+
+    NOMINAL    0.8247   measured clean p1 of THIS detector
+    DEGRADED   0.50     carried from design.md §8
+    RESTRICTED 0.25     carried from design.md §8
+
+Split provenance, stamped into every emitted decision: NOMINAL is measured on
+this detector; DEGRADED and RESTRICTED are carried, and their justification is
+not a fit — both sit below the measured clean minimum of 0.7500, so neither can
+contribute a false surrender on this day. They partition the attack
+distribution, not the clean one.
+
+## FSR denominator: epoch 0 excluded (ruled)
+
+Epoch 0 has no causal baseline, so every per-SV feature is unscored, the
+anomaly reads 0, and confidence is exactly 1.0000 — an artefact of having no
+history, not a measurement of a clean sky. It is dropped from the
+false-surrender denominator (2,880 → 2,879 epochs).
+
+**The 0.750017 epoch is kept.** It is the clean-day minimum, it looks like a
+round 0.75 and is not, and it is data: `cross_constellation` saturated at 1.0
+on clean sky with the geometry deficit at zero.
+
+## Per-epoch FSR understates the cost by ~4x
+
+design.md §8 makes recovery asymmetric on purpose: a downgrade fires on one
+epoch's evidence, an upgrade needs 10 sustained epochs above the higher
+threshold plus 5 epochs' dwell. So one bad epoch does not cost one epoch of
+authority — it costs one epoch plus the whole climb back. A per-epoch
+threshold sweep has no memory and cannot see this.
+
+Measured through the arbiter on the clean day (`python -m
+backend.measurement.continuity`):
+
+| | NOMINAL 0.8247 (ruled) | NOMINAL 0.80 |
+|---|---|---|
+| scored epochs | 2,879 | 2,879 |
+| distinct downgrade events | **8** | 3 |
+| episodes below NOMINAL | 8 | 3 |
+| epochs below NOMINAL | **125** | 36 |
+| **fraction of day not NOMINAL** | **0.0434** | **0.0125** |
+| longest / median episode | 26 / 15.0 epochs | 16 / 10.0 epochs |
+| states visited | DEGRADED, NOMINAL | DEGRADED, NOMINAL |
+
+> **State-level FSR at the ruled threshold is 4.34%, against a per-epoch
+> figure of 1.01% at the same value — a 4.3x amplification.** Eight isolated
+> clean-day excursions become 125 epochs (62 minutes) of reduced authority,
+> because each one carries a ~15-epoch recovery. The same ratio holds at 0.80
+> (1.25% state-level against 0.28% per-epoch, 4.5x).
+>
+> Report the state-level number. The per-epoch one is not wrong, it is
+> answering a question no operator asks: what an operator experiences is time
+> under unnecessary restriction, which is what §10 says it intends to measure.
+
+Neither threshold ever reaches RESTRICTED or SURRENDERED on clean data — the
+clean distribution never comes near 0.50.
+
+## Time to alert, and whether authority returns
+
+Same arbiter, same hysteresis, at the ruled thresholds:
+
+| scenario | epochs to first downgrade | min state reached | recovers before window ends |
+|---|---|---|---|
+| carry-off coherent | **1** (30 s) | SURRENDERED | no |
+| carry-off at the pin | **1** (30 s) | SURRENDERED | no |
+| clock-domain walk | 2 (60 s) | SURRENDERED | no |
+| meaconing | **0** | DEGRADED | no |
+
+Meaconing alerts at the onset epoch itself because its confidence (0.7854
+± 0.0349) already sits below 0.8247 — the threshold was placed at the clean p1
+precisely where the meaconing distribution begins. It reaches DEGRADED and
+stops there, correctly: 0.7854 is nowhere near the 0.50 carried threshold. The
+walks cross the whole staircase within a couple of epochs.
+
+None recover, which is the intended behaviour: all four attacks run to the end
+of their window, so there is nothing to recover from yet.
+
+
+---
+
+# README §10 figures regenerated on the current detector (2026-09-06)
+
+Streams regenerated with `python -m backend.demo` after repairing the
+generator (see the defect note below), then:
+
+    python -m backend.measurement.displacement out/carryoff.jsonl
+    python -m backend.measurement.weight_sweep out/clean.jsonl \
+        out/carryoff.jsonl --nominal 0.8247 --n-draws 1000 --arbitrate
+
+## The generator was scoring with feature 2 dead
+
+`backend/demo.py` called `fit(clean, floor)` with no `resid_panel` and never
+masked. Once feature 2 became the post-fit residual it *requires* the
+solution, so in that generator it returned nothing and scored **0.0 on every
+epoch**. The previously published §10 numbers were therefore not merely fitted
+to a stale distribution — they came from a detector whose strongest channel was
+silent. This was a consequence of the feature 2 change that should have been
+traced into the generator when it was made and was not.
+
+Repaired: `demo.py` masks upstream, builds the residual panel, calibrates with
+it, threads per-epoch residuals into scoring (one solve per epoch, shared with
+the cross-constellation feature), and takes the demo pin from its single
+definition instead of the `0.02` test literal it still carried.
+
+Solver sanity on the regenerated clean stream: horizontal p50 **0.73 m**, p95
+1.67 m against the surveyed position, GDOP p50 1.63, zero unsolvable epochs.
+
+## Integrity — maximum adversarial displacement: 0.00 m
+
+At the ruled thresholds the arbiter leaves NOMINAL **one epoch after onset**,
+and the epoch preceding that transition is the onset epoch itself, where the
+walk has not yet displaced the solution. So the attacker achieves **0.00 m**
+before authority is reduced, against an analytic bound of **12.6 m** at the
+same epoch.
+
+**Two caveats, both of which matter more than the number.**
+
+1. **The figure is quantised by the 30 s epoch.** "0.00 m" means the attacker
+   got less than one epoch of walk-off, not that displacement is impossible.
+   Detection is faster than the sampling interval, so the measurement floor
+   and the result coincide. The attack goes on to reach **1027.0 m** inside
+   the window — long after the vehicle has surrendered.
+2. **§10's literal wording no longer picks the attack.** It says the epoch
+   preceding *the first* transition out of NOMINAL. With NOMINAL at the clean
+   p1 there are 8 clean-day downgrade events, the first at **00:26:30** — ten
+   hours before onset — so the literal definition selects a clean epoch and
+   returns 0.00 m for a reason that has nothing to do with the attack. Both
+   scopings happen to give 0.00 m here, so nothing is currently misreported,
+   but they agree by coincidence. **Scoping the definition to the first
+   transition after onset is a measurement decision and is not taken here.**
+
+Claim 2a check: empirical <= bound at **2,649 of 2,649** arbitrated-NOMINAL
+epochs — PASS.
+
+## Continuity — false surrender rate
+
+Reported as a distribution over 1,000 Dirichlet draws, never a point (§10):
+
+| | min | median | max |
+|---|---|---|---|
+| **arbitrated FSR** (hysteresis, the §10 headline) | 0.0000 | **0.0344** | 0.2858 |
+| downgrade events per draw | — | 5 | 54 |
+| raw per-epoch FSR | 0.013 | 0.059 | 0.979 |
+| attack detection fraction | 0.978 | 0.989 | 1.000 |
+
+**Weight-sensitive epochs: 96.2%**, against 44.6% in the superseded README.
+That is a worse answer to arXiv 2607.05415 and it should be reported as one.
+The likely reason is mechanical rather than mysterious: feature 2 is now
+load-bearing on the walks (d' 8.59) and silent on the clock-domain attack
+(0.02), so a re-weighting moves the composite much further than it did when
+feature 2 was weak everywhere. A single fixed weight vector is doing more work
+than before, so its choice matters more.
+
+At the ruled weights the arbitrated FSR median of 0.0344 sits close to the
+directly measured 0.0434 for the equal-weight vector; the spread is the answer
+to the objection, not the median alone.

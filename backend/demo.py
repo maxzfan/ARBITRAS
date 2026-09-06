@@ -60,21 +60,23 @@ from backend.detection import (FEATURE_NAMES, CrossConstellation,
 from backend.geometry.engine import compute_geometry_block, set_sigma_uere
 from backend.geometry.solve import (NavTables, displacement, error_from_surveyed,
                                     solve_epoch)
-from backend.injector import (CARRY_OFF, CLEAN, inject, summarise,
-                              top_n_by_elevation)
+from backend.injector import (CARRY_OFF, CLEAN, DEMO_CARRIER_RATE_ERROR,
+                              inject, summarise, top_n_by_elevation)
 from backend.measurement.sigma_uere import load_or_measure
 from backend.rinex import ephemeris, noise
 from backend.rinex.loader import load_obs
-from backend.rinex.solve import solve_per_constellation
+from backend.rinex.solve import (EL_MASK_DEG, masked_epoch, residual_panel,
+                                 solve_per_constellation)
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
 SYSTEMS = "GERCS"
 ONSET = datetime(2026, 8, 20, 12, 30)
 
-# TEST VALUE, copied from tests/test_detection.py. Eric's CARRY_OFF deliberately
-# has no default: the demo pin is "picked by hand from the printed arithmetic"
-# and had not been given when this was written. Replace when it is.
-CARRIER_RATE_ERROR_MPS = 0.02
+# The demo pin, ruled by hand 2026-09-05 at k = 2 sigma / t = 30 s. This was a
+# test value (0.02) copied from the test suite while the pin was pending; the
+# pin has since been given, so it is used from its single definition rather
+# than duplicated here. Chosen for demo legibility, not as a physical claim.
+CARRIER_RATE_ERROR_MPS = DEMO_CARRIER_RATE_ERROR
 
 # Spoofed subset (design.md §7: "walk-off on an SV subset"). See the module
 # docstring: `all_gps` is absorbed by the GPS clock column and moves the fix by
@@ -224,15 +226,20 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
     fx, w, out = FeatureExtractor(cal), Weights(), []
     n = len(epochs)
     for i, ep in enumerate(epochs):
-        res = fx.step(ep)
+        # Feature 2 is the post-fit pseudorange residual (2026-09-05 ruling),
+        # so it needs the solution -- without it the feature is not scored at
+        # all and the composite silently loses its strongest channel. One solve
+        # per epoch, shared with the cross-constellation feature below.
+        sols = (solve_per_constellation(ep, nav_xc)
+                if nav_xc is not None else {})
+        res = fx.step(ep, resid=(sols.get("all") or {}).get("resid_m"))
         feats = res["features"]
         if xc is not None and nav_xc is not None:
             # §6a.4, wired exactly as backend.replay.run does it: Eric's
             # absolute per-constellation WLS (backend/rinex/solve.py) feeds
             # the streaming cross-constellation scorer. The caller must
             # xc.reset() before each replay so no state leaks across runs.
-            feats["cross_constellation"] = xc.score(
-                ep, solve_per_constellation(ep, nav_xc))["value"]
+            feats["cross_constellation"] = xc.score(ep, sols)["value"]
         excluded = distrusted(res["per_sv"], cal)
         geom = geometry_block(ep.time, excluded, list(ep.df.index))
         sol = positions.get(ep.time) if positions else None
@@ -278,14 +285,28 @@ def main(argv=None) -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     print("load", flush=True)
-    clean = load_obs(args.obs, systems=SYSTEMS)
-    floor = noise.measure(clean)
+    raw = load_obs(args.obs, systems=SYSTEMS)
+    floor = noise.measure(raw)
     print(" ", floor)
-    cal = fit(clean, floor)
+
+    # 5 degree elevation mask, applied upstream of scoring, solving and
+    # geometry (2026-09-06 ruling). Track C's engine is set to the same angle
+    # so the information-ratio denominator is taken over the same set.
+    nav_xc = ephemeris.load_nav()
+    from backend.geometry.engine import set_el_mask_deg
+    set_el_mask_deg(EL_MASK_DEG)
+    clean = [masked_epoch(e, nav_xc) for e in raw]
+    print(f"  elevation mask {EL_MASK_DEG:g} deg applied "
+          f"({sum(e.n_sv for e in raw) - sum(e.n_sv for e in clean)} "
+          f"satellite-epochs dropped)")
+
+    print("post-fit residual panel (feature 2)", flush=True)
+    resid = residual_panel(clean, nav_xc)
+    print(f"  {resid.shape[0]} epochs x {resid.shape[1]} SV")
+    cal = fit(clean, floor, resid_panel=resid)
     print(" ", cal)
 
     print("cross-constellation calibration (§6a.4, per-constellation WLS)", flush=True)
-    nav_xc = ephemeris.load_nav()
     xc = CrossConstellation(fit_cross(clean, nav_xc), nav_xc)
     print(" ", xc.cal)
 
@@ -304,7 +325,8 @@ def main(argv=None) -> None:
     spoof = CARRY_OFF(onset=ONSET, carrier_rate_error=CARRIER_RATE_ERROR_MPS,
                       duration_s=ATTACK_EPOCHS * EPOCH_S - 1,
                       target_svs=TARGETS[args.target])
-    injected, truth = inject(clean, spoof, floor)
+    injected, truth = inject(clean, spoof, floor, nav=nav_xc)
+    injected = [masked_epoch(e, nav_xc) for e in injected]
     truth.to_csv(out / "carryoff_truth.csv")
     print(" ", summarise(truth))
 

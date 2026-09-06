@@ -7,22 +7,25 @@ The demo settings are fixed by ruling (2026-09-05):
     combine mode          weighted_sum
     elevation mask        5 deg, the ARAIM convention
 
-**Thresholds are deliberately absent.** Beats 2 and 7 need arbitrated states,
-states need confidence thresholds, and no threshold exists for the current
-detector: the values in `console/arbiter/states.py` were measured against the
-distribution produced by the previous feature 2, before the 5 degree mask and
-before the cross-constellation calibration fix, and are stale by construction.
+**Thresholds were ruled by hand on 2026-09-06** from the distributions printed
+by `backend.beats.thresholds`, and are `RULED` below. They are NOT the values in
+`console/arbiter/states.py`, which were fitted to the distribution produced by
+the previous feature 2, before the 5 degree mask and before the
+cross-constellation calibration fix, and are stale by construction.
 
-So this module refuses to guess. `require_thresholds()` raises with the name of
-the first missing value. Supply them explicitly:
+The three have different provenance and the string says so, because two of them
+are measured on this detector and one pair is carried:
 
-    python -m backend.beats.beat2 --nominal 0.70 --degraded 0.60 \\
-                                  --restricted 0.55
+- **NOMINAL 0.8247** is the measured clean p1 of THIS detector.
+- **DEGRADED 0.50 / RESTRICTED 0.25** are carried from design.md §8. Their
+  justification is not a fit: both sit below the measured clean minimum of
+  0.7500, so neither can contribute a false surrender on this day. They
+  partition the attack distribution, not the clean one.
 
-or in the environment (HOLDFAST_NOMINAL, HOLDFAST_DEGRADED,
-HOLDFAST_RESTRICTED). Whatever is supplied is stamped into every emitted
-decision through the provenance string, so a number invented at the command
-line cannot reach a rendered beat unlabelled.
+Explicit values still override, by argument or environment (HOLDFAST_NOMINAL,
+HOLDFAST_DEGRADED, HOLDFAST_RESTRICTED), and an override is stamped as
+operator-supplied so a number invented at the command line cannot reach a
+rendered beat wearing the ruled provenance.
 """
 from __future__ import annotations
 
@@ -49,7 +52,13 @@ ENV = {n: f"HOLDFAST_{n.upper()}" for n in THRESHOLD_NAMES}
 
 
 class MissingThreshold(RuntimeError):
-    """Raised when a beat needs a threshold nobody has set."""
+    """Raised when a beat needs a threshold nobody has set.
+
+    Retained although `RULED` now exists: an operator can still disable the
+    ruled values (`HOLDFAST_NOMINAL=` empty is not the same as unset, but
+    `require_thresholds(..., allow_ruled=False)` is), and the failure path is
+    what keeps a future detector change from silently inheriting these.
+    """
 
 
 @dataclass
@@ -72,11 +81,27 @@ class Thresholds:
                 f"RESTRICTED {self.restricted:.4g}  [{self.source}]")
 
 
-def require_thresholds(nominal=None, degraded=None, restricted=None,
-                       source: str | None = None) -> Thresholds:
-    """Resolve thresholds from arguments, then the environment. No defaults.
+# Ruled by hand 2026-09-06 from backend.beats.thresholds. Split provenance:
+# NOMINAL is measured on this detector; DEGRADED and RESTRICTED are carried.
+RULED_PROVENANCE = (
+    "ruled 2026-09-06: NOMINAL 0.8247 = measured clean p1 of THIS detector "
+    "(5 deg mask, post-fit-residual feature 2, corrected cross calibration, "
+    "weighted_sum, beta 0.5); DEGRADED 0.50 and RESTRICTED 0.25 carried from "
+    "design.md §8, justified as sitting below the measured clean minimum "
+    "0.7500 and therefore carrying no false-surrender cost"
+)
+RULED = Thresholds(nominal=0.8247, degraded=0.50, restricted=0.25,
+                   source=RULED_PROVENANCE)
 
-    Raises MissingThreshold naming the first value that is not set anywhere.
+
+def require_thresholds(nominal=None, degraded=None, restricted=None,
+                       source: str | None = None,
+                       allow_ruled: bool = True) -> Thresholds:
+    """Resolve thresholds: arguments, then environment, then the ruled values.
+
+    With `allow_ruled=False` there is no fallback and a missing value raises
+    MissingThreshold naming it -- the path that stopped a superseded threshold
+    being inherited, kept so a future detector change hits it again.
     """
     given = {"nominal": nominal, "degraded": degraded, "restricted": restricted}
     resolved, origins = {}, []
@@ -86,19 +111,27 @@ def require_thresholds(nominal=None, degraded=None, restricted=None,
             origins.append("cli")
             continue
         env = os.environ.get(ENV[name])
-        if env is not None:
+        if env:
             resolved[name] = float(env)
             origins.append("env")
             continue
+        if allow_ruled:
+            resolved[name] = getattr(RULED, name)
+            origins.append("ruled")
+            continue
         raise MissingThreshold(
             f"missing threshold: {name!r}.\n"
-            f"  No default exists. The values in console/arbiter/states.py "
-            f"were measured against the superseded detector (pre-mask, "
-            f"pre-post-fit-residual) and are not valid for this pipeline.\n"
-            f"  Supply it with --{name} or {ENV[name]}=<value>, or set the "
-            f"threshold in the 21:00 session.")
-    src = source or ("+".join(sorted(set(origins))) + " (operator-supplied, "
-                     "NOT measured for this detector)")
+            f"  No default is permitted here. The values in "
+            f"console/arbiter/states.py were measured against the superseded "
+            f"detector (pre-mask, pre-post-fit-residual).\n"
+            f"  Supply it with --{name} or {ENV[name]}=<value>.")
+    kinds = set(origins)
+    if kinds == {"ruled"}:
+        src = source or RULED_PROVENANCE
+    else:
+        src = source or (
+            "+".join(sorted(kinds)) + " — OVERRIDDEN, operator-supplied, "
+            "not the ruled values")
     return Thresholds(source=src, **resolved)
 
 

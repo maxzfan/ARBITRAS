@@ -6,24 +6,45 @@ import pytest
 from backend.beats import config as cfg
 
 
-def test_thresholds_have_no_defaults_and_name_the_missing_value(monkeypatch):
+def test_ruled_thresholds_are_the_resolved_default(monkeypatch):
+    """Ruled 2026-09-06 from backend.beats.thresholds."""
+    for name in cfg.THRESHOLD_NAMES:
+        monkeypatch.delenv(cfg.ENV[name], raising=False)
+    t = cfg.require_thresholds()
+    assert (t.nominal, t.degraded, t.restricted) == (0.8247, 0.50, 0.25)
+    assert "measured clean p1" in t.provenance
+    assert "carried from design.md" in t.provenance
+
+
+def test_strict_mode_still_names_the_missing_value(monkeypatch):
+    """The refusal path is kept: a future detector change must hit it rather
+    than silently inheriting these values."""
     for name in cfg.THRESHOLD_NAMES:
         monkeypatch.delenv(cfg.ENV[name], raising=False)
     with pytest.raises(cfg.MissingThreshold) as exc:
-        cfg.require_thresholds()
+        cfg.require_thresholds(allow_ruled=False)
     assert "nominal" in str(exc.value)
     with pytest.raises(cfg.MissingThreshold) as exc:
-        cfg.require_thresholds(nominal=0.8)
+        cfg.require_thresholds(nominal=0.8, allow_ruled=False)
     assert "degraded" in str(exc.value)
 
 
-def test_thresholds_come_from_the_environment_when_not_given(monkeypatch):
+def test_an_override_is_not_stamped_with_the_ruled_provenance(monkeypatch):
+    for name in cfg.THRESHOLD_NAMES:
+        monkeypatch.delenv(cfg.ENV[name], raising=False)
+    t = cfg.require_thresholds(nominal=0.70)
+    assert t.nominal == 0.70
+    assert "OVERRIDDEN" in t.provenance
+    assert "measured clean p1" not in t.provenance
+
+
+def test_environment_overrides_the_ruled_values(monkeypatch):
     monkeypatch.setenv(cfg.ENV["nominal"], "0.8")
     monkeypatch.setenv(cfg.ENV["degraded"], "0.7")
     monkeypatch.setenv(cfg.ENV["restricted"], "0.6")
     t = cfg.require_thresholds()
     assert (t.nominal, t.degraded, t.restricted) == (0.8, 0.7, 0.6)
-    assert "NOT measured" in t.provenance
+    assert "OVERRIDDEN" in t.provenance
 
 
 def test_thresholds_must_be_strictly_decreasing():
