@@ -19,6 +19,14 @@ Built at DNHacks, 5-6 September 2026.
     source .venv/bin/activate
     python -m backend.demo && python -m console.server   # then open the console
 
+To let judges run the missions from their own browsers, serve this machine
+through a Cloudflare quick tunnel (`brew install cloudflared`, no account):
+
+    bash deploy/public.sh      # prints a *.trycloudflare.com URL; Ctrl-C ends it
+
+One replay per viewer; the URL changes on every launch and dies with the
+laptop's network or sleep (the script holds off sleep while it runs).
+
 ## Results
 
 Real observables: USN8 (US Naval Observatory), 2026-08-20, 2,880 epochs at
