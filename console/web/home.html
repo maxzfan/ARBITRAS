@@ -245,7 +245,7 @@
   }
   const cloneVehicle = root => (T.SkeletonUtils && T.SkeletonUtils.clone) ? T.SkeletonUtils.clone(root) : root.clone(true);
   // vehicle forward axis: +Z in glTF convention unless the CAD says otherwise (?face= compass degrees offset)
-  const FACE = QS.has('face') ? +QS.get('face') : 180;
+  const FACE = QS.has('face') ? +QS.get('face') : 90;
   const headingToYaw = headingRad => -((90 - headingRad / D2R) * D2R) + FACE * D2R;
 
   // ---------------------------------------------------------------- shared scene rig

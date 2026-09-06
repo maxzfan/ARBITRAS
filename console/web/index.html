@@ -766,7 +766,7 @@ const ENV = {
   R: 400,                                  // dome radius, metres
   // Camera azimuth (where the camera SITS relative to the vehicle). Default NNW,
   // looking SSE toward the HDRI sun so the warm horizon is in frame. ?cam=155 etc.
-  faceAz: QS.has('face') ? +QS.get('face') : 200,   // vehicle nose, azimuth
+  faceAz: QS.has('face') ? +QS.get('face') : 90,   // vehicle nose, azimuth
   // Earth backdrop (console/web/EARTH_BACKDROP.md): kloofendal_48d_partly_cloudy
   // lights the scene; its sun was measured at az 124.4 / el 47.3 in this frame.
   sunAz: 124.4, sunEl: 47.3, sunColor: 0xFFF4E0, sunIntensity: 3.0,
