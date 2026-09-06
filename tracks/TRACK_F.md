@@ -1,6 +1,7 @@
-# TRACK F -- Mission console (scoped 2026-09-05, NOT BUILT)
+# TRACK F -- Mission console (scoped 2026-09-05; built 2026-09-06, see Build status)
 
-**Status: scoped, not started.** One scrolling page: a hero that says what
+**Status: built on `track_f`; F-0b threshold session outstanding.** One
+scrolling page: a hero that says what
 ARBITER is, a four-way mission selector, and the existing console parametrised
 by mission. Each mission is a different UGV task in a different environment,
 a different attack from the design.md §7 model, and a different meaning of
