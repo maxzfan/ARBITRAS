@@ -28,7 +28,7 @@ whose mechanisms (SIMPLISTIC + credential REVOKED) already exist end to end.
 ### The mission
 A scout UGV leaves a patrol base, runs a 1,013 m loop past three observation points (OP-1, OP-2,
 OP-3) and an observation post (OP KESTREL), and returns. At each OP it files a spot report: a
-grid, a time, and what it saw. PROJECT.md §1 anchors the platform to the Army's last-tactical-mile
+grid, a time, and what it saw. design.md §1 anchors the platform to the Army's last-tactical-mile
 UGV (GroundBreaker 1, Camp Grafton); reconnaissance is the leg "under the greatest threat from
 enemy observation and fires", and the report is the thing the fires cell acts on. A report with the
 wrong grid or the wrong time is worse than no report.

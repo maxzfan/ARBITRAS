@@ -28,7 +28,7 @@ calibration on 2880 clean epochs, saturating |z| at the median per-SV p99: cn0_a
 | `geometry.next_best_observation` | derived | rank-one determinant update over visible-but-untrusted groups (CONVERGE identity) |
 | `features.by_sv` | derived | Track D contract extension 1 (`backend/detection/features.py by_sv_scores`): per-SV max of the three per-SV features, each normalised by its calibrated saturation and clipped to [0, 1]. Cross-constellation is solution-level and does not enter |
 | `geometry.correction` | derived from **measured** thresholds | Track D weighted-RAIM block (`backend/correction/emit.py`): trusted-subset WLS re-solve (binary weights from `excluded_sv`), slope-form protection level with tau fit on the clean day (p99.9 per-SV residual, `backend.correction.validate`), five-check gate with 10-epoch grant / 1-epoch revoke hysteresis. Fail-closed: `correction_ok: false` with null position whenever the solve or any evaluated check cannot stand |
-| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (120 epochs = T_int 60 × d 2) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last 1.3 s at the 15 epochs/s demo rate; tuned to 60 × 2 so every credential state holds ≥ 8 s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. **Threshold dependency for beat 4:** in the 45 epochs (3 s) before PENDING begins, confidence min 0.769 / median 0.789; 0 of 45 sit below the placeholder NOMINAL threshold 0.75. Whether the vehicle is steadily NOMINAL when the credential lapses depends on the 21:00 threshold pick, not on this stream. |
+| `credential_status` | **scripted** (demo.jsonl only) | VALID → PENDING (120 epochs = T_int 60 × d 2) → EXPIRED. **T_int and d are venue-tuned protocol parameters (design.md §9)**: the §9 defaults (10 × 2 = 20 epochs) last 4.0 s at the 5 epochs/s demo rate; tuned to 60 × 2 so every credential state holds ≥ 24 s on screen. Stands in for the live TESLA verifier until Track A's T1 lands. **Threshold dependency for beat 4:** in the 45 epochs (9 s) before PENDING begins, confidence min 0.769 / median 0.789; 0 of 45 sit below the placeholder NOMINAL threshold 0.75. Whether the vehicle is steadily NOMINAL when the credential lapses depends on the 21:00 threshold pick, not on this stream. |
 | `_attack` (carryoff/demo) | injector truth log | stage, n_spoofed, range_offset_m, cmc_divergence_m — what the attacker did, never seen by the detector |
 | `score_detail` | derived | Track A's breakdown of the composite |
 
@@ -80,8 +80,8 @@ plots on one axis.
 demo.jsonl beats: 60 clean · 90 attack (2026-08-20T12:30:00Z → 2026-08-20T13:14:30Z) ·
 360 post-attack clean with credential 120 VALID (2026-08-20T13:15:00Z → 2026-08-20T14:15:00Z) /
 120 PENDING (2026-08-20T14:15:00Z → 2026-08-20T15:15:00Z) / 120 EXPIRED (2026-08-20T15:15:00Z → 2026-08-20T16:14:30Z).
-At 15 epochs/s: VALID tail 8.0 s ·
-PENDING 8.0 s · EXPIRED 8.0 s.
+At 5 epochs/s: VALID tail 24.0 s ·
+PENDING 24.0 s · EXPIRED 24.0 s.
 
 ## Position solution — is the solver right, and what did the attack do to the fix
 

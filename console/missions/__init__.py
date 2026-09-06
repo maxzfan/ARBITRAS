@@ -18,6 +18,7 @@ The four missions and their mechanisms (decided 2026-09-05, late):
 """
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass, field, asdict
 
@@ -58,6 +59,14 @@ class Mission:
     # corridor for a road-bound convoy; a scout's 100 m grid-square limit is not
     # a road, so RECON sets it to a single-track width.
     corridor_half_width_m: float | None = None
+    # The ARBITRAS guide's script (console/web/DIALOGUE.md §3): the
+    # operator-facing rewrite of `beats`, one entry per pinned epoch, each
+    # carrying 1-3 lines. Every numeral in a line's `text` is covered by a
+    # claim holding either a contract `path` (dug out of the epoch and
+    # verified before display, as explain.verify does) or a named `source`
+    # (a scenario parameter, which is not a measurement). design.md §14.
+    # Defaulted so nothing that constructs a Mission has to supply it.
+    guide: tuple[dict, ...] = ()
 
 
 # ----------------------------------------------------------------- kinematics
@@ -127,6 +136,82 @@ LOGISTICS = Mission(
         (200, "NOMINAL. Convoy crosses PL AMBER on GNSS."),
         (390, "Authorisation expired at the end of the window: resupply delivered, convoy stands down at RP KILO."),
     ),
+    guide=(
+        # The operator-facing rewrite of `beats`, anchored on the same epochs.
+        # design.md §14: every numeral below is covered by a claim carrying
+        # either a contract `path` (verified live against the epoch) or a
+        # named `source`. Values are the exact figures on out/logistics.jsonl.
+        {"epoch": 0, "lines": [
+            {"text": "The convoy is leaving the supply point on satellite navigation. Everything here is real: observations recorded at a US Naval Observatory receiver, one every 30 s.",
+             "tone": "calm",
+             "claims": [{"text": "30 s", "value": 30.0,
+                         "source": "observation interval of the IGS daily files, CLAUDE.md Data (2026-08-20, 30 s)"}]},
+            {"text": "My job is to say how far that position can be trusted. Right now every monitored signal sits in its own normal range and confidence is 0.91, so the convoy has full authority.",
+             "tone": "calm",
+             "claims": [{"text": "0.91", "value": 0.9079, "path": "confidence"}]},
+            {"text": "The road is the constraint. More than 15 m of position error puts the convoy off a single-track corridor, so 15 m is what every fix is judged against.",
+             "tone": "calm",
+             "claims": [{"text": "15 m", "value": 15.0, "path": "geometry.correction.alert_limit_m"}]},
+        ]},
+        {"epoch": 60, "lines": [
+            {"text": "A spoofer has just captured the six strongest GPS satellites and lifted them 2 dB. That is barely above the noise, and deliberately so.",
+             "tone": "alert",
+             "claims": [{"text": "2 dB", "value": 2.0,
+                         "source": "injector power, docs/stream_provenance_logistics.md (carry_off, power 2.0 dB, 6 SV)"}]},
+            {"text": "Nothing on my panel has moved. No satellite is outside the trusted set, confidence is 0.87, and the believed position is still on the road. This is what a good attack looks like at the start.",
+             "tone": "alert",
+             "claims": [{"text": "0.87", "value": 0.8652, "path": "confidence"}]},
+            {"text": "From here the spoofer walks the believed position sideways at 0.2 m/s. I will not see it until the ranges stop agreeing on one place.",
+             "tone": "alert",
+             "claims": [{"text": "0.2 m/s", "value": 0.2,
+                         "source": "injector walk rate, docs/stream_provenance_logistics.md (carry_off, 0.2 m/s, bearing 90)"}]},
+        ]},
+        {"epoch": 65, "lines": [
+            {"text": "Now the ranges disagree. No single position fits them all any more: that score has climbed to 0.73, and seven satellites have dropped out of the trusted set.",
+             "tone": "bad",
+             "claims": [{"text": "0.73", "value": 0.7345, "path": "features.pseudorange_residual"}]},
+            {"text": "Authority steps down one notch. I still stand behind a fix, re-solved on the satellites I do trust, with 7.8 m of protection level against the 15 m limit.",
+             "tone": "bad",
+             "claims": [{"text": "7.8 m", "value": 7.79, "path": "geometry.correction.protection_level_m"},
+                        {"text": "15 m", "value": 15.0, "path": "geometry.correction.alert_limit_m"}]},
+        ]},
+        {"epoch": 67, "lines": [
+            {"text": "Two epochs later the trusted set is down to eight satellites and the protection level is 18.3 m, wider than the road itself. I can no longer certify which side of it we are on.",
+             "tone": "bad",
+             "claims": [{"text": "18.3 m", "value": 18.28, "path": "geometry.correction.protection_level_m"}]},
+            {"text": "So authority goes to the operator. That is not the vehicle giving up: a person drives the contested stretch by what they can see, and I keep scoring every epoch behind them.",
+             "tone": "act", "claims": []},
+        ]},
+        {"epoch": 150, "lines": [
+            {"text": "The spoofer has stopped. The ranges fit one place again, but my baselines learned the attacked level while it ran, so the residual score still reads 0.97.",
+             "tone": "calm",
+             "claims": [{"text": "0.97", "value": 0.9673, "path": "features.pseudorange_residual"}]},
+            {"text": "I do not hand authority back on that. Confidence has to hold above the next threshold for 10 straight epochs before each step up, so nothing recovers on one lucky reading.",
+             "tone": "calm",
+             "claims": [{"text": "10", "value": 10,
+                         "source": "RECOVERY_EPOCHS, console/arbitras/states.py"}]},
+        ]},
+        {"epoch": 190, "lines": [
+            {"text": "Baselines have caught up. Full sky, nothing excluded, information ratio 1.00, and the corrected fix carries 2.8 m of protection level.",
+             "tone": "good",
+             "claims": [{"text": "1.00", "value": 1.0, "path": "geometry.information_ratio"},
+                        {"text": "2.8 m", "value": 2.83, "path": "geometry.correction.protection_level_m"}]},
+            {"text": "The operator hands the convoy back and it rejoins the route under its own authority, one step at a time.",
+             "tone": "good", "claims": []},
+        ]},
+        {"epoch": 200, "lines": [
+            {"text": "Full authority restored, confidence 0.92. The convoy crosses the phase line on satellite navigation, and the contested stretch was driven without a trusted fix and without stopping.",
+             "tone": "good",
+             "claims": [{"text": "0.92", "value": 0.9243, "path": "confidence"}]},
+        ]},
+        {"epoch": 390, "lines": [
+            {"text": "Nothing is wrong with the sky: confidence is 0.91 and every satellite is trusted. But the authorisation for this window has lapsed and no renewal key arrived.",
+             "tone": "bad",
+             "claims": [{"text": "0.91", "value": 0.907, "path": "confidence"}]},
+            {"text": "Credentials outrank signal quality in both directions, so authority is withdrawn anyway. The load is delivered; the convoy stands down at the resupply point under operator control.",
+             "tone": "bad", "claims": []},
+        ]},
+    ),
     behaviour={
         "NOMINAL": "Convoy proceeding on GNSS. Accepting route updates from the FOB.",
         "DEGRADED": "Convoy proceeding on the trusted-satellite fix; corridor position verified.",
@@ -175,6 +260,89 @@ RECON = Mission(
         (390, "Authorisation renewed: key disclosed, uplink solid."),
         (461, "Loop complete. Every report delivered with a trust tag; the emitter's bearing reported."),
     ),
+    guide=(
+        # Operator-facing rewrite of `beats`; figures are the exact values on
+        # out/recon.jsonl at the epoch each entry fires (design.md §14).
+        {"epoch": 0, "lines": [
+            {"text": "The scout is leaving the patrol base to file spot reports: a grid, a time, and what it saw. A report with the wrong grid is worse than no report at all.",
+             "tone": "calm", "claims": []},
+            {"text": "Full sky, confidence 0.91. An attacker who wanted to move me without breaking the ranges has 14 m to work with. That is a bound my geometry gives me, not a guess.",
+             "tone": "calm",
+             "claims": [{"text": "0.91", "value": 0.9079, "path": "confidence"},
+                        {"text": "14 m", "value": 13.9, "path": "geometry.displacement_bound_m"}]},
+        ]},
+        {"epoch": 60, "lines": [
+            {"text": "A repeater has switched on. It re-broadcasts every GPS signal from its own antenna 8 dB louder, so all twelve got louder in the same instant. Real satellites drift apart.",
+             "tone": "bad",
+             "claims": [{"text": "8 dB", "value": 8.0,
+                         "source": "injector power, docs/stream_provenance_recon.md (repeater_offset, power 8.0 dB, 12 SV)"}]},
+            {"text": "Now the constellations disagree: GPS says one place, Galileo and BeiDou another. So I distrust GPS whole rather than argue satellite by satellite. All 12 are out.",
+             "tone": "bad",
+             "claims": [{"text": "12", "value": 12, "path": "geometry.excluded_sv"}]},
+            {"text": "Losing a constellation costs geometry: my information ratio is 0.80 of the full sky. Three of my four signal checks are saturated, authority goes to the operator, and the scout halts.",
+             "tone": "bad",
+             "claims": [{"text": "0.80", "value": 0.7988, "path": "geometry.information_ratio"}]},
+        ]},
+        {"epoch": 61, "lines": [
+            {"text": "This is where a stopped vehicle has the advantage. The scout is stationary, so I hold the last trusted fix as an anchor, taken at epoch 59 before the repeater, and carry it on odometry.",
+             "tone": "act",
+             "claims": [{"text": "59", "value": 59,
+                         "path": "geometry.correction.stationary.anchor_epoch"}]},
+            {"text": "The satellites now place me 118 m from that anchor while the wheels say I have not moved. A stationary vehicle cannot drift 118 m. That offset is the spoof, measured rather than assumed.",
+             "tone": "act",
+             "claims": [{"text": "118 m", "value": 118.2,
+                         "path": "geometry.correction.stationary.deduced_offset.mag_m"}]},
+        ]},
+        {"epoch": 70, "lines": [
+            {"text": "The offset points back down its own path. Bearing 85 degrees from the scout, and the jump in the GPS clock channel puts the emitter about 260 m out: a path delay, not a position fix.",
+             "tone": "act",
+             "claims": [{"text": "85 degrees", "value": 84.7,
+                         "path": "geometry.correction.stationary.emitter_bearing_deg"},
+                        {"text": "260 m", "value": 259.6,
+                         "path": "geometry.correction.stationary.path_delay_m"}]},
+            {"text": "That bearing goes into the report: the attack has become reconnaissance. The Galileo-only fix agrees with the anchor to 0.5 m, so two independent methods are saying the same thing.",
+             "tone": "act",
+             "claims": [{"text": "0.5 m", "value": 0.46,
+                         "path": "geometry.correction.stationary.agreement_m"}]},
+        ]},
+        {"epoch": 84, "lines": [
+            {"text": "Authority comes back one step, on Galileo and BeiDou. GPS stays dark until its clock channels agree with the others again. I do not readmit a constellation for going quiet.",
+             "tone": "good", "claims": []},
+            {"text": "The scout resumes toward the observation point on the corrected fix: 9.1 m of protection level, against the 100 m limit a grid-square report is held to.",
+             "tone": "good",
+             "claims": [{"text": "9.1 m", "value": 9.05, "path": "geometry.correction.protection_level_m"},
+                        {"text": "100 m", "value": 100.0, "path": "geometry.correction.alert_limit_m"}]},
+        ]},
+        {"epoch": 90, "lines": [
+            {"text": "The repeater is off. The GPS clock channels agree again, every GPS satellite is readmitted, and the information ratio is back to 1.00. Nothing was permanently excluded.",
+             "tone": "good",
+             "claims": [{"text": "1.00", "value": 1.0, "path": "geometry.information_ratio"}]},
+            {"text": "Exclusion here is a judgement about this epoch, not a blacklist. When the evidence comes back, so does the satellite.",
+             "tone": "good", "claims": []},
+        ]},
+        {"epoch": 100, "lines": [
+            {"text": "The observation report is filed with its trust tag attached: which constellations stood behind the fix, a protection level of 3.8 m, and a note that the clock was free-running.",
+             "tone": "calm",
+             "claims": [{"text": "3.8 m", "value": 3.79, "path": "geometry.correction.protection_level_m"}]},
+            {"text": "That tag is the product. An operator reading the report tomorrow can tell exactly how much of it to believe.",
+             "tone": "calm", "claims": []},
+        ]},
+        {"epoch": 104, "lines": [
+            {"text": "Full sky, full authority, confidence 0.73 and rising. Nobody drove the scout and nothing was shut down: it lost a constellation, kept patrolling, and is still on its loop.",
+             "tone": "good",
+             "claims": [{"text": "0.73", "value": 0.7274, "path": "confidence"}]},
+        ]},
+        {"epoch": 390, "lines": [
+            {"text": "A fresh authorisation key was disclosed on schedule and verified, so the mission credential holds for the next window. Signal quality and credentials are two separate votes.",
+             "tone": "calm", "claims": []},
+        ]},
+        {"epoch": 461, "lines": [
+            {"text": "Loop complete, back at the patrol base. Every report was delivered, and each one carries the trust it was filed under, including those filed while GPS was lying.",
+             "tone": "good", "claims": []},
+            {"text": "The scout also brought back something it was not sent for: a bearing to the transmitter.",
+             "tone": "good", "claims": []},
+        ]},
+    ),
     behaviour={
         "NOMINAL": "Patrol continuing on GNSS. Reports tagged clean.",
         "DEGRADED": "Patrol continuing on Galileo. GPS distrusted; reports tagged; clock in holdover.",
@@ -218,6 +386,81 @@ CASEVAC = Mission(
         (264, "AT CCP, terrain-confirmed: fix inside the 25 m ring on evidence that never came through the antenna."),
         (290, "Casualty aboard. Return leg; pins continue."),
     ),
+    guide=(
+        # Operator-facing rewrite of `beats`; figures are the exact values on
+        # out/casevac.jsonl at the epoch each entry fires (design.md §14).
+        {"epoch": 0, "lines": [
+            {"text": "A casualty is waiting at a collection point 420 m out. The vehicle drives there, loads a litter and comes back. The failure that matters here is stopping at the wrong place.",
+             "tone": "calm",
+             "claims": [{"text": "420 m", "value": 420.0,
+                         "source": "outbound leg to the CCP, docs/stream_provenance_casevac.md (s <= 420.0 m)"}]},
+            {"text": "This mission carries one extra check: a simulated ground-class sensor at the wheels, read against a map signed before departure. Right now sensor and map both read building.",
+             "tone": "calm", "claims": []},
+        ]},
+        {"epoch": 60, "lines": [
+            {"text": "The carry-off starts here, and it is the careful kind: code and carrier are walked together, so the measurement that usually catches a spoof sees nothing at all.",
+             "tone": "alert", "claims": []},
+            {"text": "The believed position begins running ahead along the route at 1 m/s. Along-track is the dangerous direction: the vehicle never seems to leave the road, it just seems further down it.",
+             "tone": "alert",
+             "claims": [{"text": "1 m/s", "value": 1.0,
+                         "source": "injector walk rate, docs/stream_provenance_casevac.md (carry_off, 1.0 m/s, bearing 135)"}]},
+        ]},
+        {"epoch": 62, "lines": [
+            {"text": "The ranges stop fitting one position, and the ground disagrees too: the sensor reads building while the map says the reported position is on paved. Match likelihood 0.03.",
+             "tone": "bad",
+             "claims": [{"text": "0.03", "value": 0.025, "path": "terrain.match_likelihood"}]},
+            {"text": "Authority goes to the operator and the vehicle holds. But the terrain sensor does more than object: every class boundary it crosses says how far along the route the vehicle really is.",
+             "tone": "act", "claims": []},
+            {"text": "First pin: 16.7 m behind where the satellites put us. That correction came off the ground, not through the antenna.",
+             "tone": "act",
+             "claims": [{"text": "16.7 m", "value": -16.74, "path": "terrain.route_fix.correction_m"}]},
+        ]},
+        {"epoch": 84, "lines": [
+            {"text": "The believed position has just entered the collection-point ring. An unprotected vehicle would report arrival now, with the casualty still hundreds of metres away.",
+             "tone": "bad", "claims": []},
+            {"text": "It does not. The terrain fix still has the vehicle back at the last pin, no satellite is trusted, the information ratio is 0.00, and arrival is not confirmed.",
+             "tone": "bad",
+             "claims": [{"text": "0.00", "value": 0.0, "path": "geometry.information_ratio"}]},
+        ]},
+        {"epoch": 120, "lines": [
+            {"text": "The spoofer stops. With no trusted satellites left, the bound on how far wrong the fix could be no longer comes from the sky at all: it comes from the terrain pin, at 267 m.",
+             "tone": "alert",
+             "claims": [{"text": "267 m", "value": 266.7, "path": "geometry.displacement_bound_m"}]},
+            {"text": "I always quote the tighter of the two bounds and say which one it was. A number without its source is not evidence.",
+             "tone": "alert", "claims": []},
+        ]},
+        {"epoch": 150, "lines": [
+            {"text": "Ranges agree again and the full sky is back: information ratio 1.00, protection level 3.2 m. Authority returns one step and the vehicle resumes toward the collection point.",
+             "tone": "good",
+             "claims": [{"text": "1.00", "value": 1.0, "path": "geometry.information_ratio"},
+                        {"text": "3.2 m", "value": 3.2, "path": "geometry.correction.protection_level_m"}]},
+            {"text": "Between boundaries the fix rides on odometry, which drifts. Each boundary crossing sets it straight again.",
+             "tone": "good", "claims": []},
+        ]},
+        {"epoch": 158, "lines": [
+            {"text": "A boundary crossed: the sensor changes class exactly where the map says it should. The pin re-zeroes the odometry with a 2.9 m correction.",
+             "tone": "good",
+             "claims": [{"text": "2.9 m", "value": -2.88, "path": "terrain.route_fix.correction_m"}]},
+        ]},
+        {"epoch": 170, "lines": [
+            {"text": "Full authority, confidence 0.87, and the terrain channel quiet again: sensor and map both reading building under the wheels.",
+             "tone": "good",
+             "claims": [{"text": "0.87", "value": 0.8681, "path": "confidence"}]},
+        ]},
+        {"epoch": 264, "lines": [
+            {"text": "At the collection point, and this time it is confirmed. The fix sits inside the 25 m ring and the last pin is recent, so arrival rests on evidence that never came through the antenna.",
+             "tone": "good",
+             "claims": [{"text": "25 m", "value": 25.0,
+                         "source": "arrival ring, docs/stream_provenance_casevac.md (at_ccp: fix inside the 25.0 m ring and fresh)"}]},
+            {"text": "The believed pin claimed this long ago and was wrong. The latest pin needed 0.5 m of correction: the ground and the map have agreed the whole way in.",
+             "tone": "good",
+             "claims": [{"text": "0.5 m", "value": -0.5, "path": "terrain.route_fix.correction_m"}]},
+        ]},
+        {"epoch": 290, "lines": [
+            {"text": "Casualty aboard, return leg running, pins continuing. The last boundary needed no correction at all: the vehicle knows where it is on the route to within a couple of metres.",
+             "tone": "calm", "claims": []},
+        ]},
+    ),
     behaviour={
         "NOMINAL": "Driving to the collection point on GNSS.",
         "DEGRADED": "Driving on the terrain-referenced fix. GNSS position flagged.",
@@ -260,6 +503,66 @@ COMBAT = Mission(
         (130, "NOMINAL. Fire-control input: TRUSTED."),
         (344, "OBJ HAWK reached. 70 epochs operator-driven, none on a spoofed fix."),
         (390, "Authorisation renewed: key disclosed."),
+    ),
+    guide=(
+        # Operator-facing rewrite of `beats`; figures are the exact values on
+        # out/combat.jsonl at the epoch each entry fires (design.md §14).
+        {"epoch": 0, "lines": [
+            {"text": "The advance starts from the line of departure. This vehicle's reported position does two jobs: it reports phase-line crossings, and it is the origin of every target grid it sends.",
+             "tone": "calm", "claims": []},
+            {"text": "Fire-control input reads TRUSTED. Confidence 0.91, full sky, nothing excluded, and an attacker would have 14 m of room before the ranges stopped agreeing.",
+             "tone": "calm",
+             "claims": [{"text": "0.91", "value": 0.9079, "path": "confidence"},
+                        {"text": "14 m", "value": 13.9, "path": "geometry.displacement_bound_m"}]},
+        ]},
+        {"epoch": 60, "lines": [
+            {"text": "A crude spoofer, 15 dB above the real signals, throws every GPS range at once. Loud and instant: three of my four signal checks saturate in the same epoch.",
+             "tone": "bad",
+             "claims": [{"text": "15 dB", "value": 15.0,
+                         "source": "injector power, docs/stream_provenance_combat.md (simplistic_position, power 15.0 dB, 12 SV)"}]},
+            {"text": "The joint solution jumps east, past the phase line. GPS is the constellation disagreeing with the other two, so all 12 of its satellites go out together.",
+             "tone": "bad",
+             "claims": [{"text": "12", "value": 12, "path": "geometry.excluded_sv"}]},
+            {"text": "Information ratio falls to 0.80 and confidence to 0.49. Authority goes to the operator: against an attack this blunt there is nothing left for the vehicle to navigate itself on.",
+             "tone": "bad",
+             "claims": [{"text": "0.80", "value": 0.7988, "path": "geometry.information_ratio"},
+                        {"text": "0.49", "value": 0.4913, "path": "confidence"}]},
+        ]},
+        {"epoch": 61, "lines": [
+            {"text": "The operator is not driving blind. Galileo and BeiDou were never touched, and the fix built on them alone carries 7.4 m of protection level against the 15 m limit.",
+             "tone": "act",
+             "claims": [{"text": "7.4 m", "value": 7.41, "path": "geometry.correction.protection_level_m"},
+                        {"text": "15 m", "value": 15.0, "path": "geometry.correction.alert_limit_m"}]},
+            {"text": "So fire-control input reads CONDITIONAL: not trusted, not withheld. A grid can still be sent, and it goes with its uncertainty attached.",
+             "tone": "act", "claims": []},
+        ]},
+        {"epoch": 80, "lines": [
+            {"text": "The spoofer is off and every satellite is back in the trusted set. My own baselines still carry the attacked level, though, so three of the four checks still read high.",
+             "tone": "alert", "claims": []},
+            {"text": "Confidence is 0.57. The sky is clean and my memory of it is not, so authority stays where it is. I would rather be late than early.",
+             "tone": "alert",
+             "claims": [{"text": "0.57", "value": 0.5721, "path": "confidence"}]},
+        ]},
+        {"epoch": 120, "lines": [
+            {"text": "Baselines have caught up and authority has climbed all the way back: confidence 0.87, full geometry, ten sustained clean epochs paid for every step up.",
+             "tone": "good",
+             "claims": [{"text": "0.87", "value": 0.8685, "path": "confidence"}]},
+            {"text": "The operator hands back and the vehicle rejoins the advance under its own authority. It never stopped moving; it stopped moving on its own judgement.",
+             "tone": "good", "claims": []},
+        ]},
+        {"epoch": 130, "lines": [
+            {"text": "Fire-control input reads TRUSTED again, confidence 0.82, and the advance continues toward the objective.",
+             "tone": "good",
+             "claims": [{"text": "0.82", "value": 0.821, "path": "confidence"}]},
+        ]},
+        {"epoch": 344, "lines": [
+            {"text": "Objective reached. While GPS was lying, no target grid left this vehicle on a spoofed position: the grids came off Galileo and BeiDou, and they went out marked conditional.",
+             "tone": "good", "claims": []},
+        ]},
+        {"epoch": 390, "lines": [
+            {"text": "The authorisation key for the next window was disclosed on schedule and verified, so the credential holds. Had it not arrived, authority would have gone under a clean sky.",
+             "tone": "calm", "claims": []},
+        ]},
     ),
     behaviour={
         "NOMINAL": "Full autonomy. Advancing on GNSS; position feeds fire control.",
@@ -319,6 +622,7 @@ def as_dict(m: Mission) -> dict:
         "attack": dict(m.attack),
         "mechanism": m.mechanism,
         "beats": [{"epoch": i, "caption": c} for i, c in m.beats],
+        "guide": copy.deepcopy(list(m.guide)),
         "behaviour": dict(m.behaviour),
         "scene": dict(m.scene),
         "stream": m.stream,

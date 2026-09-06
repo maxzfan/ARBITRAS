@@ -30,6 +30,7 @@ carries a contract path.
 | `heightAt(x, z)` | terrain height in scene frame (from the environment module) |
 | `latLonToEnu(lat, lon)` / `enuToLatLon(e, n)` | route.js conversions bound to the mission |
 | `labels` | an absolutely positioned HTML layer you may append `div.skl`-styled labels to; position them with `project` |
+| `live` | `{truePos, ghostPos}`: scene `Vector3`s of the TRUE vehicle and the BELIEVED ghost, mutated in place by the console every frame (read-only; `ghostPos.y` is not terrain-fitted, use `heightAt`). Read these in `tick()` for anything that rides with the vehicle |
 | `project(v3)` | scene point -> `[x, y, visible]` in CSS px of the pane |
 | `colors` | `{truth:'#7FA8CC', believed:'#E4551F', corrected:'#6FCF97', amber:'#E8A21C', red:'#D62119', dim:'#8794A2'}` |
 | `glowTexture()` | the console's sprite texture |
@@ -59,6 +60,13 @@ any `terrain.route_fix` the post-pass added), `position`, `_truth`,
 scene), `D` (`{e, n, mag}` metres, measured), `Dc` (corrected displacement
 or null), `sCur` (arc length), `headingAz` (compass degrees), `state`.
 
+`frame` is a SNAPSHOT taken when the epoch arrives. The vehicle then keeps
+moving along the route for the whole inter-epoch interval, so an object
+placed from `frame.truePos` sits one epoch's travel behind it. Anything that
+rides with the vehicle (an anchor, a fix relative to TRUE) is stored in
+`epoch()` as an offset from TRUE and added to `ctx.live.truePos` in
+`tick()`. Absolute world objects (a pinned route point) may use `frame`.
+
 ## Rules
 
 1. **Every number you draw has a path.** Label text like `ANCHOR · 1.2 M ·
@@ -75,7 +83,8 @@ or null), `sCur` (arc length), `headingAz` (compass degrees), `state`.
 ## Verifying
 
 Start a private server (`python -m console.server --port 84xx`), open
-`/?mission=<name>&post=0&shadow=0&env=0&rate=40` headless (venv Playwright,
+`/console?mission=<name>&post=0&shadow=0&env=0&rate=40` headless (the
+briefing dialogue pauses the stream until advanced: send Space) (venv Playwright,
 launch args `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader
 --ignore-gpu-blocklist`), wait for the epochs you care about (`?rate=` sets
 epochs per second; the replay ends with `replay complete`), screenshot, and

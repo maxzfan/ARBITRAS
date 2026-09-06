@@ -79,8 +79,8 @@
     };
     // -- buttons: the overlay owns this DOM and disposes it (CONTRACT.md rule 3) --
     const bar = document.createElement('div');
-    // Sits clear above the scene's provenance caption (.attrib), which runs along
-    // the bottom of the pane -- the buttons must not cover the rendered-scene notice.
+    // Sits clear of the stage's bottom band (satellite inset, hint) so the
+    // buttons never cover the rendered scene's readouts.
     bar.style.cssText = 'position:absolute;left:50%;bottom:62px;transform:translateX(-50%);z-index:6;' +
       'display:flex;gap:8px;pointer-events:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
     const mkBtn = (key, text, want) => {

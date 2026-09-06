@@ -3,7 +3,7 @@
     python -m console.server                      # replay the fixture stream
     python -m console.server --source out/run.jsonl
     python -m console.server --source out/live.jsonl --tail     # follow Track A live
-    python -m console.server --rate 8             # slower, for video beats 2 and 3
+    python -m console.server --rate 4             # slower still, for video beats 2 and 3
 
 Then open http://localhost:8420
 
@@ -27,6 +27,14 @@ from console.arbitras.machine import Arbitras
 from console.arbitras.states import THRESHOLD_PROVENANCE, THRESHOLDS, TrustState
 from console import mission
 from console import missions as mission_registry
+
+try:
+    # The operator dialogue (console/web/DIALOGUE.md). Presentation-side, like the
+    # env and overlay modules index.html loads with onerror="this.remove()": a
+    # console without it still serves the stream, the strip and the scene.
+    from console.arbitras.dialogue import Guide
+except ImportError:                     # pragma: no cover -- module not present
+    Guide = None
 
 WEB = Path(__file__).parent / "web"
 VENDOR_MIME = {
@@ -169,7 +177,10 @@ def terrain_map(path: Path = Path("data/terrain_usn8.npz")) -> dict | None:
 
 
 def decide(arb: Arbitras, epoch, layer_on: bool, guide=None) -> dict:
-    """One arbitration + explanation + verification, ready for the wire."""
+    """One arbitration + explanation + verification (+ dialogue), ready for the wire.
+
+    `guide` is the per-connection Guide (console/web/DIALOGUE.md §2) or None; the
+    payload gains a `dialogue` block only when one is passed."""
     d = arb.step(epoch)
     payload = d.to_dict()
 
@@ -184,6 +195,13 @@ def decide(arb: Arbitras, epoch, layer_on: bool, guide=None) -> dict:
         payload["explanation"] = ex
         payload["explanation_verified"] = ok
         payload["explanation_failures"] = failures
+        # console/web/DIALOGUE.md §1: the guide's lines for this epoch, beside the
+        # explanation. Console-side output -- NOT part of the design.md §5 contract,
+        # and nothing in backend/ produces or consumes it. `explanation` stays on the
+        # wire unchanged (test_server.py and the verification banner read it); only
+        # its RENDERING goes away.
+        if guide is not None:
+            payload["dialogue"] = guide.step(d, epoch if isinstance(epoch, dict) else None)
     else:
         # Video beat 2: the trust layer is OFF. An unprotected vehicle reports a
         # confident, plausible position and nothing alarms.
@@ -197,6 +215,10 @@ def decide(arb: Arbitras, epoch, layer_on: bool, guide=None) -> dict:
         payload["previous_state"] = TrustState.NOMINAL.name
         payload["changed"] = False
         payload["explanation"] = None
+        # The dialogue is trust-layer output too -- the guide exists only because the
+        # layer has something to say. Off means off ON THE WIRE, not merely hidden;
+        # an empty box under an OFF badge is the argument.
+        payload["dialogue"] = None
         payload["confidence"] = None
         payload["features"] = {}
         # Satellite POSITIONS are not trust-layer output -- an unprotected receiver
@@ -252,6 +274,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/route.js":
             # Our own kinematics module (mirrors console/mission.py); not vendor.
             return self._file(WEB / "route.js", "application/javascript")
+        if u.path == "/dialogue.js":
+            # The dialogue box (console/web/DIALOGUE.md §4); ours, not vendor.
+            return self._file(WEB / "dialogue.js", "application/javascript")
         if u.path == "/mission":
             # Track F (tracks/TRACK_F.md §3): ?name= selects a registry mission;
             # without it the legacy console/mission.py frame is served unchanged.
@@ -353,26 +378,45 @@ class Handler(BaseHTTPRequestHandler):
         # fallback until generated); --source still wins in tail mode.
         src_path = Path(a.source)
         mname = q.get("mission", [None])[0]
-        if mname and not a.tail:
+        mm = None
+        if mname:
             try:
                 mm = mission_registry.get(mname)
             except KeyError:
                 mm = None
-            if mm is not None:
-                for cand in (mm.stream, mm.fallback_stream):
-                    if cand and Path(cand).exists():
-                        src_path = Path(cand)
-                        break
+        # The stream is only overridden in replay mode; the mission itself is
+        # resolved either way, because the guide's script belongs to the mission
+        # and not to where its epochs come from.
+        if mm is not None and not a.tail:
+            for cand in (mm.stream, mm.fallback_stream):
+                if cand and Path(cand).exists():
+                    src_path = Path(cand)
+                    break
+        # console/web/DIALOGUE.md §2: one Guide per connection, exactly like the
+        # Arbitras above, so a browser reload is still the hard reset (design.md §11a,
+        # "under five seconds"). layer=off builds none: the dialogue is trust-layer
+        # output like the explanation, and decide() nulls the field on the wire.
+        guide = (Guide(mission_registry.as_dict(mm) if mm is not None else None)
+                 if Guide is not None and layer_on else None)
         try:
             tailing = bool(a.tail)
             source = (follow(src_path, a.stale_after) if tailing
                       else iter(read_epochs(src_path)))
             for epoch in source:
-                payload = decide(arb, epoch, layer_on)
+                payload = decide(arb, epoch, layer_on, guide)
                 self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())
                 self.wfile.flush()
                 if not tailing:
                     time.sleep(delay)   # tail mode is paced by the producer
+            if guide is not None:
+                # The guide's closing lines (gate_reason "end"). They belong to no
+                # epoch, so they ride their own event rather than faking one: the
+                # client queues them BEHIND the epoch backlog, which is still
+                # draining here, and shows them before `end` is acted on.
+                tail = guide.finish()
+                if isinstance(tail, dict) and tail.get("lines"):
+                    self.wfile.write(f"event: dialogue\ndata: {json.dumps(tail)}\n\n".encode())
+                    self.wfile.flush()
             self.wfile.write(b"event: end\ndata: {}\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -382,7 +426,11 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--source", default=str(DEFAULT_SOURCE))
-    p.add_argument("--rate", type=float, default=15.0, help="epochs/sec (design.md §5: 10-20)")
+    p.add_argument("--rate", type=float, default=5.0,
+                   help="epochs/sec (design.md §5). 10-20 is the DEVELOPMENT "
+                        "range; the demo replays at 5 because the guide dialogue "
+                        "(console/web/DIALOGUE.md) gates the replay and has to "
+                        "be read")
     p.add_argument("--tail", action="store_true", help="follow a growing file")
     p.add_argument("--stale-after", type=float, default=2.0, dest="stale_after",
                    help="seconds of silence before an epoch counts as missing "

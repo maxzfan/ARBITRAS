@@ -39,7 +39,7 @@ on the page.
 
 ### The mission
 A UGV leaves a Role 1 aid station, drives ~420 m to a casualty collection point (CCP), loads
-a litter, and comes back — PROJECT.md §1's "casualty evacuation back, across the segment under
+a litter, and comes back — design.md §1's "casualty evacuation back, across the segment under
 the greatest threat from enemy observation and fires". It is time-critical and point-to-point:
 a medic is standing at the CCP with a patient, and the vehicle's arrival report commits the
 next step of the chain (medevac window, dismount exposure). The failure that matters here is
@@ -180,7 +180,7 @@ false; green `AT CCP · CONFIRMED` when `at_ccp`; the true vehicle keeps its rou
 Camera/palette: dusk, low warm key (continuity with the shared HDRI), a red-cross panel and
 a ground litter at the CCP, ring drawn flat on the terrain; the map view must fit TRUE,
 BELIEVED and the CCP in frame — the believed pin reaches 632 m SE of the vehicle. Beats
-(stream idx → caption, 15 epochs/s):
+(stream idx → caption, 5 epochs/s):
 
 | idx | caption |
 |---|---|
