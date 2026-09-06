@@ -227,6 +227,8 @@ def test_record_matches_the_contract_fixture():
     r = record(datetime(2026, 8, 20, 0, 14, 30), feats,
                score(feats, None), n_sv=11)
     for key in fixture:
+        if key == "terrain":
+            continue        # Track E's optional block: present only when the channel ran
         assert key in r, f"§5 contract key {key!r} missing from the record"
     assert r["timestamp"].endswith("Z")
     assert 0.0 <= r["confidence"] <= 1.0

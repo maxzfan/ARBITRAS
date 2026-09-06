@@ -86,8 +86,20 @@ def attack_indices(records) -> list[int]:
             if (r.get("_attack") or {}).get("stage") in ATTACK_STAGES]
 
 
-def first_fire(records, attack, level: float = 0.5):
-    return next((i for i in attack if records[i]["features"].get("terrain_mismatch", 0.0) >= level), None)
+FIRE_LEVEL = 0.5     # a windowed mismatch at or above half scale counts as a terrain fire
+
+
+def first_fire(records, attack, level: float = FIRE_LEVEL):
+    return next((i for i in attack
+                 if records[i]["features"].get("terrain_mismatch", 0.0) >= level), None)
+
+
+def fire_fraction(records, idx=None, level: float = FIRE_LEVEL) -> float:
+    """Share of the given epochs on which the terrain feature is at or above
+    `level` — the channel's OWN alarm rate, independent of the weights."""
+    idx = range(len(records)) if idx is None else idx
+    return float(np.mean([records[i]["features"].get("terrain_mismatch", 0.0) >= level
+                          for i in idx]))
 
 
 def sensor_quality_curve(clean, carry, rmap, diags, windows, sigma_uere) -> list[dict]:
@@ -108,26 +120,34 @@ def sensor_quality_curve(clean, carry, rmap, diags, windows, sigma_uere) -> list
             rows.append({"diag": diag, "window": window, "saturation": ch.saturation,
                          "floor": ch.floor, "fsr_raw": raw_fsr, "fsr_arbitrated": arb_fsr,
                          "attack_detection_fraction": det,
+                         # the channel's own alarm rates, weight-independent
+                         "terrain_clean_fire_fraction": fire_fraction(c),
+                         "terrain_attack_fire_fraction": fire_fraction(k, attack),
                          "terrain_first_fire_epoch": None if first is None else first - attack[0],
                          "bound_source_terrain_fraction": float(np.mean(
                              [r["geometry"].get("bound_source") == "terrain" for r in k]))})
-            print(f"  diag {diag:.2f} W {window}: FSR raw {raw_fsr:.4f} arb {arb_fsr:.4f} "
-                  f"det {det:.3f} first-fire {rows[-1]['terrain_first_fire_epoch']}", flush=True)
+            print(f"  diag {diag:.2f} W {window}: composite FSR raw {raw_fsr:.4f} arb {arb_fsr:.4f} "
+                  f"det {det:.3f} | terrain fires clean {rows[-1]['terrain_clean_fire_fraction']:.4f} "
+                  f"attack {rows[-1]['terrain_attack_fire_fraction']:.3f} "
+                  f"first {rows[-1]['terrain_first_fire_epoch']}", flush=True)
     return rows
 
 
-def integrity_check(rescored) -> dict:
-    """§10-style: empirical |D| <= combined bound at every arbitrated-NOMINAL epoch."""
+def integrity_check(rescored, key: str = "displacement_bound_m") -> dict:
+    """§10-style: empirical |D| <= bound at every arbitrated-NOMINAL epoch.
+    `key` selects the combined bound (default) or `residual_bound_m`, so the
+    terrain contribution can be separated from the pre-existing state."""
     states = _states(rescored)
     viol, n = [], 0
     for r, s in zip(rescored, states):
-        b = r["geometry"].get("displacement_bound_m")
+        b = r["geometry"].get(key)
         d = (r.get("_solution") or {}).get("displacement_m")
         if s == "NOMINAL" and b is not None and d is not None:
             n += 1
             if d > b:
                 viol.append((r["timestamp"], d, b))
-    return {"n_checked": n, "violations": viol, "ok": not viol and n > 0}
+    return {"bound": key, "n_checked": n, "n_violations": len(viol),
+            "violations": viol[:20], "ok": not viol and n > 0}
 
 
 # ------------------------------------------------------------------- plots
@@ -177,18 +197,22 @@ def plot_tta_polar(pred: dict, measured: dict | None, out: Path) -> None:
 
 def plot_sensor_quality(rows: list[dict], out: Path) -> None:
     plt = _plt()
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     for window in sorted({r["window"] for r in rows}):
         sub = sorted([r for r in rows if r["window"] == window], key=lambda r: r["diag"])
         d = [r["diag"] for r in sub]
-        axes[0].plot(d, [r["fsr_arbitrated"] for r in sub], "o-", label=f"W={window}")
-        axes[1].plot(d, [r["attack_detection_fraction"] for r in sub], "o-", label=f"W={window}")
-    axes[0].set_ylabel("false surrender rate (arbitrated, clean day)")
-    axes[1].set_ylabel("attack-window detection fraction")
+        axes[0].plot(d, [r["terrain_clean_fire_fraction"] for r in sub], "o-", label=f"W={window}")
+        axes[1].plot(d, [r["terrain_attack_fire_fraction"] for r in sub], "o-", label=f"W={window}")
+        axes[2].plot(d, [r["fsr_arbitrated"] for r in sub], "o-", label=f"FSR W={window}")
+        axes[2].plot(d, [r["attack_detection_fraction"] for r in sub], "s--", label=f"det W={window}")
+    axes[0].set_ylabel(f"terrain feature ≥ {FIRE_LEVEL} on the clean day (own false-alarm rate)")
+    axes[1].set_ylabel(f"terrain feature ≥ {FIRE_LEVEL} in the attack window")
+    axes[2].set_ylabel("composite: arbitrated FSR / attack detection")
     for ax in axes:
-        ax.set_xlabel("confusion diagonal of the SIMULATED sensor"); ax.grid(alpha=0.3); ax.legend()
-    fig.suptitle("Sensor quality sweep — equal untuned weights over five features, beta 0.5",
-                 fontsize=10)
+        ax.set_xlabel("confusion diagonal of the SIMULATED sensor"); ax.grid(alpha=0.3)
+        ax.legend(fontsize=7)
+    fig.suptitle("Sensor quality sweep — channel alone (left, centre) and in the composite at "
+                 "equal untuned weights over five features, beta 0.5 (right)", fontsize=10)
     fig.tight_layout(); fig.savefig(out, dpi=150); plt.close(fig)
 
 
@@ -255,11 +279,13 @@ def main(argv=None) -> None:
     w = Weights.equal(FEATURE_NAMES + OPTIONAL_FEATURE_NAMES)
     k = rescore(carry, ch, w)
     chk = integrity_check(k)
-    print(f"   empirical <= combined bound at arbitrated-NOMINAL epochs: "
-          f"{chk['n_checked'] - len(chk['violations'])}/{chk['n_checked']} — "
-          f"{'PASS' if chk['ok'] else 'FAIL'}")
+    chk_res = integrity_check(k, key="residual_bound_m")
+    for c in (chk_res, chk):
+        print(f"   empirical <= {c['bound']} at arbitrated-NOMINAL epochs: "
+              f"{c['n_checked'] - c['n_violations']}/{c['n_checked']} — "
+              f"{'PASS' if c['ok'] else 'FAIL'}")
     for t, d, b in chk["violations"][:5]:
-        print(f"     {t}: empirical {d:.2f} m > bound {b:.2f} m")
+        print(f"     {t}: empirical {d:.2f} m > combined bound {b:.2f} m")
     attack = attack_indices(k)
     first = first_fire(k, attack)
     measured = None
@@ -289,7 +315,11 @@ def main(argv=None) -> None:
               "predicted_tta": {str(b): v for b, v in pred.items()},
               "sensor_quality": rows,
               "headline": {"diag": hd, "window": args.headline_window,
-                           "integrity_check": chk, "measured_first_fire": measured},
+                           "integrity_check_combined": chk,
+                           "integrity_check_residual_only": chk_res,
+                           "measured_first_fire": measured,
+                           "terrain_clean_fire_fraction": fire_fraction(rescore(clean, ch, w)),
+                           "terrain_attack_fire_fraction": fire_fraction(k, attack)},
               "sigma_uere_m": sigma,
               "sensor": "SIMULATED (confusion matrix), not for the submission video"}
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)

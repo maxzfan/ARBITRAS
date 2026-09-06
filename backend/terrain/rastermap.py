@@ -142,14 +142,19 @@ class RasterMap:
         ce, cn = self.cell_centres(ii, jj)
         return float(np.hypot(ce - e, cn - n).max() + self.cell_m * math.sqrt(2) / 2)
 
-    def nearest_boundary(self, e: float, n: float) -> dict | None:
+    def nearest_boundary(self, e: float, n: float, c0: int | None = None) -> dict | None:
+        """Nearest cell of a different labelled class. `c0` overrides the
+        class under the point — the channel passes the footprint's dominant
+        class when the exact cell is unlabelled, so the advisory still names
+        the boundary the map does know about. None off-map or with no class."""
         idx = self.cell_index(e, n)
         if idx is None:
             return None
-        c0 = int(self.grid[idx])
+        if c0 is None:
+            c0 = int(self.grid[idx])
         if c0 == UNKNOWN:
             return None
-        ii, jj = self._other_for(c0)
+        ii, jj = self._other_for(int(c0))
         if len(ii) == 0:
             return None
         ce, cn = self.cell_centres(ii, jj)

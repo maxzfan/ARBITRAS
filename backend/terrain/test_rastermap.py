@@ -93,3 +93,11 @@ def test_metres_per_degree_match_the_console():
     lat_m, lon_m = m_per_deg(mission.LAT)
     assert lat_m == pytest.approx(mission.M_PER_DEG_LAT)
     assert lon_m == pytest.approx(mission.M_PER_DEG_LON)
+
+
+def test_nearest_boundary_with_a_class_override_on_an_unknown_cell(rmap):
+    assert rmap.nearest_boundary(-80.0, -50.0) is None              # unknown cell, no class
+    nb = rmap.nearest_boundary(-80.0, -50.0, c0=rmap.classes.index("grass"))
+    assert nb is not None and nb["class_beyond"] != "grass"
+    # from (-80,-50) the nearest non-grass labelled cell is the west ring at e=-100
+    assert nb["distance_m"] == pytest.approx(20.0) and nb["bearing_deg"] == pytest.approx(270.0)

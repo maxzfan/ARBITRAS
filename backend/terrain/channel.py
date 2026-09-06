@@ -108,7 +108,10 @@ class TerrainChannel:
             self._window.append(mismatch(q, p_s))
             map_dist = _dist(self.rmap.classes, q)
             extent = self.rmap.consistent_extent_m(*enu)
-            nb = self.rmap.nearest_boundary(*enu)
+            # Advisory relative to the class the footprint says is there, so
+            # an unlabelled exact cell (38% of the OSM raster) still yields a
+            # testable prediction. The extent keeps the conservative None.
+            nb = self.rmap.nearest_boundary(*enu, c0=int(np.argmax(q)))
 
         feature = None
         if len(self._window):
