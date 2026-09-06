@@ -62,7 +62,13 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
   const renderer = new T.WebGLRenderer({antialias:true, alpha:false, powerPreference:'high-performance'});
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.outputEncoding = T.sRGBEncoding; renderer.toneMapping = T.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = spec.exposure || 1.5; renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+  // ?shadow=0 and ?envmap=0 are headless diagnostics: SwiftShader renders shadow
+  // maps and float PMREM environments unreliably (everything reads as in-shadow),
+  // so headless screenshots are judged with them off; brightness is tuned on a
+  // real GPU (console/web/EARTH_BACKDROP.md, TRACK_B.md).
+  renderer.toneMappingExposure = +(QS.get('exposure') || spec.exposure || 1.5);
+  renderer.shadowMap.enabled = QS.get('shadow') !== '0'; renderer.shadowMap.type = T.PCFSoftShadowMap;
+  const USE_ENVMAP = QS.get('envmap') !== '0';
   renderer.info.autoReset = false; view.appendChild(renderer.domElement);
   T.ColorManagement.legacyMode = false;
 
@@ -94,8 +100,10 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
   let sunAz = handle.sunAz != null ? handle.sunAz : spec.sun.az, sunEl = handle.sunEl != null ? handle.sunEl : spec.sun.el;
   status.sky = 'loading';
   H.withTimeout(H.loadHDR(spec.hdr, renderer), 25000, 'HDRI').then(h => {
-    scene.environment = h.env; hemi.intensity = 0.12; sunAz = h.sunAz; sunEl = h.sunEl; status.sky = 'loaded';
-  }).catch(() => H.loadHDR(H.FALLBACK.hdr, renderer).then(h => { scene.environment = h.env; hemi.intensity = 0.12; status.sky = 'fallback'; })
+    if (USE_ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; }
+    sunAz = h.sunAz; sunEl = h.sunEl; status.sky = 'loaded';
+    status.hdr_measured = {sunAz: +h.sunAz.toFixed(1), sunEl: +h.sunEl.toFixed(1), horizon: '#' + h.fog.getHexString()};
+  }).catch(() => H.loadHDR(H.FALLBACK.hdr, renderer).then(h => { if (USE_ENVMAP) { scene.environment = h.env; hemi.intensity = 0.12; } status.sky = 'fallback'; })
               .catch(() => { status.sky = 'fallback (gradient only)'; }));
 
   // harness-only reference: route centreline + a 2 m cube at the route start

@@ -17,7 +17,7 @@
     sun: { az: 124.4, el: 47.3 },                          // measured from the HDR; overridden at load
     palette: { ground: '#6B6A5E', rock: '#5C574D', accent: '#E8A21C' },
     attribution: 'Sky, ground: Poly Haven, CC0',
-    hero_camera: { az: 200, el: 24, dist: 150, dolly: 0.6 },
+    hero_camera: { az: 215, el: 13, dist: 82, dolly: 0.6 },   // low oblique over the convoy's left shoulder
   };
 
   function build(ctx) {
@@ -115,7 +115,8 @@
       const dark = new T.MeshStandardMaterial({color:0x5A5548, roughness:0.9});
       const r = (p.radius_m || 30) + 6;
       for (let i = 0; i < 7; i++) {
-        const a = -0.9 + i*0.22, bx = p.e + Math.sin(a)*r, bz = -(p.n + Math.cos(a)*r);
+        // an arc on the SOUTH side of the pad (bearings ~125-210 deg): the route leaves north
+        const a = 2.2 + i*0.22, bx = p.e + Math.sin(a)*r, bz = -(p.n + Math.cos(a)*r);
         const b = new T.Mesh(new T.BoxGeometry(2.2, 1.4 + (i%2)*0.9, 2.2), dark);
         b.position.set(bx, heightAt(bx, bz) + b.geometry.parameters.height/2, bz);
         b.castShadow = b.receiveShadow = true; b.layers.enable(H.INSET_LAYER); scene.add(b); own.push(b);

@@ -98,6 +98,54 @@ def follow(path: Path, stale_after: float = 2.0, poll: float = 0.05):
 
 
 _TERRAIN_CACHE: dict = {}
+_NUMBERS_CACHE: dict = {}
+
+
+def numbers(clean_path=Path("out/clean.jsonl"), attack_path=Path("out/carryoff.jsonl")) -> dict:
+    """design.md §10 headline numbers from the streams on disk, cached per mtime.
+
+    max adversarial displacement = |position - _truth| at the epoch before the
+    first arbitrated transition out of NOMINAL after onset; the analytic bound
+    is that same epoch's geometry.displacement_bound_m; time-to-alert is epochs
+    from onset to that transition; FSR is epochs below NOMINAL over the clean
+    replay. Nulls, with a note, when a stream is missing."""
+    key = tuple((str(q), q.stat().st_mtime if q.exists() else None) for q in (clean_path, attack_path))
+    if _NUMBERS_CACHE.get("key") == key:
+        return _NUMBERS_CACHE["v"]
+    from console.replay import arbitrate, false_surrender_rate, time_to_alert
+    rows = []
+    def row(label, value, unit, source): rows.append({"label": label, "value": value, "unit": unit, "source": source})
+    if attack_path.exists():
+        eps = read_epochs(attack_path)
+        onset = next((i for i, e in enumerate(eps) if isinstance(e, dict)
+                      and (e.get("_attack") or {}).get("stage", "CLEAN") != "CLEAN"), None)
+        if onset is not None:
+            dec = arbitrate(eps)
+            tta = time_to_alert(dec, onset)
+            k = onset + tta - 1 if tta else None
+            disp = bound = None
+            if k is not None and isinstance(eps[k], dict):
+                disp = (eps[k].get("_solution") or {}).get("displacement_m")
+                bound = (eps[k].get("geometry") or {}).get("displacement_bound_m")
+            src = f"{attack_path}, epoch {k} (before the first transition out of NOMINAL)"
+            row("MAX ADVERSARIAL DISPLACEMENT", disp, "M", src)
+            row("ANALYTIC BOUND · SAME EPOCH", bound, "M", src)
+            row("TIME TO ALERT", tta, "EPOCHS", f"{attack_path}, onset epoch {onset}, 30 s epochs")
+        else:
+            row("MAX ADVERSARIAL DISPLACEMENT", None, "M", f"{attack_path}: no attack epochs")
+    else:
+        row("MAX ADVERSARIAL DISPLACEMENT", None, "M", f"{attack_path} missing: run python -m backend.demo")
+    if clean_path.exists():
+        m = false_surrender_rate(arbitrate(read_epochs(clean_path)))
+        row("FALSE SURRENDER RATE", None if m.get("fsr") is None else round(m["fsr"], 4), "",
+            f"{clean_path}, {m.get('epochs')} clean epochs, {m.get('downgrade_events')} events")
+    else:
+        row("FALSE SURRENDER RATE", None, "", f"{clean_path} missing")
+    row("STATION", "USN8 · 2026-08-20 · 30 S · 5 CONSTELLATIONS", "", "design.md §4")
+    row("THRESHOLDS", THRESHOLD_PROVENANCE.split(":")[0], "", "console/arbiter/states.py")
+    v = {"rows": rows, "note": "computed from the streams on disk at server start; every value carries its source"}
+    _NUMBERS_CACHE.update(key=key, v=v)
+    return v
 
 
 def terrain_map(path: Path = Path("data/terrain_usn8.npz")) -> dict | None:
@@ -207,6 +255,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_error(404, str(e))
         if u.path == "/missions":
             return self._json(mission_registry.summary())
+        if u.path == "/numbers":
+            # Hero spec block (TRACK_F.md §1): headline results computed from
+            # the streams on disk, each with its source, never typed by hand.
+            return self._json(numbers())
         if u.path == "/terrain":
             # The signed pre-map (Track E) as a class grid, for the CASEVAC
             # environment. Mission context, not an observable: loaded with numpy
