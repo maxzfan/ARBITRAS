@@ -105,12 +105,21 @@ def dprime(clean_records, attack_records, attack_idx) -> float:
     return float((a.mean() - c.mean()) / pooled) if pooled > 0 else float("inf")
 
 
-def fire_fraction(records, idx=None, level: float = FIRE_LEVEL) -> float:
-    """Share of the given epochs on which the terrain feature is at or above
-    `level` — the channel's OWN alarm rate, independent of the weights."""
+def scored_fraction(records, idx=None) -> float:
+    """Share of the given epochs on which the channel made a claim at all —
+    the believed position was solved, on the map, and on labelled ground."""
     idx = range(len(records)) if idx is None else idx
-    return float(np.mean([records[i]["features"].get("terrain_mismatch", 0.0) >= level
-                          for i in idx]))
+    return float(np.mean(["terrain_mismatch" in records[i]["features"] for i in idx]))
+
+
+def fire_fraction(records, idx=None, level: float = FIRE_LEVEL) -> float:
+    """Share of the SCORED epochs on which the terrain feature is at or above
+    `level` — the channel's OWN alarm rate, independent of the weights. Epochs
+    without a claim are not in the denominator; scored_fraction says how many."""
+    idx = range(len(records)) if idx is None else idx
+    vals = [records[i]["features"]["terrain_mismatch"] for i in idx
+            if "terrain_mismatch" in records[i]["features"]]
+    return float(np.mean([v >= level for v in vals])) if vals else float("nan")
 
 
 def sensor_quality_curve(clean, carry, rmap, diags, windows, sigma_uere) -> list[dict]:
@@ -132,6 +141,8 @@ def sensor_quality_curve(clean, carry, rmap, diags, windows, sigma_uere) -> list
                          "floor": ch.floor, "fsr_raw": raw_fsr, "fsr_arbitrated": arb_fsr,
                          "attack_detection_fraction": det,
                          # the channel's own alarm rates, weight-independent
+                         "terrain_clean_scored_fraction": scored_fraction(c),
+                         "terrain_attack_scored_fraction": scored_fraction(k, attack),
                          "terrain_clean_fire_fraction": fire_fraction(c),
                          "terrain_attack_fire_fraction": fire_fraction(k, attack),
                          "terrain_dprime": dprime(c, k, attack),
@@ -141,6 +152,7 @@ def sensor_quality_curve(clean, carry, rmap, diags, windows, sigma_uere) -> list
             print(f"  diag {diag:.2f} W {window}: composite FSR raw {raw_fsr:.4f} arb {arb_fsr:.4f} "
                   f"det {det:.3f} | terrain fires clean {rows[-1]['terrain_clean_fire_fraction']:.4f} "
                   f"attack {rows[-1]['terrain_attack_fire_fraction']:.3f} "
+                  f"(scored {rows[-1]['terrain_attack_scored_fraction']:.2f}) "
                   f"d' {rows[-1]['terrain_dprime']:.2f} "
                   f"first {rows[-1]['terrain_first_fire_epoch']}", flush=True)
     return rows
@@ -217,9 +229,12 @@ def plot_sensor_quality(rows: list[dict], out: Path) -> None:
         axes[0].plot(d, [r["terrain_clean_fire_fraction"] for r in sub], "o-", label=f"W={window}")
         axes[1].plot(d, [r["terrain_attack_fire_fraction"] for r in sub], "o-", label=f"W={window}")
         axes[2].plot(d, [r["terrain_dprime"] for r in sub], "o-", label=f"W={window}")
-    axes[0].set_ylabel(f"terrain feature ≥ {FIRE_LEVEL} on the clean day (own false-alarm rate)")
-    axes[1].set_ylabel(f"terrain feature ≥ {FIRE_LEVEL} in the attack window")
-    axes[2].set_ylabel("d′ of the terrain feature, clean day vs attack window")
+    axes[0].set_ylabel(f"clean-day fire rate (feature ≥ {FIRE_LEVEL})")
+    axes[1].set_ylabel(f"attack-window fire rate (feature ≥ {FIRE_LEVEL}), scored epochs")
+    axes[2].set_ylabel("d′, clean day vs attack window")
+    axes[0].set_title("own false-alarm rate", fontsize=9)
+    axes[1].set_title("own detection rate", fontsize=9)
+    axes[2].set_title("separation of the emitted feature", fontsize=9)
     for ax in axes:
         ax.set_xlabel("confusion diagonal of the SIMULATED sensor"); ax.grid(alpha=0.3)
         ax.legend(fontsize=7)
@@ -332,6 +347,7 @@ def main(argv=None) -> None:
                            "measured_first_fire": measured,
                            "terrain_clean_fire_fraction": fire_fraction(rescore(clean, ch, w)),
                            "terrain_attack_fire_fraction": fire_fraction(k, attack),
+                           "terrain_attack_scored_fraction": scored_fraction(k, attack),
                            "terrain_dprime": dprime(rescore(clean, ch, w), k, attack)},
               "sigma_uere_m": sigma,
               "sensor": "SIMULATED (confusion matrix), not for the submission video"}
