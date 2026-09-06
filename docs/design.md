@@ -609,7 +609,7 @@ georinex emits a FutureWarning per epoch from xarray. Harmless. Suppress with `2
 ## Repo layout — create at the venue, not before
 
 ```
-HOLDFAST/
+ARBITER/
 ├── CLAUDE.md
 ├── docs/design.md
 ├── data/                   ← gitignored
