@@ -55,11 +55,26 @@ jobs:
       # backend.missions' casevac spec calls load_verified(), which raises on a
       # missing map, and bootstrap.sh fetches the RINEX day but not the pre-map.
       # fetch() short-circuits on data/terrain_usn8_osm.json, so Overpass is hit
-      # only when the cache above misses; --sign mints the keypair if absent.
+      # only when the inputs cache above misses; --sign mints the keypair if
+      # absent.
+      #
+      # Retried because a cold cache is not the rare case it looks like:
+      # actions/cache only SAVES on a successful run, so once the deploy starts
+      # failing every subsequent run is cold too, and one 504 from a free public
+      # endpoint keeps it that way. Run 34037489897 died exactly there. On a
+      # cache hit the fetch is a no-op and attempt 1 returns immediately.
       - name: Pre-map (Track E)
         run: |
-          [ -s data/terrain_usn8.npz ] ||
-            python -m backend.terrain.fetch_map --radius 600 --cell 5 --sign
+          if [ -s data/terrain_usn8.npz ]; then exit 0; fi
+          for attempt in 1 2 3; do
+            if python -m backend.terrain.fetch_map --radius 600 --cell 5 --sign; then
+              exit 0
+            fi
+            echo "pre-map attempt $attempt failed; retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
+          echo "::error::Overpass did not answer after 3 attempts"
+          exit 1
 
       - run: python -m backend.demo
       - run: python -m backend.missions --mission all
