@@ -30,6 +30,14 @@ EMIT_LATERAL_ADVISORY = True
 
 REQUIRED_KEYS = ("timestamp", "confidence", "credential_status")
 
+_COMPASS = ("north", "north-east", "east", "south-east",
+            "south", "south-west", "west", "north-west")
+
+
+def compass(bearing_deg: float) -> str:
+    """Bearing in degrees clockwise from north -> eight-point compass name."""
+    return _COMPASS[int(((float(bearing_deg) % 360.0) + 22.5) // 45.0) % 8]
+
 
 @dataclass
 class Decision:
@@ -57,6 +65,9 @@ class Decision:
     threshold_provenance: str = THRESHOLD_PROVENANCE
     features: dict = field(default_factory=dict)
     geometry: dict = field(default_factory=dict)
+    # Track E (tracks/TRACK_E.md): the epoch's terrain block, passed through
+    # like geometry; {} when the channel did not run.
+    terrain: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -177,7 +188,7 @@ class Arbiter:
                 reason = "stale"
             return self._emit(
                 previous, reason, None, None, self._last_confidence,
-                self._last_credential, None, {}, {},
+                self._last_credential, None, {}, {}, {},
             )
 
         self._stale = 0
@@ -211,10 +222,11 @@ class Arbiter:
         return self._emit(
             previous, reason, epoch.get("timestamp"), implied, confidence,
             credential, divergence, epoch.get("features") or {}, geometry,
+            epoch.get("terrain") or {},
         )
 
     def _emit(self, previous, reason, timestamp, implied, confidence,
-              credential, divergence, features, geometry) -> Decision:
+              credential, divergence, features, geometry, terrain=None) -> Decision:
         nominal = self.state is TrustState.NOMINAL
         pursuing = advisory = None
         if self.state is TrustState.DEGRADED:
@@ -227,6 +239,14 @@ class Arbiter:
                         " Lateral offset would break a fixed-position spoofer's"
                         " geometry — advisory only, not a motion command."
                     )
+            # Track E: the terrain next-best observation — a prediction the
+            # mission can test, never a motion command (tracks/TRACK_E.md).
+            nb = (terrain or {}).get("nearest_boundary")
+            if nb:
+                line = (f"Terrain: if the reported position is right, the sensor "
+                        f"should read {nb['class_beyond']} {nb['distance_m']:.0f} m "
+                        f"to the {compass(nb['bearing_deg'])}.")
+                advisory = f"{advisory} {line}" if advisory else line
         return Decision(
             epoch_index=self.epoch_index,
             timestamp=timestamp,
@@ -247,4 +267,5 @@ class Arbiter:
             stale_ticks=self._stale,
             features=features,
             geometry=geometry,
+            terrain=terrain or {},
         )

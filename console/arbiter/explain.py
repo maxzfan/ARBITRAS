@@ -27,6 +27,8 @@ FEATURE_PHRASE = {
     "pseudorange_residual": "range measurements are drifting from their smoothed track",
     "code_carrier_divergence": "code and carrier measurements have separated",
     "cross_constellation": "the constellations no longer agree on position",
+    # Track E (tracks/TRACK_E.md): the one non-RF channel.
+    "terrain_mismatch": "the ground under the vehicle does not match the map at the reported position",
 }
 
 CREDENTIAL_PHRASE = {
@@ -119,6 +121,16 @@ def explain(d: Decision) -> dict:
             f"dropped out of the trusted set ({', '.join(excluded)})."
         )
         claims.append(_claim(str(len(excluded)), len(excluded), "geometry.excluded_sv"))
+
+    # --- terrain (Track E): the most operator-legible sentence available ---
+    t = d.terrain or {}
+    L = t.get("match_likelihood")
+    sensed = (t.get("sensed") or {}).get("class")
+    mapped = (t.get("map_at_position") or {}).get("class")
+    if L is not None and sensed and mapped and sensed != mapped:
+        parts.append(f"The terrain sensor reads {sensed}; the map has {mapped} "
+                     f"at the reported position.")
+        claims.append(_claim(f"{L:.2f}", L, "terrain.match_likelihood"))
 
     # --- invariant 5: DEGRADED is an active state -------------------------
     if d.advisory:

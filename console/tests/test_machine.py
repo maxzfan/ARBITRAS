@@ -270,3 +270,63 @@ def test_verifier_catches_a_fabricated_number():
                          "path": "geometry.displacement_bound_m"})
     ok, failures = verify(ex, e)
     assert not ok and failures, "a number not in the epoch record must not display"
+
+
+# ---------------------------------------------------------- Track E consumers
+
+TERRAIN = {"available": True, "match_likelihood": 0.1,
+           "sensed": {"class": "grass", "p": {"grass": 1.0}},
+           "map_at_position": {"class": "paved", "p": {"paved": 1.0}},
+           "nearest_boundary": {"distance_m": 38.0, "bearing_deg": 47.0,
+                                "class_beyond": "water"}}
+
+
+def test_terrain_block_passes_through_and_advises_only_in_degraded():
+    arb = Arbiter()
+    d = arb.step(epoch(0.60, terrain=TERRAIN, geometry={"next_best_observation": "E"}))
+    assert d.state is TrustState.DEGRADED
+    assert d.terrain == TERRAIN
+    assert "should read water 38 m to the north-east" in d.advisory
+    assert d.advisory.startswith("Reweight toward E.")
+    d = Arbiter().step(epoch(0.95, terrain=TERRAIN))
+    assert d.state is TrustState.NOMINAL and d.advisory is None
+    d = Arbiter().step(epoch(0.30, terrain=TERRAIN))
+    assert d.state is not TrustState.DEGRADED and d.advisory is None
+
+
+def test_terrain_advisory_stands_alone_without_next_best_observation():
+    d = Arbiter().step(epoch(0.60, terrain=TERRAIN))
+    assert d.state is TrustState.DEGRADED
+    assert d.advisory.startswith("Terrain: if the reported position is right")
+
+
+def test_sensorless_epoch_has_empty_terrain():
+    assert Arbiter().step(epoch(0.95)).terrain == {}
+
+
+def test_terrain_mismatch_has_an_operator_phrase():
+    from console.arbiter.explain import FEATURE_PHRASE
+    assert "terrain_mismatch" in FEATURE_PHRASE
+    assert "map" in FEATURE_PHRASE["terrain_mismatch"]
+
+
+def test_terrain_disagreement_is_named_and_verifiable():
+    from console.arbiter.explain import FEATURE_PHRASE
+    ep = epoch(0.60, features={"cn0_anomaly": 0.1, "terrain_mismatch": 0.9},
+               terrain={"available": True, "match_likelihood": 0.12,
+                        "sensed": {"class": "grass", "p": {"grass": 1.0}},
+                        "map_at_position": {"class": "paved", "p": {"paved": 1.0}}})
+    d = Arbiter().step(ep)
+    ex = explain(d)
+    assert ex["headline"].startswith(FEATURE_PHRASE["terrain_mismatch"].capitalize())
+    assert "reads grass; the map has paved" in ex["detail"]
+    ok, failures = verify(ex, ep)
+    assert ok, failures
+
+
+def test_terrain_agreement_adds_no_sentence():
+    ep = epoch(0.95, terrain={"available": True, "match_likelihood": 0.98,
+                              "sensed": {"class": "grass", "p": {"grass": 1.0}},
+                              "map_at_position": {"class": "grass", "p": {"grass": 1.0}}})
+    ex = explain(Arbiter().step(ep))
+    assert "terrain sensor" not in ex["detail"]
