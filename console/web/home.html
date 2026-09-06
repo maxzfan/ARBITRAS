@@ -21,6 +21,7 @@
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
+  section[id],footer[id]{scroll-margin-top:var(--nav)}
   html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
   /* ---- nav ---- */
@@ -44,9 +45,13 @@
     font-size:clamp(52px,7.4vw,112px);line-height:.92;letter-spacing:-.015em;margin:0}
   .hero .sub{margin:26px 0 0;max-width:560px;font-size:15px;line-height:1.55;color:#D2D9E2}
   .hero .clock{position:absolute;left:28px;bottom:34px;z-index:2;font-family:var(--mono);font-size:13px;letter-spacing:.2em;color:#C8D0DA;line-height:1.9}
-  .hero .down{position:absolute;right:26%;top:50%;z-index:2;width:74px;height:74px;border:1px solid #E6EAF0;display:flex;align-items:center;
-    justify-content:center;font-size:30px;color:#fff;cursor:pointer;transform:translateY(-50%);background:rgba(0,0,0,.12)}
-  .hero .down:hover{background:rgba(255,255,255,.08)}
+  .hero .down{position:absolute;left:50%;bottom:34px;z-index:2;transform:translateX(-50%);display:flex;align-items:center;gap:14px;
+    padding:14px 22px;border:1px solid #E6EAF0;background:rgba(0,0,0,.12);cursor:pointer;color:#fff;
+    font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;white-space:nowrap;
+    text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 14px rgba(0,0,0,.8);transition:background .15s}
+  .hero .down:hover{background:rgba(255,255,255,.1)}
+  .hero .down i{font-style:normal;font-size:17px;line-height:1;transition:transform .2s}
+  .hero .down:hover i{transform:translateY(3px)}
   /* Text-only over a bright ground: the halo carries legibility so the block
      never needs a panel behind it, which would cover the render it sits on. */
   .hero .spec{position:absolute;right:28px;bottom:34px;z-index:2;font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:#E8EDF3;
@@ -107,20 +112,43 @@
   .console .badge.link{cursor:pointer;color:var(--dim)}
   .console .badge.link:hover{color:var(--fg)}
   .console iframe{flex:1;width:100%;border:0;background:var(--bg);display:block}
-  .console .empty{flex:1;display:flex;align-items:center;justify-content:center;font-family:var(--mono);letter-spacing:.2em;color:var(--faint);font-size:12px}
+  /* The console panel and the limits that qualify it are consequences of a
+     choice: neither exists on the page until a mission has been selected. */
+  body:not(.picked) #method,body:not(.picked) #limits{display:none}
+  /* ---- research ---- */
+  .research{background:var(--bg);border-top:1px solid var(--line);padding:64px 28px 72px}
+  .research h2{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin:0 0 10px}
+  .research .lede{font-size:14.5px;line-height:1.6;color:#C2CBD6;max-width:820px;margin:0 0 40px}
+  .research .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.45fr);gap:44px 64px;max-width:1560px;align-items:start}
+  .research h3{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);
+    margin:0 0 20px;padding-bottom:10px;border-bottom:1px solid var(--keyline)}
+  .research h4{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:0 0 14px}
+  .research h4+ul{margin-bottom:26px}
+  .research ul{list-style:none;margin:0;padding:0}
+  .research li{margin-bottom:18px}
+  .research .w{display:block;font-size:14px;font-weight:600;color:var(--fg);line-height:1.35}
+  .research .w.inl{display:inline}                     /* several primitives on one line */
+  .research a.w:hover{color:var(--amber)}
+  .research a.w::after{content:' ↗';font-size:11px;color:var(--faint)}
+  .research a.w:hover::after{color:var(--amber)}
+  .research .who{display:block;margin-top:5px;font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;color:#7C8A99}
+  .research .rel{display:block;margin-top:6px;font-size:12.5px;line-height:1.5;color:var(--dim);max-width:660px}
+  .research .cited li{margin-bottom:13px}
+  .research .cited .rel{margin-top:3px;font-size:12px}
+  @media (max-width:1100px){.research .cols{grid-template-columns:minmax(0,1fr)}}
   /* ---- footer ---- */
   footer{background:#000;padding:56px 28px 70px;color:#AEB8C4;font-size:13px;line-height:1.6}
   footer h2{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8794A2;margin:0 0 16px}
   footer ol{max-width:900px;margin:0;padding-left:18px}
   footer li{margin-bottom:8px}
   footer .fine{margin-top:28px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:#5C6875}
-  @media (max-width:1100px){.missions .row{flex-wrap:wrap} .missions .col,.missions .col.active,.missions .row.hovering .col,.missions .row.hovering .col.hover{flex:0 0 50%} .missions canvas#tilesCanvas{display:none} .hero .spec{display:none} .hero .down{right:28px}}
+  @media (max-width:1100px){.missions .row{flex-wrap:wrap} .missions .col,.missions .col.active,.missions .row.hovering .col,.missions .row.hovering .col.hover{flex:0 0 50%} .missions canvas#tilesCanvas{display:none} .hero .spec{display:none}}
 </style>
 
 <nav>
   <a class="wordmark" href="#platform">ARBITRAS</a>
   <div class="links">
-    <a href="#platform">Platform</a><a href="#missions">Missions</a><a href="#method">Method</a><a href="#limits">Limits</a>
+    <a href="#platform">Platform</a><a href="#missions">Missions</a><a href="#research">Research</a>
   </div>
   <span class="reset" id="reset" title="hard reset: reload">Reset</span>
 </nav>
@@ -133,7 +161,7 @@
     <h1>Signal quality<br>is not provenance</h1>
     <p class="sub">A trust layer between a GNSS receiver and an autonomy stack. It detects spoofed positioning, scores confidence continuously, and degrades the vehicle's authority in stages — full autonomy, coast, finish the leg, hold — instead of one binary trust decision.</p>
   </div>
-  <div class="down" id="down" title="missions">↓</div>
+  <div class="down" id="down" title="the four missions">Explore use cases <i>↓</i></div>
   <div class="clock" id="clock">--.---.----<br>--:--:-- ZULU</div>
   <div class="spec" id="spec"></div>
 </section>
@@ -146,12 +174,63 @@
 
 <section class="console" id="method">
   <div class="mhead">
-    <div class="t" id="mTitle">Missions<small>select a mission above</small></div>
+    <div class="t" id="mTitle"></div>
     <div class="atk" id="mAttack"></div>
     <div class="right" id="mRight"></div>
   </div>
-  <div class="empty" id="consoleEmpty">SELECT A MISSION</div>
-  <iframe id="consoleFrame" title="ARBITRAS console" style="display:none" allow="fullscreen"></iframe>
+  <iframe id="consoleFrame" title="ARBITRAS console" allow="fullscreen"></iframe>
+</section>
+
+<section class="research" id="research">
+  <h2>Research</h2>
+  <p class="lede">ARBITRAS is an assembly of published work — its geometry score, its credential layer and its scoring discipline each come from somewhere, and the relationships below are the ones stated in <code>docs/design.md</code> §3. Where a work carries no link the citation is the reference.</p>
+  <div class="cols">
+    <div>
+      <h3>Our papers</h3>
+      <ul>
+        <li><a class="w" href="/papers/anderson-2024-gnss-cryptography.pdf" target="_blank" rel="noopener">Designing Cryptography Systems for GNSS Data and Ranging Authentication</a>
+          <span class="who">Jason Anderson · PhD dissertation, Stanford University, Aeronautics and Astronautics · December 2024</span>
+          <span class="rel">The design space our credential layer sits in: data and ranging authentication under GNSS's bandwidth constraint, and the receiver-side processing that turns a verified message into a statement about trust. Its argument that the product can now dictate the cryptography, rather than the reverse, is why a mission authorisation here is short-lived and continuously renewed instead of signed once.</span></li>
+        <li><a class="w" href="/papers/converge-coverage-view-selection.pdf" target="_blank" rel="noopener">Coverage Optimization for Camera View Selection (CONVERGE)</a>
+          <span class="who">Timothy Chen*, Adam Dai*, Maximilian Adang, Grace Gao, Mac Schwager · Stanford University</span>
+          <span class="rel">Fisher Information Gain reduced to a tractable coverage surrogate for active view selection. Different domain, same mathematics: the source of the geometry score — an information ratio over the line-of-sight matrix, normalised to <code>(det ratio)^(1/(3+k))</code> — and of the next-best-observation ranking the console pursues in DEGRADED. The mathematics is what carries over; ARBITRAS holds no imagery and no camera anywhere.</span></li>
+        <li><a class="w" href="/papers/cho-sbas-authentication-poster.pdf" target="_blank" rel="noopener">Authenticating Satellite-Based Augmentation Systems (SBAS)</a>
+          <span class="who">Eric Hyunseung Cho · advisor Prof. Todd Walter · Stanford GPS Laboratory · 2026</span>
+          <span class="rel">A standards-compliant prototype of SBAS message authentication: 250 bits per second, no signature and nothing confirming the sender, and ICAO's answer to it. The upstream problem our credential layer assumes solved — that work authenticates the message, and this one asks what authority the message grants.</span></li>
+      </ul>
+    </div>
+    <div class="cited">
+      <h3>Works cited</h3>
+      <h4>Authentication and credentials</h4>
+      <ul>
+        <li><a class="w" href="https://www.rfc-editor.org/rfc/rfc4082" target="_blank" rel="noopener">RFC 4082 — TESLA</a>
+          <span class="rel">Delayed disclosure of symmetric keys buys asymmetry without a signature per message. The hash chain and disclosure schedule here are ours; the primitives under them never are.</span></li>
+        <li><span class="w">ICAO Doc 10169 — SBAS authentication</span>
+          <span class="rel">TESLA, Ed25519, KMAC, compressed certificates. The protocol our credential layer reimplements; HMAC substitutes for KMAC under the library-crypto-only rule.</span></li>
+        <li><a class="w" href="https://www.gsc-europa.eu/galileo/services/galileo-open-service-navigation-message-authentication-osnma" target="_blank" rel="noopener">Galileo OSNMA</a>
+          <span class="rel">Operational 24 July 2025. TESLA delayed disclosure with live PKI, Merkle root and OTAR. Upstream of us: it authenticates the message and says nothing about authority.</span></li>
+        <li><a class="w inl" href="https://www.rfc-editor.org/rfc/rfc8032" target="_blank" rel="noopener">RFC 8032 — Ed25519</a> ·
+          <a class="w inl" href="https://csrc.nist.gov/pubs/fips/180-4/upd1/final" target="_blank" rel="noopener">FIPS 180-4 — SHA-256</a> ·
+          <a class="w inl" href="https://www.rfc-editor.org/rfc/rfc2104" target="_blank" rel="noopener">RFC 2104 — HMAC</a>
+          <span class="rel">The anchor signature, the chain and the tag over each authorisation. All three come from <code>cryptography</code>; no primitive in this project is written by us.</span></li>
+      </ul>
+      <h4>Scoring, geometry and detection</h4>
+      <ul>
+        <li><a class="w" href="https://arxiv.org/abs/2607.05415" target="_blank" rel="noopener">How Stable Is a PNT Resilience Score? — arXiv 2607.05415</a>
+          <span class="rel">Ally and challenge. Single-number resilience ratings are weighting-unstable: re-weighting flips the winner in up to 22% of draws under nominal conditions. It is why the false surrender rate is reported as a distribution over sampled weight vectors, and why the composite never appears without its four sub-scores and the geometry block.</span></li>
+        <li><span class="w">PNTTING — PNT Trust Inference Engine</span>
+          <span class="rel">Molina-Markham et al., DHS S&amp;T / MITRE. The closest published work: probabilistic trust inference for PNT user equipment, meant to assist automated decisions. More principled than ours; no credential binding, and not an authority arbiter with a published false-alarm rate.</span></li>
+        <li><span class="w">DHS Resilient PNT Conformance Framework v2.0 (2022) · Reference Architecture v1.0 (2022) · IEEE P1952</span>
+          <span class="rel">Four resilience levels, source-agnostic and outcome-based; Zero Trust applied to PNT — "function under the assumption of compromise." Our state machine instantiates that behavioural intent, and is a candidate conformance test for the standard in development.</span></li>
+        <li><span class="w">RAIM / ARAIM</span>
+          <span class="rel">An independent-fault model rather than a coordinated adversary, answering "can I trust this fix" and not "how much may this platform do." Its subset-geometry reasoning is the closest published relative of the geometry score.</span></li>
+        <li><span class="w">Rothmaier, Chen, Lo, Walter — ION GNSS+ 2021 · Psiaki &amp; Humphreys, Proc. IEEE 2016</span>
+          <span class="rel">Spoofing detection by metric combination, and the canonical survey. Our detector is that class of method, kept in the measurement domain and made to carry a confidence rather than a verdict.</span></li>
+        <li><span class="w">TEXBAT (UT Austin) · OAKBAT (ORNL)</span>
+          <span class="rel">The standard spoofing datasets, both raw IQ. We work one layer up, on RINEX observables, which is why the attacks here are injected rather than replayed.</span></li>
+      </ul>
+    </div>
+  </div>
 </section>
 
 <footer id="limits">
@@ -493,7 +572,8 @@
     const url = `/console?mission=${encodeURIComponent(target)}`;
     right.innerHTML = (ms.built ? '' : `<span class="badge">stream pending · logistics console shown</span>`)
       + `<span class="badge ${cls}">${label}</span><a class="badge link" href="${url}" target="_blank">open console ↗</a>`;
-    const fr = document.getElementById('consoleFrame'); fr.style.display = 'block'; document.getElementById('consoleEmpty').style.display = 'none';
+    document.body.classList.add('picked');                      // reveals the console panel, the limits and their nav entries
+    const fr = document.getElementById('consoleFrame');
     if (fr.dataset.mission !== target) { fr.src = url + '&hz=3'; fr.dataset.mission = target; }
     const u = new URL(location.href); u.searchParams.set('mission', name); history.replaceState(null, '', u);
     if (scroll) document.getElementById('method').scrollIntoView({behavior:'smooth'});
