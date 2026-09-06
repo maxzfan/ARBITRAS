@@ -246,13 +246,6 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
             # xc.reset() before each replay so no state leaks across runs.
             xc_result = xc.score(ep, sols)
             feats["cross_constellation"] = xc_result["value"]
-            # Track F (TRACK_F_RECON.md F-R6): the compensated channel z-scores
-            # behind the feature, so a mission post-pass can attribute a
-            # disagreement (which constellation, clock or position) without
-            # re-solving. Not a scored feature: confidence.anomaly() sums only
-            # the names in the weight vector.
-            feats["cross_constellation_detail"] = {
-                k: round(float(v), 3) for k, v in (xc_result.get("channels") or {}).items()}
         excluded = (distrusted(res["per_sv"], cal) if exclude is None
                     else exclude(res["per_sv"], cal, xc_result, ep))
         geom = geometry_block(ep.time, excluded, list(ep.df.index))
@@ -279,6 +272,14 @@ def score_stream(epochs, cal, truth: pd.DataFrame | None = None,
                      position=dict(sol["believed"].lla) if solved else None,
                      by_sv=by_sv_scores(res["per_sv"], cal.z_sat),
                      terrain=t_block)
+        if xc_result is not None:
+            # Track F (TRACK_F_RECON.md F-R6): the compensated channel z-scores
+            # behind feature 4, so a mission post-pass can attribute a
+            # disagreement (which constellation, clock or position) without
+            # re-solving. Attached AFTER record() because the emitter casts every
+            # feature to a float; nested under features like by_sv, additive.
+            rec["features"]["cross_constellation_detail"] = {
+                k: round(float(v), 3) for k, v in (xc_result.get("channels") or {}).items()}
         # Replay ground truth for the console (underscore = out of contract):
         # the WLS fix from the CLEAN pseudoranges at this epoch. `position` is
         # the fix from the injected ones. Same satellites, same weights.

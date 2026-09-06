@@ -451,4 +451,8 @@ def main(argv=None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Run through the canonical module object: under `python -m` this file is
+    # `__main__`, and the per-mission modules register their augment() into
+    # `backend.missions.REGISTRY`, which would otherwise be a second copy.
+    import backend.missions as _canonical
+    _canonical.main()

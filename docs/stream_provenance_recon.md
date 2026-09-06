@@ -34,3 +34,48 @@ SCRIPTED, `_attack` the injector's truth log). Differences for this stream:
 
 Attack epochs by stage: {'WALK': 29, 'CAPTURE': 1}.
 State timeline: `python -m console.replay out/recon.jsonl`.
+
+## Stationary deduction (geometry.correction.stationary)
+
+Added by `backend/missions_recon.py` (RECON's post-pass, `register_augment`);
+measured on this stream by `python -m backend.missions_recon`. The anchor is the
+last NOMINAL fix (arbiter transitions: 60 NOMINAL→SURRENDERED, 84 SURRENDERED→RESTRICTED, 94 RESTRICTED→DEGRADED, 104 DEGRADED→NOMINAL) carried by odometry -- the route in
+the presentation frame, zero in the stream frame -- and the anchor cross-check
+and the Galileo re-solve are independent: one is RF-free odometry from a fix
+taken before the attack, the other the trusted-subset solve of each epoch's
+ranges.
+
+| quantity | value |
+|---|---|
+| anchor epoch (last NOMINAL before the downgrade) | 59 (onset 60) |
+| anchored during the attack | 30/30 epochs |
+| agreement_m (anchor vs corrected_position) over the attack, median / max | 0.46 / 1.41 m |
+| deduced offset over the attack, min / max | 118.1 / 125.2 m |
+| deduced offset vs measured displacement, max difference (fix jitter since the anchor) | 0.31 m |
+| emitter bearing while stationary, median (min–max) | 84.7° (81.9–85.0°), 24 epochs (injected bearing 90°) |
+| path-delay estimate while stationary, median (min–max) | 258.8 m (256.2–262.0), 24 epochs vs 300.0 m injected |
+| clean lead-in: epochs anchored (must be 0) | 0 |
+| clean lead-in: deduced offset max (anchor refreshed every NOMINAL epoch) | 0.0 m |
+| clean lead-in: an anchor HELD from epoch 0 vs `_truth`, median / max | 0.32 / 0.82 m |
+| post-attack stationary windows | op_dwell:OP KESTREL (scripted dwell, presentation frame), op_dwell:OP-1 (scripted dwell, presentation frame), op_dwell:OP-2 (scripted dwell, presentation frame), op_dwell:OP-3 (scripted dwell, presentation frame) |
+| drag rate with the repeater off (method noise floor), median / max | 0.037 / 0.168 m/epoch |
+
+Stationary windows inside the attack (drag and bearing at the window's last epoch):
+
+| epochs | why stationary | drag | emitter bearing | path delay m | report tag |
+|---|---|---|---|---|---|
+| 60–83 | halted:SURRENDERED | 0.36 m/epoch on 126.4° | 84.8 | 256.2 | `SURRENDERED · on E+C · G dropped · PL 9.0 m · clock in holdover` |
+
+Report tags: epoch 0 `NOMINAL · on G+E+C · PL 4.0 m`; epoch 60 `SURRENDERED · on E+C · G dropped · PL 7.4 m · clock in holdover`; epoch 70 `SURRENDERED · on E+C · G dropped · PL 8.8 m · clock in holdover`; epoch 90 `RESTRICTED · on G+E+C · PL 3.5 m · clock in holdover`; epoch 509 `NOMINAL · on G+E+C · PL 3.2 m`.
+
+Notes. The path-delay estimate is the jump in the believed fix's dt_G - dt_E
+since the anchor epoch (`_solution.clock_bias_m`, metres); it reads below the
+injected figure because the joint G+E fix absorbs part of the repeater's
+position step into position (the 118–125 m displacement) rather than into the
+GPS clock. The detector's channel z-scores (`features.cross_constellation_detail`)
+and `CrossCal.scale` are dimensionless and are used for attribution only. The
+emitter bearing is claimed only when the deduced offset exceeds the corrected
+fix's protection level; inside it the offset is fix noise. A SURRENDERED halt
+is a stationary window the console actually draws (progress gain 0); an
+observation-point dwell is scripted (the console does not yet slow the vehicle
+at an OP) and is labelled as such in `frame.reason`.
