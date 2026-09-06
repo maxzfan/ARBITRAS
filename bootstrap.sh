@@ -16,7 +16,7 @@ echo "== 2/3  venv + libraries =="
 [ -d .venv ] || "$PY" -m venv .venv
 source .venv/bin/activate
 pip install -q -U pip wheel setuptools
-pip install -q "gnss-lib-py==1.0.4" "georinex==1.16.1"
+pip install -q "gnss-lib-py==1.0.4" "georinex==1.16.1" "cryptography"
 python -c "import georinex, gnss_lib_py, sys; print('python', sys.version.split()[0]); print('georinex ok'); print('gnss_lib_py ok')"
 
 echo "== 3/3  data (BKG mirror — no login needed; CDDIS requires Earthdata auth) =="
