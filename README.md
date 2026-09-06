@@ -27,6 +27,19 @@ through a Cloudflare quick tunnel (`brew install cloudflared`, no account):
 One replay per viewer; the URL changes on every launch and dies with the
 laptop's network or sleep (the script holds off sleep while it runs).
 
+For a link that outlives the laptop, render the console to a static site and
+put it on Cloudflare Pages. `Arbitras` is deterministic in (stream, layer), so
+every response the server would give is rendered once at build time; the build
+re-renders to catch nondeterminism, and `console/tests/test_static_build.py`
+diffs the artifacts against the running server byte for byte.
+
+    python -m deploy.build_static                  # site/, ~1.6 s
+    npx wrangler pages deploy site/ --project-name arbitras
+    python -m deploy.build_static --probe https://<domain>   # MIME check
+
+Full procedure, including the nameserver move:
+`docs/superpowers/specs/2026-09-06-public-static-deploy-design.md`.
+
 ## Results
 
 Real observables: USN8 (US Naval Observatory), 2026-08-20, 2,880 epochs at

@@ -9,3 +9,6 @@ out/
 
 # Track F environment assets: fetched by bootstrap.sh (console/web/env/ASSETS.txt), never committed
 console/web/vendor/asset-env-*
+
+# Built static site (deploy/build_static.py); rebuilt from out/ + vendor assets
+site/

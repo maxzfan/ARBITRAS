@@ -1,7 +1,9 @@
 # Public static deployment — design
 
 **Date:** 2026-09-06
-**Status:** approved, not yet implemented
+**Status:** implemented on `track_f` — `deploy/build_static.py`,
+`deploy/static_shim.js`, `console/tests/test_static_build.py`,
+`console/tests/static_shim_check.mjs`
 **Goal:** a stable URL on a domain we own that judges can open after the
 hackathon, with our machines closed.
 
@@ -42,9 +44,8 @@ Pages behind our own domain.
 **Why this is not a mock.** `Arbitras` is pure and deterministic in
 `(stream, layer)` — a property Track C already depends on, since its
 Dirichlet sweep replays the arbitras identically on every draw. The
-pre-rendered NDJSON is therefore byte-identical to what the live server
-would have pushed, and §5 of this document makes the build prove it rather
-than assert it.
+pre-rendered SSE bodies are therefore byte-identical to what the live server
+would have pushed, and §5 makes the build prove it rather than assert it.
 
 **No new claim is made.** The server was already replaying `out/*.jsonl`.
 The site replays the same epochs through the same arbitration. Provenance
@@ -91,7 +92,7 @@ site/api/numbers.json                                   912 B
 site/api/terrain.json                       190 KB → 10 KB gz
 site/api/mission/{logistics,recon,casevac,combat}.json
 site/api/mission/_default.json               console/mission.py frame
-site/api/events/{demo,logistics,recon,casevac,combat}.{on,off}.ndjson
+site/api/events/{demo,logistics,recon,casevac,combat}.{on,off}.sse
 site/{vendor,env,overlays}/**        copied verbatim, 45 MB / 86 files
 site/route.js  + any other web-root *.js
 ```
@@ -128,10 +129,16 @@ The shim covers exactly eight call sites:
 equivalents. Every other request passes through untouched.
 
 **`EventSource`** — replaced by a class that fetches
-`api/events/<mission>.<layer>.ndjson`, splits lines, and dispatches them
-paced at `1/rate` from `?rate=` (default 15, matching `_events`). It fires
-`open`, then `message` per epoch, then a terminal `end` event, because
-`index.html` closes the connection on `end`.
+`api/events/<mission>.<layer>.sse`, parses the stored frames, and dispatches
+them paced at `1/rate` from `?rate=` (default 15, matching `_events`). It
+fires `open`, a `message` per epoch, the guide's `dialogue` frame, then
+`end`, because `index.html` closes the connection on `end`.
+
+**The artifact is the raw SSE response body, not a JSON array of payloads.**
+This changed during implementation. `_events` had gained a second event type
+(`event: dialogue`, carrying `Guide.finish()`), and storing the body verbatim
+means the identity check in §5 is a plain `cmp` and a third event type will
+reach the site without anyone editing the shim.
 
 **Mission and layer resolution mirrors `_events` exactly:** `?mission=`
 selects the registry stream, falling back `mm.stream` → `mm.fallback_stream`;
@@ -152,10 +159,13 @@ state honest during load.
 "These bytes are what the server would have sent" is a claim, so the build
 checks it.
 
-1. **Byte-identity.** For each of the ten stream/layer files, replay through
-   `console.server.decide()` a second time and diff against what was
-   written. Any drift fails the build. This is the check that keeps the
-   determinism argument honest as the arbitras changes.
+1. **Byte-identity.** Two layers, both implemented. The build re-renders
+   every stream a second time and fails on any difference, which catches
+   nondeterminism before a deploy. `console/tests/test_static_build.py` then
+   runs the real `console.server` in-process and diffs its `/events` response
+   against the artifact byte for byte — that is the check that catches the
+   build and the server *drifting apart*, which the double-render cannot see.
+   Measured on the current streams: all eight mission bodies identical.
 2. **MIME probe.** After deploy, `HEAD` one file per asset class against the
    live URL: `.hdr` must arrive as an opaque byte stream for `RGBELoader`,
    and `draco_decoder.wasm` as `application/wasm`. Both fail *silently* in
@@ -181,23 +191,39 @@ python -m backend.missions        # the four mission streams
 `clean.jsonl` and `carryoff.jsonl` are 21 MB and feed `/numbers` only; they
 are read at build time and never deployed.
 
+**Nameservers first.** The domain is registered elsewhere and is not on
+Cloudflare, so before anything else: add the site at `dash.cloudflare.com`
+(Free plan), take the two nameservers it issues, and set them at the
+registrar. Propagation is minutes to hours and runs in the background while
+the rest of this happens. This is worth doing rather than leaving DNS at the
+registrar, because an apex domain cannot be a CNAME in standard DNS — most
+registrars cannot point the bare domain at `arbitras.pages.dev` at all.
+Cloudflare flattens CNAMEs at the apex, so the bare domain works.
+
 **Build and deploy:**
 
 ```bash
-python -m deploy.build_static           # writes site/, runs check 1
+npx wrangler login                                  # once
+npx wrangler pages project create arbitras --production-branch main
+python -m deploy.build_static                       # writes site/, runs check 1
 npx wrangler pages deploy site/ --project-name arbitras
 python -m deploy.build_static --probe https://<domain>   # runs check 2
 ```
 
+The build takes about 1.6 s and produces **103 files, 64.6 MB** — 45 MB of
+assets plus ~19.5 MB of SSE bodies, which the edge serves gzipped at roughly
+2 MB. Largest single file is the 6.0 MB combat sky HDR. Cloudflare Pages
+allows 20,000 files and 25 MiB each, so there is about 4x per-file headroom.
+
 **Substrate: Cloudflare Pages, direct upload via wrangler.** Chosen over
 GitHub Pages for three reasons: unlimited bandwidth, which matters because
-of §7; 45 MB of assets never enter git; and gzip/brotli is automatic.
-Current tree is 86 files at 45 MB with a 6.0 MB largest file, against limits
-of 20,000 files and 25 MiB per file — roughly a quarter of the per-file
-headroom, so an additional environment would still fit.
+of §7; 45 MB of assets never enter git; and gzip/brotli is automatic. The
+free tier needs no card.
 
-**Custom domain** is a CNAME to the `*.pages.dev` hostname, added in the
-Pages project. TLS is issued automatically.
+**Custom domain**: Workers & Pages → arbitras → Custom domains. With the
+zone on the same account, Cloudflare writes the DNS record itself and issues
+TLS automatically. `arbitras.pages.dev` keeps working as a fallback link
+while DNS propagates.
 
 `deploy/public.sh` stays exactly as it is. Quick tunnel for driving a live
 demo, static site for the durable link; they do not interact.
@@ -214,8 +240,8 @@ its own scope.
 
 ## 8. Open questions
 
-- Which domain, and are its nameservers already on Cloudflare? If they are
-  not, the CNAME still works but TLS issuance takes longer.
+- Which domain? Resolved: it is registered but not on Cloudflare, so the
+  nameserver move in §6 is a prerequisite rather than an option.
 - Should the site carry a visible "replay of recorded USN8 observations,
   2026-08-20" banner? The console already says so internally; a judge
   arriving cold at the console URL rather than the landing page may not see
