@@ -1,5 +1,10 @@
 # Measured quantities — USN8, 2026-08-20 (DOY 232)
 
+> **SUPERSEDED:** every d' figure recorded in this document before commit
+> `5780797` is stale — that run is the first with the 5° mask, the post-fit
+> residual feature 2, and a correctly-keyed cross-constellation calibration.
+> Use the "Items 4 and 5, measured on the masked detector" section at the end.
+
 Everything a threshold or an injected magnitude is expressed against. Measured,
 not assumed (CLAUDE.md: *thresholds derive from observed data*). Regenerate with
 `python -m backend.rinex.report_floor`.
@@ -622,3 +627,432 @@ Not edited here: those numbers and that section belong to the tracks that
 produced them, and silently rewriting another track's published results is
 worse than flagging them. Regeneration is a threshold-session task, since
 step 4 of the §10 procedure has to be redone on the new distributions.
+
+
+---
+
+# Elevation mask: 5 degrees, applied upstream (ruling 2026-09-05)
+
+**5 degrees is the standard aviation/ARAIM mask angle, taken from convention
+and NOT fitted to the exclusion bins it controls** — a cutoff tuned on the data
+it governs is a threshold in disguise. The measured bins (100% of clean-day
+exclusions in 0–15°, median 0.4°) confirm 5° is a safe place to cut; they did
+not choose it.
+
+## Applied as a mask, not an exemption
+
+Satellites below 5° are dropped from the epoch **entirely**, before feature
+scoring, before the position solution, and before the geometry block
+(`rinex.solve.masked_epoch`). After masking they are neither trusted, nor
+excludable, nor usable as cover.
+
+The rejected alternative — exempting low-elevation satellites from exclusion
+eligibility while still solving on them — creates a **safe harbour**:
+satellites that can never be flagged are exactly the ones an attacker would
+choose to capture. `ExclusionRule` now has no elevation term at all, and a
+test asserts `flagged_sv` takes no elevation argument so the path cannot come
+back.
+
+## The denominator, coordinated with Track C
+
+The information ratio's denominator `det(HᵀH_all)` must be taken over the
+masked set too, or the ratio moves for reasons unrelated to any attack.
+
+Track C's engine already masks its own basis — but at **10°**, its default,
+against the ruled 5°. Left alone, the position solution would have stood on a
+5° set while the geometry ratio stood on a 10° one. Resolved by making the mask
+angle a single definition (`rinex.solve.EL_MASK_DEG`) that `backend.replay`
+pushes into the geometry engine via a new `set_el_mask_deg`, added in the same
+style as their existing `set_sigma_uere`. Verified end to end: the minimum
+elevation appearing in the emitted geometry block is exactly 5.00°.
+
+**Validated on three constellations out of five.** The elevation bin table
+needs Keplerian broadcast ephemeris, which covers G/E/C only, so GLONASS and
+SBAS — about a quarter of the tracked sky — were not part of the validation.
+Satellites without usable ephemeris are *kept* rather than masked, deliberately:
+they are absent from H either way, so masking them would silently remove
+GLONASS from the C/N₀ feature while claiming to be a geometry decision.
+
+`satellites_tracked` now counts **usable** satellites (post-mask) rather than
+raw signals present in the file. That is the number that matters for a trust
+layer — how many satellites the solution is standing on.
+
+---
+
+# Limitation: the temporal signature is reproduced ~60x slow
+
+Decision 3 approved as proposed — flat `+power_db` from capture onward, with
+the fade emerging from the detector's rolling-mean memory rather than from any
+injected decay constant.
+
+**The timescale does not survive the data source, and this is a limitation of
+the archive, not a defect of the injector.** §7's stage-2 fade is ~10 s. Our
+epochs are 30 s, and the C/N₀ trailing mean is 20 epochs, so the emergent fade
+sits at **~10 minutes**. We reproduce the *shape* of the four-stage §7
+signature — onset spike, fade to baseline, lift-off, elevated steady state — at
+a timescale roughly **60× longer than the physical one**, because 30 s archived
+observables cannot resolve a 10 s transient. Nothing in the measurement domain
+can; resolving it needs the raw IQ that §12 puts out of scope by construction.
+
+Say the shape is right and the clock is stretched. Do not present the ~10
+minute fade as the receiver's loop dynamics.
+
+---
+
+# Injected transients: demo only, never in measurement
+
+Decision 5 values approved — capture jitter 3σ of measured clean C/N₀ noise,
+lift-off transient 6σ of measured clean code-minus-carrier, one epoch each —
+and split by config per the ruling:
+
+| config | transients |
+|---|---|
+| demo (`Spoof.transients` default) | **ON** |
+| every sweep and measurement run | **OFF** (forced in `run_sweep`, asserted by test) |
+
+Both are recorded per epoch in the injector's truth log (`transients` column)
+and in every sweep record, so no reported number is ambiguous about which
+setting produced it.
+
+Verified: with transients off, the lift-off CMC spike disappears from exactly
+one epoch (1.226 m = 6 × 0.204 m) and the capture C/N₀ jitter from exactly the
+capture epoch (0.91 dB rms ≈ 3 × 0.262 dB); every other epoch is bit-identical
+between the two runs.
+
+A bug this split caught: the capture jitter initially ignored the flag
+entirely. It was invisible in a naive diff because both runs draw from the same
+seed, so the jitter cancelled and the difference read 0.000 dB — which looked
+like "the flag works" rather than "the flag does nothing".
+
+---
+
+# Meaconing 300 m: a lower bound, not decomposed
+
+Decision 4 approved as written. 300 m ≈ 1 μs of excess path, the minimum for
+any repeater with physically separated antennas. It is labelled a **lower
+bound** and deliberately not decomposed into antenna-to-antenna path plus
+amplifier/hardware group delay: an honest decomposition needs a repeater
+geometry and hardware we have not specified, and inventing both to arrive back
+at the same number would dress a guess up as a derivation. A real meaconer adds
+unmodelled hardware delay, so the true bias is ≥ 300 m.
+
+
+---
+
+# Items 4 and 5, measured on the masked detector
+
+All figures below are the CURRENT numbers and supersede every earlier d′ in
+this document: they are the first taken with the 5° mask, the post-fit-residual
+feature 2, and a correctly-keyed cross-constellation calibration (see the cache
+note at the end). Attack scenarios scored on a 2 h window centred on onset with
+60 epochs of causal warm-up; clean baseline and FSR denominator are the full
+2,880-epoch day.
+
+## Item 4 — are we detecting our own injected spike? No.
+
+Composite and per-feature d′ at `carrier_rate_error = 0`:
+
+| transients | C/N₀ | residual | divergence | cross-const | **composite** |
+|---|---|---|---|---|---|
+| **ON** | 0.17 | 7.62 | 0.37 | 7.55 | **10.38** |
+| **OFF** | 0.18 | 7.62 | 0.37 | 7.55 | **10.22** |
+
+Sustained detection does not depend on the transients: composite d′ moves by
+0.16 (1.6%) and no per-feature figure moves at all. **We were not partly
+detecting our own artefact.** Transients stay ON for the demo and OFF for every
+measurement, and the setting is recorded per epoch either way.
+
+## Item 5 — weighted_sum vs max, both printed, neither picked
+
+| scenario | d′ (sum) | d′ (max) | per-feature d′ (cn0 / resid / cmc / cross) |
+|---|---|---|---|
+| carry-off, coherent | **10.22** | 9.20 | 0.18 / 7.62 / 0.37 / 7.55 |
+| carry-off, pin | **10.47** | 9.20 | 0.18 / 7.62 / 1.54 / 7.55 |
+| clock-domain walk | **9.08** | 8.62 | 0.18 / 4.47 / 0.37 / 12.38 |
+| meaconing | 4.47 | **9.55** | 0.20 / 0.76 / 0.37 / **28.85** |
+| simplistic | 0.91 | **1.79** | 0.28 / 0.76 / 3.99 / 0.28 |
+
+Clean-day composite distribution:
+
+| mode | mean | σ | p1 | p0.1 | min |
+|---|---|---|---|---|---|
+| weighted_sum | 0.8001 | **0.0425** | 0.6568 | 0.5441 | 0.5000 |
+| max | 0.6768 | 0.1002 | 0.2241 | 0.0470 | 0.0000 |
+
+False surrender rate against a **swept** NOMINAL threshold (none picked), with
+the coherent carry-off's detection fraction alongside:
+
+| NOMINAL | FSR sum | FSR max | det sum | det max |
+|---|---|---|---|---|
+| 0.50 | **0.0000** | 0.0514 | 0.9889 | 1.0000 |
+| 0.55 | 0.0014 | 0.0698 | 0.9944 | 1.0000 |
+| 0.60 | 0.0024 | 0.1187 | 0.9944 | 1.0000 |
+| 0.65 | **0.0080** | **0.2403** | 0.9944 | 1.0000 |
+| 0.70 | 0.0312 | 0.5069 | 0.9944 | 1.0000 |
+| 0.75 | 0.1010 | 0.8469 | 1.0000 | 1.0000 |
+| 0.80 | 0.4205 | 0.9875 | 1.0000 | 1.0000 |
+
+### What the two rules actually buy
+
+**Neither dominates, and the split is along scenario lines.**
+
+- `weighted_sum` wins where several features move together: the position walk
+  (10.22 vs 9.20) and the clock-domain walk (9.08 vs 8.62). Averaging helps
+  when there is more than one live channel.
+- `max` wins decisively where exactly one feature carries everything:
+  **meaconing 4.47 → 9.55**. Cross-constellation alone reads 28.85 there; the
+  equal-weight average drags that to 4.47, and max recovers a bit over twice
+  the separation without being told which scenario it is in. It also doubles
+  the simplistic case (0.91 → 1.79).
+- **The dilution is not fixed by either rule.** On meaconing even max reaches
+  only 9.55 against the 28.85 its best channel achieves alone, because max's
+  own clean distribution is 2.4× wider (σ 0.1002 vs 0.0425) — d′ divides by
+  that spread, so max gives back in variance much of what it gains in mean.
+
+**The cost lands exactly where predicted: false alarms.** At a 0.65 threshold,
+FSR is 0.0080 for sum and 0.2403 for max — a 30× increase for a detection
+fraction that was already 0.9944. Max buys its meaconing separation with a
+clean day that pins at zero confidence on 1 epoch in 20 (p0.1 = 0.047,
+min 0.0).
+
+Both are implemented (`confidence.COMBINE_MODES`); `weighted_sum` remains the
+shipped default and **neither is picked here**. One property worth carrying to
+the threshold session: `max` has no weights at all, so it would drive
+`weight_sensitive_fraction` to 0.0 and make the tuned half weight-free — a
+second answer to arXiv 2607.05415, bought at that FSR.
+
+Scenario-conditional weights were **not** implemented: the runtime detector
+does not know which scenario it is in, so it could not carry them.
+
+## A cache defect that cost a set of measurements
+
+The first run of this measurement reported cross-constellation d′ of 2.36–2.70
+and concluded that `max` failed to recover any separation. Both were wrong.
+`fit_cross`'s calibration cache was keyed on epoch span and count, which are
+**identical for a masked and an unmasked clean day**, so the feature was
+calibrated on unmasked channel values while being scored on masked ones. With
+the key fingerprinting the observables, cross-constellation d′ on meaconing is
+28.85, not 2.70.
+
+This is the same defect fixed in `rinex.solve.residual_panel` one session
+earlier and **missed here**. The generalisable lesson, recorded because it will
+recur: *span-keyed caches over mutated epoch streams are unsafe in this
+codebase* — clean vs injected, masked vs unmasked, and any future filtered
+variant all collide. Both caches now fingerprint the observables; any new one
+must too.
+
+
+---
+
+# Thresholds ruled 2026-09-06, and the state-level continuity cost
+
+    NOMINAL    0.8247   measured clean p1 of THIS detector
+    DEGRADED   0.50     carried from design.md §8
+    RESTRICTED 0.25     carried from design.md §8
+
+Split provenance, stamped into every emitted decision: NOMINAL is measured on
+this detector; DEGRADED and RESTRICTED are carried, and their justification is
+not a fit — both sit below the measured clean minimum of 0.7500, so neither can
+contribute a false surrender on this day. They partition the attack
+distribution, not the clean one.
+
+## FSR denominator: epoch 0 excluded (ruled)
+
+Epoch 0 has no causal baseline, so every per-SV feature is unscored, the
+anomaly reads 0, and confidence is exactly 1.0000 — an artefact of having no
+history, not a measurement of a clean sky. It is dropped from the
+false-surrender denominator (2,880 → 2,879 epochs).
+
+**The 0.750017 epoch is kept.** It is the clean-day minimum, it looks like a
+round 0.75 and is not, and it is data: `cross_constellation` saturated at 1.0
+on clean sky with the geometry deficit at zero.
+
+## Per-epoch FSR understates the cost by ~4x
+
+design.md §8 makes recovery asymmetric on purpose: a downgrade fires on one
+epoch's evidence, an upgrade needs 10 sustained epochs above the higher
+threshold plus 5 epochs' dwell. So one bad epoch does not cost one epoch of
+authority — it costs one epoch plus the whole climb back. A per-epoch
+threshold sweep has no memory and cannot see this.
+
+Measured through the arbiter on the clean day (`python -m
+backend.measurement.continuity`):
+
+| | NOMINAL 0.8247 (ruled) | NOMINAL 0.80 |
+|---|---|---|
+| scored epochs | 2,879 | 2,879 |
+| distinct downgrade events | **8** | 3 |
+| episodes below NOMINAL | 8 | 3 |
+| epochs below NOMINAL | **125** | 36 |
+| **fraction of day not NOMINAL** | **0.0434** | **0.0125** |
+| longest / median episode | 26 / 15.0 epochs | 16 / 10.0 epochs |
+| states visited | DEGRADED, NOMINAL | DEGRADED, NOMINAL |
+
+> **State-level FSR at the ruled threshold is 4.34%, against a per-epoch
+> figure of 1.01% at the same value — a 4.3x amplification.** Eight isolated
+> clean-day excursions become 125 epochs (62 minutes) of reduced authority,
+> because each one carries a ~15-epoch recovery. The same ratio holds at 0.80
+> (1.25% state-level against 0.28% per-epoch, 4.5x).
+>
+> Report the state-level number. The per-epoch one is not wrong, it is
+> answering a question no operator asks: what an operator experiences is time
+> under unnecessary restriction, which is what §10 says it intends to measure.
+
+### The comparison is the result, not either threshold
+
+NOMINAL stays at **0.8247** (ruled 2026-09-06). The interesting finding is not
+which value is better — it is that at the state level the two candidates are
+**detection-equivalent**:
+
+| | NOMINAL 0.8247 | NOMINAL 0.80 |
+|---|---|---|
+| carry-off coherent | SURRENDERED, alerts in 1 epoch, never recovers | same |
+| carry-off at the pin | SURRENDERED, alerts in 1 epoch, never recovers | same |
+| clock-domain walk | SURRENDERED, alerts in 2 epochs, never recovers | same |
+| meaconing | DEGRADED, alerts in 0 epochs, never recovers | same |
+| **state-level FSR** | **0.0434** | **0.0125** |
+
+**All four scenarios produce identical arbitrated outcomes at both
+thresholds.** Every attack reaches the same floor state, on the same epoch,
+and none recovers at either value. The entire 3.5x difference between the two
+candidates is **false-surrender cost and nothing else** — it buys no
+detection.
+
+That is a stronger thing to report than either number: it says the detection
+side of this threshold choice is saturated, so the only axis left to trade on
+is continuity. It also means a future re-ruling toward 0.80 would be a pure
+continuity improvement with no detection risk on these four scenarios — worth
+knowing, and deliberately not acted on tonight, because the demo path is
+verified at 0.8247 and re-verifying a working demo is not worth 3 points of
+FSR.
+
+Caveat on the equivalence: it is measured on four scenarios at one onset time.
+"Detection-equivalent" means equivalent on what was run, not in general — a
+slower or weaker attack could sit between the two thresholds and separate
+them.
+
+Neither threshold ever reaches RESTRICTED or SURRENDERED on clean data — the
+clean distribution never comes near 0.50.
+
+## Time to alert, and whether authority returns
+
+Same arbiter, same hysteresis, at the ruled thresholds:
+
+| scenario | epochs to first downgrade | min state reached | recovers before window ends |
+|---|---|---|---|
+| carry-off coherent | **1** (30 s) | SURRENDERED | no |
+| carry-off at the pin | **1** (30 s) | SURRENDERED | no |
+| clock-domain walk | 2 (60 s) | SURRENDERED | no |
+| meaconing | **0** | DEGRADED | no |
+
+Meaconing alerts at the onset epoch itself because its confidence (0.7854
+± 0.0349) already sits below 0.8247 — the threshold was placed at the clean p1
+precisely where the meaconing distribution begins. It reaches DEGRADED and
+stops there, correctly: 0.7854 is nowhere near the 0.50 carried threshold. The
+walks cross the whole staircase within a couple of epochs.
+
+None recover, which is the intended behaviour: all four attacks run to the end
+of their window, so there is nothing to recover from yet.
+
+
+---
+
+# README §10 figures regenerated on the current detector (2026-09-06)
+
+Streams regenerated with `python -m backend.demo` after repairing the
+generator (see the defect note below), then:
+
+    python -m backend.measurement.displacement out/carryoff.jsonl
+    python -m backend.measurement.weight_sweep out/clean.jsonl \
+        out/carryoff.jsonl --nominal 0.8247 --n-draws 1000 --arbitrate
+
+## The generator was scoring with feature 2 dead
+
+`backend/demo.py` called `fit(clean, floor)` with no `resid_panel` and never
+masked. Once feature 2 became the post-fit residual it *requires* the
+solution, so in that generator it returned nothing and scored **0.0 on every
+epoch**. The previously published §10 numbers were therefore not merely fitted
+to a stale distribution — they came from a detector whose strongest channel was
+silent. This was a consequence of the feature 2 change that should have been
+traced into the generator when it was made and was not.
+
+Repaired: `demo.py` masks upstream, builds the residual panel, calibrates with
+it, threads per-epoch residuals into scoring (one solve per epoch, shared with
+the cross-constellation feature), and takes the demo pin from its single
+definition instead of the `0.02` test literal it still carried.
+
+Solver sanity on the regenerated clean stream: horizontal p50 **0.73 m**, p95
+1.67 m against the surveyed position, GDOP p50 1.63, zero unsolvable epochs.
+
+## Integrity — maximum adversarial displacement: 0.00 m
+
+At the ruled thresholds the arbiter leaves NOMINAL **one epoch after onset**,
+and the epoch preceding that transition is the onset epoch itself, where the
+walk has not yet displaced the solution. So the attacker achieves **0.00 m**
+before authority is reduced, against an analytic bound of **12.6 m** at the
+same epoch.
+
+**Two caveats, both of which matter more than the number.**
+
+1. **The figure is quantised by the 30 s epoch.** "0.00 m" means the attacker
+   got less than one epoch of walk-off, not that displacement is impossible.
+   Detection is faster than the sampling interval, so the measurement floor
+   and the result coincide. The attack goes on to reach **1027.0 m** inside
+   the window — long after the vehicle has surrendered.
+2. **§10's literal wording no longer picks the attack.** It says the epoch
+   preceding *the first* transition out of NOMINAL. With NOMINAL at the clean
+   p1 there are 8 clean-day downgrade events, the first at **00:26:30** — ten
+   hours before onset — so the literal definition selects a clean epoch and
+   returns 0.00 m for a reason that has nothing to do with the attack. Both
+   scopings happen to give 0.00 m here, so nothing is currently misreported,
+   but they agree by coincidence. **Scoping the definition to the first
+   transition after onset is a measurement decision and is not taken here.**
+
+Claim 2a check: empirical <= bound at **2,649 of 2,649** arbitrated-NOMINAL
+epochs — PASS.
+
+## Continuity — false surrender rate
+
+Reported as a distribution over 1,000 Dirichlet draws, never a point (§10):
+
+| | min | median | max |
+|---|---|---|---|
+| **arbitrated FSR** (hysteresis, the §10 headline) | 0.0000 | **0.0344** | 0.2858 |
+| downgrade events per draw | — | 5 | 54 |
+| raw per-epoch FSR | 0.013 | 0.059 | 0.979 |
+| attack detection fraction | 0.978 | 0.989 | 1.000 |
+
+**Weight-sensitive epochs: 96.2%**, against 44.6% in the superseded README.
+
+**This is not a regression, and it should not be read as one.** The number rose
+because feature 2 got stronger. Its per-scenario d' is now **8.59 on both
+carry-offs and 0.02 on the clock-domain attack** — the strongest channel in
+the set on one attack and silent on another. A feature with that profile makes
+the composite far more responsive to how it is weighted than the old feature 2
+did, which was weak (0.77) almost everywhere and therefore moved the composite
+very little however it was weighted. Higher weight sensitivity is the
+*arithmetic consequence* of having a channel worth weighting.
+
+The mechanism stated plainly:
+
+> No fixed weight vector can serve both a position walk and a clock-domain
+> attack. The feature that carries one is silent on the other (8.59 vs 0.02),
+> and the same is true in reverse for cross-constellation (7.55 on the walk,
+> 28.85 on meaconing). Any single vector is a compromise whose cost depends on
+> which attack arrives.
+
+**The conclusion, and it is the reason §10 is written the way it is: a fixed
+weight vector is not defensible across scenarios.** That is precisely why §10
+reports a **Dirichlet distribution over weightings** rather than a tuned
+vector, and why the honest headline is the arbitrated FSR *distribution*
+(min/median/max 0.0000 / 0.0344 / 0.2858) rather than the median alone. A
+project that tuned one vector and published its FSR would be reporting the
+best draw from a distribution it had not looked at.
+
+No attempt was made to reduce 96.2%. Reducing it would mean weakening the
+feature that made it rise, and the number is a property of the detector
+worth reporting rather than a defect worth hiding.
+
+At the ruled weights the arbitrated FSR median of 0.0344 sits close to the
+directly measured 0.0434 for the equal-weight vector; the spread is the answer
+to arXiv 2607.05415, not the median.

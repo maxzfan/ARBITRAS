@@ -11,6 +11,7 @@ import pytest
 from backend.demo import (ATTACK_EPOCHS, DISCLOSURE_LAG_INTERVALS, LEGIBLE_EPOCHS,
                           PENDING_EPOCHS, POST_EXPIRED_EPOCHS, POST_VALID_EPOCHS,
                           PRE_EPOCHS, T_INT_EPOCHS)
+from backend.rinex.solve import EL_MASK_DEG
 from console.arbitras.states import TrustState
 from console.replay import arbitrate
 
@@ -56,7 +57,11 @@ def test_sky_is_real_and_trusted_flags_match_excluded(demo):
         dark = {s["sv"] for s in g["sky"] if not s["trusted"]}
         assert dark == set(g["excluded_sv"]) & svs
         for s in g["sky"]:
-            assert 10.0 <= s["el"] <= 90.0 and 0.0 <= s["az"] < 360.0
+            # Against the ruled mask (2026-09-06: 5 deg, the ARAIM
+            # convention) rather than a literal. This asserted >= 10.0, the
+            # geometry engine's old default, and broke when the mask became a
+            # single shared constant pushed into that engine.
+            assert EL_MASK_DEG <= s["el"] <= 90.0 and 0.0 <= s["az"] < 360.0
             # Track C's engine propagates its own Kepler ephemeris for
             # GPS, Galileo and BeiDou — same set as the H matrix.
             assert s["sv"][0] in "GEC"

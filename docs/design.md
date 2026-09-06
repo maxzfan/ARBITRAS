@@ -124,7 +124,8 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
                  "code_carrier_divergence": 0.25, "cross_constellation": 0.25 },
     "weight_sensitive_fraction": 0.5,
     "features_scored": ["cn0_anomaly", "pseudorange_residual",
-                        "code_carrier_divergence", "cross_constellation"]
+                        "code_carrier_divergence", "cross_constellation"],
+    "combine_mode": "weighted_sum"
   }
 }
 ```
@@ -145,11 +146,14 @@ One object per epoch. Backend emits, console consumes. **This is the architectur
   `geometry_available`, `weights_tuned` (**false until the threshold session —
   any number produced while false is a placeholder**), `weights`, and
   `weight_sensitive_fraction` (the share of the composite a re-weighting can
-  move; the answer to the arXiv 2607.05415 objection), and `features_scored`
+  move; the answer to the arXiv 2607.05415 objection), `features_scored`
   *(added 5 Sep, Track E)* — the features that actually entered the weighted
   sum this epoch; weights are renormalised over that list, so an absent
-  feature is not scored rather than read as zero. Additive: the composite
-  is never shipped without the parts that made it.
+  feature is not scored rather than read as zero — and `combine_mode`
+  (`weighted_sum` | `max` | `layer_off`) — the two rules produce different
+  numbers from the same features, so a record that did not name its rule would
+  be ambiguous. Additive: the composite is never shipped without the parts
+  that made it.
 - `geometry` — the weight-independent half of the score. `information_ratio` ∈ [0,1] is the determinant ratio of the trusted-subset information matrix against the full solution. `excluded_sv` is which satellites the detector stopped trusting and therefore which rows came out. `displacement_bound_m` is the analytic bound at this epoch. `next_best_observation` is the observation that would recover the most information — consumed by the console in `DEGRADED`, ignored elsewhere.
 
 **Transport:** JSON Lines appended to a file; console tails it.
@@ -375,7 +379,11 @@ Embedded decisions, each defensible: **epoch-weighted** (what an operator cares 
 
 **Maximum adversarial displacement (integrity risk):**
 
-> Greatest position error, in metres, between believed and true position at the epoch immediately preceding the first transition out of `NOMINAL`, swept over injector parameters (walk-off rate, power advantage, spoofed SV subset size).
+> Greatest position error, in metres, between believed and true position at the epoch immediately preceding **the first transition out of `NOMINAL` that occurs within the attack window** (i.e. at or after injection onset), swept over injector parameters (walk-off rate, power advantage, spoofed SV subset size).
+
+*Scope clarified 6 Sep, and the clarification is load-bearing.* The original wording said "the first transition out of `NOMINAL`", full stop. That is only equivalent to the attack response if the clean replay never leaves `NOMINAL` — and at the ruled threshold (`NOMINAL` = 0.8247, the measured clean p1) it leaves `NOMINAL` **eight times on clean data**, the first at 00:26:30, ten hours before onset. Read literally, the definition selects a clean-day epoch and returns a displacement of 0.00 m for a reason that has nothing to do with any attacker.
+
+Both scopings happen to return 0.00 m against the current detector, so no published figure is wrong. They agree by coincidence, and the coincidence is not something to leave load-bearing: it holds only while time-to-alert is shorter than one epoch of walk-off, and it would break silently the moment either the threshold or the detector changed. The window scope is the definition; a first-transition-anywhere number is a different quantity and would need to say so.
 
 **Reported alongside the analytic bound** from §6b, computed from the trusted-subset information matrix at the same epoch. Plot both on one axis. The empirical number says *what our injector achieved*; the analytic bound says *what any attacker could achieve against this geometry*. The second is the stronger claim and does not depend on how many attack variants there was time to run. If the empirical number ever exceeds the bound, the bound is wrong — that check is worth running explicitly and mentioning that it was run.
 

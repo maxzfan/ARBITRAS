@@ -252,7 +252,19 @@ def _compensated_frame(clean_epochs, nav, use_cache: bool = True):
     solves are the slow part, so this is what gets cached."""
     key = None
     if use_cache:
-        raw = f"xc5|{clean_epochs[0].time}|{clean_epochs[-1].time}|{len(clean_epochs)}"
+        # The span is NOT a safe key. A masked and an unmasked clean day cover
+        # the same span with the same epoch count, as do a clean and an
+        # injected replay -- so the second caller would silently receive the
+        # first's calibration. Fingerprint the observables. (Same defect was
+        # fixed in rinex.solve.residual_panel; it was missed here, and it cost
+        # a set of cross-constellation d' figures that had to be re-measured.)
+        fp = hashlib.sha1()
+        for ep in clean_epochs[:: max(1, len(clean_epochs) // 50)]:
+            fp.update(",".join(map(str, ep.df.index)).encode())
+            fp.update(np.ascontiguousarray(
+                ep.df["code_1"].to_numpy(dtype=float)).tobytes())
+        raw = (f"xc6|{clean_epochs[0].time}|{clean_epochs[-1].time}"
+               f"|{len(clean_epochs)}|{fp.hexdigest()[:16]}")
         key = CACHE / ("xc_" + hashlib.sha1(raw.encode()).hexdigest()[:16] + ".pkl")
         if key.exists():
             with key.open("rb") as fh:

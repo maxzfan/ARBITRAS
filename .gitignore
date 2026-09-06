@@ -15,3 +15,4 @@ site/
 
 # wrangler local state
 .wrangler/
+out/beats/

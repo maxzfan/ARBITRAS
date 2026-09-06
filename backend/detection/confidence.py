@@ -82,17 +82,49 @@ def scored_features(features: dict, w: Weights) -> list[str]:
     return [n for n in w.feature if _finite(features.get(n))]
 
 
-def anomaly(features: dict, w: Weights) -> float:
-    """Weighted mean of the tuned half over the features actually scored,
-    weights renormalised to the scored subset. [0,1], higher = more anomalous."""
+# How the features combine into the tuned half. BOTH ARE MEASURED AND
+# NEITHER IS PICKED (ruling of 2026-09-05 item 5).
+#
+# "weighted_sum" is the shipped default and what every reported number so far
+# used. Its measured failure: on the clean day the composite d' came out LOWER
+# than its own best feature (5.04 against cross-constellation's 6.18), because
+# three features that barely move are averaged with equal weight against one
+# that separates cleanly.
+#
+# "max" is the alternative. It recovers the best feature's separation without
+# knowing which scenario it is in -- which matters because the runtime detector
+# never knows. Scenario-conditional weights are fine for reporting and
+# unshippable for exactly that reason. The cost lands on false alarms, since
+# the max of four noisy channels is noisier than their mean. That tradeoff is
+# the whole point of measuring it; see docs/measured.md.
+COMBINE_MODES = ("weighted_sum", "max")
+
+
+def anomaly(features: dict, w: Weights, mode: str = "weighted_sum") -> float:
+    """The tuned half. [0,1], higher = more anomalous.
+
+    Both rules run over the features actually scored this epoch (absent or
+    NaN features are not scored rather than read as zero -- TRACK_E.md E3).
+    "weighted_sum" is the weighted mean with the weights renormalised to that
+    subset. "max" has no weights at all, which is worth noting against the
+    arXiv 2607.05415 objection: it would make the tuned half weight-free too,
+    at a cost in false alarms.
+    """
+    if mode not in COMBINE_MODES:
+        raise ValueError(f"unknown combine mode {mode!r}")
     scored = scored_features(features, w)
+    if not scored:
+        return 0.0
+    if mode == "max":
+        return float(max(features[n] for n in scored))
     total = sum(w.feature[n] for n in scored)
     if total <= 0.0:
         return 0.0
     return float(sum(w.feature[n] * features[n] for n in scored) / total)
 
 
-def score(features: dict, geometry: dict | None, w: Weights | None = None) -> dict:
+def score(features: dict, geometry: dict | None, w: Weights | None = None,
+          mode: str = "weighted_sum") -> dict:
     """Composite confidence plus the parts it was made of.
 
     `geometry` is Track C's §5 block. When it is absent the blend collapses to
@@ -101,7 +133,7 @@ def score(features: dict, geometry: dict | None, w: Weights | None = None) -> di
     rather than a quietly worse one (§6b, degraded fallback).
     """
     w = w or Weights()
-    a = anomaly(features, w)
+    a = anomaly(features, w, mode=mode)
     have_geom = bool(geometry) and geometry.get("information_ratio") is not None
 
     if have_geom:
@@ -119,6 +151,7 @@ def score(features: dict, geometry: dict | None, w: Weights | None = None) -> di
         "beta": beta,
         "weights_tuned": w.tuned,
         "weights": dict(w.feature),
-        "weight_sensitive_fraction": beta,
+        "weight_sensitive_fraction": (0.0 if mode == "max" else beta),
         "features_scored": scored_features(features, w),
+        "combine_mode": mode,
     }

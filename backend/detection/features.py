@@ -132,75 +132,49 @@ class ExclusionRule:
     every k as a side effect.)
 
     The tails stay an order of magnitude heavier than Gaussian at every k and
-    floor at 0.3%. **That floor is elevation-driven, and essentially
-    entirely:** binned by elevation, 100% of clean-day exclusions at k = 3
-    fall in the 0-15 degree bin, at a median elevation of 0.4 degrees. Above
-    15 degrees the clean exclusion rate is 0.00% in every bin, at both k = 3
-    and k = 5.
+    floor at 0.3%. That floor was elevation-driven, and essentially entirely:
+    100% of clean-day exclusions at k = 3 fell in the 0-15 degree bin at a
+    median elevation of 0.4 degrees.
 
-    Caveat on the binning: elevations come from Keplerian broadcast ephemeris,
-    which covers G/E/C only, so GLONASS and SBAS SV-epochs (about a quarter of
-    the sky) are absent from the bin table.
+    **There is no elevation term in this rule.** The 5 degree mask
+    (rinex.solve.EL_MASK_DEG) is applied upstream by `rinex.solve.masked_epoch`
+    and removes those satellites from the epoch altogether, so they never reach
+    scoring. An exclusion-side exemption was rejected by ruling because it
+    creates a safe harbour: satellites that can never be flagged are exactly
+    the ones an attacker captures.
 
-    So the ruled rule is `k = 3.0` plus a low-elevation mask. **The mask
-    cutoff is UNSET and the rule returns nothing until a cutoff is given** --
-    picking it is a threshold-session decision. `FLAT_K5` is the configured
-    fallback: k = 5.0 with no mask, usable without a cutoff and without
-    elevations.
+    `k = 3.0` is the ruled value. `FLAT_K5` remains available as a
+    configured fallback.
     """
     k: float
-    elevation_mask_deg: float | None = None
-    requires_mask: bool = True
 
     @property
     def armed(self) -> bool:
-        return not self.requires_mask or self.elevation_mask_deg is not None
+        return True
 
     def __str__(self) -> str:
-        if not self.armed:
-            return (f"exclusion k={self.k} with low-elevation mask: "
-                    f"DISARMED (mask cutoff unset -> no satellites excluded)")
-        m = ("no mask" if self.elevation_mask_deg is None
-             else f"mask <{self.elevation_mask_deg:g} deg")
-        return f"exclusion k={self.k}, {m}"
+        return (f"exclusion k={self.k} (5 deg mask applied upstream, "
+                f"not as an exemption)")
 
 
-# The ruled rule: k = 3.0, mask cutoff deliberately unset.
-MASKED_K3 = ExclusionRule(k=3.0, elevation_mask_deg=None, requires_mask=True)
-# Configured fallback: flat k = 5.0, no mask, no elevations needed.
-FLAT_K5 = ExclusionRule(k=5.0, elevation_mask_deg=None, requires_mask=False)
+RULED_K3 = ExclusionRule(k=3.0)
+FLAT_K5 = ExclusionRule(k=5.0)
 
 
 def flagged_sv(per_sv: pd.DataFrame, z_sat: dict,
-               rule: ExclusionRule | float | None,
-               elevations: pd.Series | None = None) -> list:
+               rule: "ExclusionRule | float | None") -> list:
     """Satellites the detector has stopped trusting.
 
     The only honest source for §5's `excluded_sv`: per-satellite scores, not a
-    restatement of what the injector did. Returns [] when the rule is None or
-    disarmed. A bare float is accepted as a flat rule for convenience.
-
-    A satellite below the mask cutoff is NOT excluded by this rule -- the mask
-    says "this satellite's score is not trustworthy evidence of spoofing",
-    which is the opposite of "this satellite is spoofed". Whether a
-    low-elevation satellite should be dropped from H for its own noise is a
-    separate question and Track C's.
+    restatement of what the injector did. Returns [] when the rule is None. A
+    bare float is accepted as a flat rule for convenience.
     """
     if rule is None or per_sv.empty:
         return []
-    if not isinstance(rule, ExclusionRule):
-        rule = ExclusionRule(k=float(rule), requires_mask=False)
-    if not rule.armed:
-        return []
+    k = rule.k if isinstance(rule, ExclusionRule) else float(rule)
     norm = per_sv / pd.Series(z_sat)
     worst = norm.max(axis=1).dropna()
-    hit = worst.index[worst >= rule.k]
-    if rule.elevation_mask_deg is not None:
-        if elevations is None:
-            raise ValueError("this exclusion rule needs elevations")
-        el = elevations.reindex(hit)
-        hit = el.index[el >= rule.elevation_mask_deg]
-    return sorted(hit)
+    return sorted(worst.index[worst >= k])
 
 
 def by_sv_scores(per_sv: pd.DataFrame, z_sat: dict) -> dict:
