@@ -71,6 +71,12 @@ CN0_SIGMA_FLOOR = 1.4826 * 0.25 / np.sqrt(2)
 # feature (backend/detection/cross.py) merged in by the replay pipeline.
 FEATURE_NAMES = ("cn0_anomaly", "pseudorange_residual",
                  "code_carrier_divergence", "cross_constellation")
+# Track E (tracks/TRACK_E.md): features that exist only when their sensor
+# does. Never in FEATURE_NAMES — a run without the sensor must score exactly
+# as before. Weights renormalise over the features actually scored
+# (confidence.anomaly), so an absent optional feature is not scored rather
+# than quietly reading zero.
+OPTIONAL_FEATURE_NAMES = ("terrain_mismatch",)
 PER_SV_FEATURES = ("cn0_anomaly", "pseudorange_residual",
                    "code_carrier_divergence")
 

@@ -47,12 +47,22 @@ class Weights:
             raise ValueError(f"beta must be in [0,1], got {self.beta}")
 
     @classmethod
-    def dirichlet(cls, rng, alpha: float = 1.0, beta=None) -> "Weights":
+    def equal(cls, names) -> "Weights":
+        """Untuned equal weights over an explicit feature set (Track E adds
+        OPTIONAL_FEATURE_NAMES when its sensor is present)."""
+        names = tuple(names)
+        return cls(feature={n: 1.0 / len(names) for n in names}, tuned=False,
+                   note=f"untuned placeholder: equal weights over {len(names)}, beta 0.5")
+
+    @classmethod
+    def dirichlet(cls, rng, alpha: float = 1.0, beta=None,
+                  names=FEATURE_NAMES) -> "Weights":
         """One draw for the §10 sweep: feature weights from a Dirichlet, and a
         blend drawn uniformly unless one is pinned."""
-        w = rng.dirichlet([alpha] * len(FEATURE_NAMES))
+        names = tuple(names)
+        w = rng.dirichlet([alpha] * len(names))
         b = float(rng.uniform()) if beta is None else float(beta)
-        return cls(feature=dict(zip(FEATURE_NAMES, map(float, w))), beta=b,
+        return cls(feature=dict(zip(names, map(float, w))), beta=b,
                    tuned=False, note="Dirichlet draw (§10 sweep)")
 
     @property
@@ -62,9 +72,24 @@ class Weights:
         return self.beta
 
 
+def _finite(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v)
+
+
+def scored_features(features: dict, w: Weights) -> list[str]:
+    """Names in the weight vector that carry a finite value this epoch.
+    Absent or NaN features are not scored (TRACK_E.md E3 seam)."""
+    return [n for n in w.feature if _finite(features.get(n))]
+
+
 def anomaly(features: dict, w: Weights) -> float:
-    """Weighted sum of the tuned half. [0,1], higher = more anomalous."""
-    return float(sum(w.feature[n] * features.get(n, 0.0) for n in FEATURE_NAMES))
+    """Weighted mean of the tuned half over the features actually scored,
+    weights renormalised to the scored subset. [0,1], higher = more anomalous."""
+    scored = scored_features(features, w)
+    total = sum(w.feature[n] for n in scored)
+    if total <= 0.0:
+        return 0.0
+    return float(sum(w.feature[n] * features[n] for n in scored) / total)
 
 
 def score(features: dict, geometry: dict | None, w: Weights | None = None) -> dict:
@@ -95,4 +120,5 @@ def score(features: dict, geometry: dict | None, w: Weights | None = None) -> di
         "weights_tuned": w.tuned,
         "weights": dict(w.feature),
         "weight_sensitive_fraction": beta,
+        "features_scored": scored_features(features, w),
     }
