@@ -94,6 +94,17 @@ def first_fire(records, attack, level: float = FIRE_LEVEL):
                  if records[i]["features"].get("terrain_mismatch", 0.0) >= level), None)
 
 
+def dprime(clean_records, attack_records, attack_idx) -> float:
+    """Separation of the emitted terrain feature, clean day vs attack window:
+    (mean_a - mean_c) / sqrt((var_a + var_c) / 2) — the README's own d' form,
+    weight-independent. The number the threshold session weighs the feature by."""
+    c = np.array([r["features"].get("terrain_mismatch", np.nan) for r in clean_records], float)
+    a = np.array([attack_records[i]["features"].get("terrain_mismatch", np.nan) for i in attack_idx], float)
+    c, a = c[np.isfinite(c)], a[np.isfinite(a)]
+    pooled = np.sqrt((a.var() + c.var()) / 2.0)
+    return float((a.mean() - c.mean()) / pooled) if pooled > 0 else float("inf")
+
+
 def fire_fraction(records, idx=None, level: float = FIRE_LEVEL) -> float:
     """Share of the given epochs on which the terrain feature is at or above
     `level` — the channel's OWN alarm rate, independent of the weights."""
@@ -123,12 +134,14 @@ def sensor_quality_curve(clean, carry, rmap, diags, windows, sigma_uere) -> list
                          # the channel's own alarm rates, weight-independent
                          "terrain_clean_fire_fraction": fire_fraction(c),
                          "terrain_attack_fire_fraction": fire_fraction(k, attack),
+                         "terrain_dprime": dprime(c, k, attack),
                          "terrain_first_fire_epoch": None if first is None else first - attack[0],
                          "bound_source_terrain_fraction": float(np.mean(
                              [r["geometry"].get("bound_source") == "terrain" for r in k]))})
             print(f"  diag {diag:.2f} W {window}: composite FSR raw {raw_fsr:.4f} arb {arb_fsr:.4f} "
                   f"det {det:.3f} | terrain fires clean {rows[-1]['terrain_clean_fire_fraction']:.4f} "
                   f"attack {rows[-1]['terrain_attack_fire_fraction']:.3f} "
+                  f"d' {rows[-1]['terrain_dprime']:.2f} "
                   f"first {rows[-1]['terrain_first_fire_epoch']}", flush=True)
     return rows
 
@@ -203,16 +216,15 @@ def plot_sensor_quality(rows: list[dict], out: Path) -> None:
         d = [r["diag"] for r in sub]
         axes[0].plot(d, [r["terrain_clean_fire_fraction"] for r in sub], "o-", label=f"W={window}")
         axes[1].plot(d, [r["terrain_attack_fire_fraction"] for r in sub], "o-", label=f"W={window}")
-        axes[2].plot(d, [r["fsr_arbitrated"] for r in sub], "o-", label=f"FSR W={window}")
-        axes[2].plot(d, [r["attack_detection_fraction"] for r in sub], "s--", label=f"det W={window}")
+        axes[2].plot(d, [r["terrain_dprime"] for r in sub], "o-", label=f"W={window}")
     axes[0].set_ylabel(f"terrain feature ≥ {FIRE_LEVEL} on the clean day (own false-alarm rate)")
     axes[1].set_ylabel(f"terrain feature ≥ {FIRE_LEVEL} in the attack window")
-    axes[2].set_ylabel("composite: arbitrated FSR / attack detection")
+    axes[2].set_ylabel("d′ of the terrain feature, clean day vs attack window")
     for ax in axes:
         ax.set_xlabel("confusion diagonal of the SIMULATED sensor"); ax.grid(alpha=0.3)
         ax.legend(fontsize=7)
-    fig.suptitle("Sensor quality sweep — channel alone (left, centre) and in the composite at "
-                 "equal untuned weights over five features, beta 0.5 (right)", fontsize=10)
+    fig.suptitle("Sensor quality sweep — the terrain channel alone, rescored over the shipped "
+                 "streams; SIMULATED sensor, fire level = half the clean-run p99", fontsize=10)
     fig.tight_layout(); fig.savefig(out, dpi=150); plt.close(fig)
 
 
@@ -319,7 +331,8 @@ def main(argv=None) -> None:
                            "integrity_check_residual_only": chk_res,
                            "measured_first_fire": measured,
                            "terrain_clean_fire_fraction": fire_fraction(rescore(clean, ch, w)),
-                           "terrain_attack_fire_fraction": fire_fraction(k, attack)},
+                           "terrain_attack_fire_fraction": fire_fraction(k, attack),
+                           "terrain_dprime": dprime(rescore(clean, ch, w), k, attack)},
               "sigma_uere_m": sigma,
               "sensor": "SIMULATED (confusion matrix), not for the submission video"}
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)

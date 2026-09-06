@@ -82,6 +82,19 @@ def test_off_map_or_unsolved_epoch_is_not_scored(rmap):
     assert far["feature"] is None and far["block"]["map_at_position"] is None
 
 
+def test_unscored_epoch_makes_no_claim_even_after_a_scored_one(rmap):
+    """A believed position that walks off the map (or onto unlabelled ground)
+    must not carry the previous epoch's verdict forward — that would let a
+    stale 0 read as agreement, or a stale 1 as an alarm."""
+    ch = TerrainChannel(rmap, ConfusionSensor(np.eye(7), rmap.classes), sigma_uere_m=0.1,
+                        window_epochs=2)
+    assert ch.step(lla_at(rmap, 70.0, 0.0), hdop=0.5)["feature"] == 1.0
+    assert ch.step(lla_at(rmap, 5000.0, 0.0), hdop=0.5)["feature"] is None
+    assert ch.step(None, None)["feature"] is None
+    # lookups resume: the trailing window continues from where it left off
+    assert ch.step(lla_at(rmap, 0.0, 0.0), hdop=0.5)["feature"] == pytest.approx(0.5)
+
+
 def test_calibrate_sets_saturation_and_floor_then_resets(rmap):
     m = confusion_from_diag(7, 0.8)
     ch = TerrainChannel(rmap, ConfusionSensor(m, rmap.classes, seed=5), sigma_uere_m=1.9)

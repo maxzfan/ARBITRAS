@@ -113,8 +113,13 @@ class TerrainChannel:
             # testable prediction. The extent keeps the conservative None.
             nb = self.rmap.nearest_boundary(*enu, c0=int(np.argmax(q)))
 
+        # No map lookup this epoch (unsolved fix, off-map, or an unlabelled
+        # footprint): the channel makes NO claim — feature None, weights
+        # renormalise over the other features — rather than repeating the
+        # last scored value. The window is kept so a trailing mean resumes
+        # where it left off once lookups return.
         feature = None
-        if len(self._window):
+        if q is not None and len(self._window):
             raw = float(np.mean(self._window))
             if self.saturation is not None and self.saturation > 0.0:
                 raw = raw / self.saturation
