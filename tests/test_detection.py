@@ -374,3 +374,45 @@ def test_ruled_exclusion_k_is_three(day, cal):
     from backend.detection import RULED_K3
     assert RULED_K3.k == 3.0
     assert RULED_K3.armed is True
+
+
+# -- combine modes: both available, neither picked ---------------------------
+
+def test_both_combine_modes_are_available_and_sum_is_the_default():
+    from backend.detection.confidence import COMBINE_MODES, anomaly, score
+    feats = dict(zip(FEATURE_NAMES, (0.1, 0.9, 0.1, 0.1)))
+    assert COMBINE_MODES == ("weighted_sum", "max")
+    assert score(feats, None)["combine_mode"] == "weighted_sum"
+    w = Weights()
+    assert anomaly(feats, w, "max") == pytest.approx(0.9)
+    assert anomaly(feats, w, "weighted_sum") == pytest.approx(0.3)
+    with pytest.raises(ValueError):
+        anomaly(feats, w, "median")
+
+
+def test_max_mode_is_weight_free():
+    """It has no weights, so nothing about it is weight-sensitive."""
+    from backend.detection.confidence import score
+    feats = dict(zip(FEATURE_NAMES, (0.1, 0.9, 0.1, 0.1)))
+    s = score(feats, {"information_ratio": 0.8}, Weights(beta=0.6), mode="max")
+    assert s["weight_sensitive_fraction"] == 0.0
+    assert score(feats, {"information_ratio": 0.8},
+                 Weights(beta=0.6))["weight_sensitive_fraction"] == 0.6
+
+
+def test_calibration_caches_distinguish_masked_from_unmasked_streams(day, nav):
+    """The defect that cost a set of measurements: span-keyed caches collide
+    across masked/unmasked and clean/injected variants of the same span."""
+    from backend.detection.cross import _compensated_frame
+    from backend.rinex.solve import masked_epoch, residual_panel
+
+    win = day[:80]
+    masked = [masked_epoch(e, nav) for e in win]
+    assert [e.time for e in masked] == [e.time for e in win]      # same span
+    assert sum(e.n_sv for e in masked) < sum(e.n_sv for e in win)  # different data
+
+    a, _ = _compensated_frame(win, nav)
+    b, _ = _compensated_frame(masked, nav)
+    assert not a.equals(b)
+
+    assert not residual_panel(win, nav).equals(residual_panel(masked, nav))

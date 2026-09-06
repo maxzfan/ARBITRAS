@@ -730,3 +730,108 @@ amplifier/hardware group delay: an honest decomposition needs a repeater
 geometry and hardware we have not specified, and inventing both to arrive back
 at the same number would dress a guess up as a derivation. A real meaconer adds
 unmodelled hardware delay, so the true bias is ≥ 300 m.
+
+
+---
+
+# Items 4 and 5, measured on the masked detector
+
+All figures below are the CURRENT numbers and supersede every earlier d′ in
+this document: they are the first taken with the 5° mask, the post-fit-residual
+feature 2, and a correctly-keyed cross-constellation calibration (see the cache
+note at the end). Attack scenarios scored on a 2 h window centred on onset with
+60 epochs of causal warm-up; clean baseline and FSR denominator are the full
+2,880-epoch day.
+
+## Item 4 — are we detecting our own injected spike? No.
+
+Composite and per-feature d′ at `carrier_rate_error = 0`:
+
+| transients | C/N₀ | residual | divergence | cross-const | **composite** |
+|---|---|---|---|---|---|
+| **ON** | 0.17 | 7.62 | 0.37 | 7.55 | **10.38** |
+| **OFF** | 0.18 | 7.62 | 0.37 | 7.55 | **10.22** |
+
+Sustained detection does not depend on the transients: composite d′ moves by
+0.16 (1.6%) and no per-feature figure moves at all. **We were not partly
+detecting our own artefact.** Transients stay ON for the demo and OFF for every
+measurement, and the setting is recorded per epoch either way.
+
+## Item 5 — weighted_sum vs max, both printed, neither picked
+
+| scenario | d′ (sum) | d′ (max) | per-feature d′ (cn0 / resid / cmc / cross) |
+|---|---|---|---|
+| carry-off, coherent | **10.22** | 9.20 | 0.18 / 7.62 / 0.37 / 7.55 |
+| carry-off, pin | **10.47** | 9.20 | 0.18 / 7.62 / 1.54 / 7.55 |
+| clock-domain walk | **9.08** | 8.62 | 0.18 / 4.47 / 0.37 / 12.38 |
+| meaconing | 4.47 | **9.55** | 0.20 / 0.76 / 0.37 / **28.85** |
+| simplistic | 0.91 | **1.79** | 0.28 / 0.76 / 3.99 / 0.28 |
+
+Clean-day composite distribution:
+
+| mode | mean | σ | p1 | p0.1 | min |
+|---|---|---|---|---|---|
+| weighted_sum | 0.8001 | **0.0425** | 0.6568 | 0.5441 | 0.5000 |
+| max | 0.6768 | 0.1002 | 0.2241 | 0.0470 | 0.0000 |
+
+False surrender rate against a **swept** NOMINAL threshold (none picked), with
+the coherent carry-off's detection fraction alongside:
+
+| NOMINAL | FSR sum | FSR max | det sum | det max |
+|---|---|---|---|---|
+| 0.50 | **0.0000** | 0.0514 | 0.9889 | 1.0000 |
+| 0.55 | 0.0014 | 0.0698 | 0.9944 | 1.0000 |
+| 0.60 | 0.0024 | 0.1187 | 0.9944 | 1.0000 |
+| 0.65 | **0.0080** | **0.2403** | 0.9944 | 1.0000 |
+| 0.70 | 0.0312 | 0.5069 | 0.9944 | 1.0000 |
+| 0.75 | 0.1010 | 0.8469 | 1.0000 | 1.0000 |
+| 0.80 | 0.4205 | 0.9875 | 1.0000 | 1.0000 |
+
+### What the two rules actually buy
+
+**Neither dominates, and the split is along scenario lines.**
+
+- `weighted_sum` wins where several features move together: the position walk
+  (10.22 vs 9.20) and the clock-domain walk (9.08 vs 8.62). Averaging helps
+  when there is more than one live channel.
+- `max` wins decisively where exactly one feature carries everything:
+  **meaconing 4.47 → 9.55**. Cross-constellation alone reads 28.85 there; the
+  equal-weight average drags that to 4.47, and max recovers a bit over twice
+  the separation without being told which scenario it is in. It also doubles
+  the simplistic case (0.91 → 1.79).
+- **The dilution is not fixed by either rule.** On meaconing even max reaches
+  only 9.55 against the 28.85 its best channel achieves alone, because max's
+  own clean distribution is 2.4× wider (σ 0.1002 vs 0.0425) — d′ divides by
+  that spread, so max gives back in variance much of what it gains in mean.
+
+**The cost lands exactly where predicted: false alarms.** At a 0.65 threshold,
+FSR is 0.0080 for sum and 0.2403 for max — a 30× increase for a detection
+fraction that was already 0.9944. Max buys its meaconing separation with a
+clean day that pins at zero confidence on 1 epoch in 20 (p0.1 = 0.047,
+min 0.0).
+
+Both are implemented (`confidence.COMBINE_MODES`); `weighted_sum` remains the
+shipped default and **neither is picked here**. One property worth carrying to
+the threshold session: `max` has no weights at all, so it would drive
+`weight_sensitive_fraction` to 0.0 and make the tuned half weight-free — a
+second answer to arXiv 2607.05415, bought at that FSR.
+
+Scenario-conditional weights were **not** implemented: the runtime detector
+does not know which scenario it is in, so it could not carry them.
+
+## A cache defect that cost a set of measurements
+
+The first run of this measurement reported cross-constellation d′ of 2.36–2.70
+and concluded that `max` failed to recover any separation. Both were wrong.
+`fit_cross`'s calibration cache was keyed on epoch span and count, which are
+**identical for a masked and an unmasked clean day**, so the feature was
+calibrated on unmasked channel values while being scored on masked ones. With
+the key fingerprinting the observables, cross-constellation d′ on meaconing is
+28.85, not 2.70.
+
+This is the same defect fixed in `rinex.solve.residual_panel` one session
+earlier and **missed here**. The generalisable lesson, recorded because it will
+recur: *span-keyed caches over mutated epoch streams are unsafe in this
+codebase* — clean vs injected, masked vs unmasked, and any future filtered
+variant all collide. Both caches now fingerprint the observables; any new one
+must too.

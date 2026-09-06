@@ -88,7 +88,7 @@ from ..injector import (CLEAN, CARRY_OFF, CLOCK_CARRY_OFF, SWEEP_BEARINGS_DEG,
                         enu_basis, inject, top_n_by_elevation)
 from ..rinex import ephemeris, noise
 from ..rinex.loader import load_obs
-from ..rinex.solve import solve
+from ..rinex.solve import EL_MASK_DEG, masked_epoch, solve
 
 OBS = "data/USN800USA_R_20262320000_01D_30S_MO.crx.gz"
 ONSET = datetime(2026, 8, 20, 12, 30)
@@ -108,6 +108,11 @@ class SweepConfig:
     obs: str = OBS
     systems: str = "GERCS"
     systems_in_h: str = "GEC"          # Kepler-propagatable; see module docstring
+    # Ruled 5 deg mask (ARAIM convention). Applied to every epoch before it is
+    # solved or has geometry taken over it, exactly as backend.replay does --
+    # a sweep that solved on unmasked epochs would be measuring a different
+    # detector from the one that ships.
+    el_mask_deg: float = EL_MASK_DEG
     # Attack epochs to score per cell. The full 1,380-epoch tail is not needed
     # to find the displacement maximum and the grid is large.
     epochs_after_onset: int = 120
@@ -210,8 +215,14 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
     cfg = cfg or SweepConfig()
     clean = load_obs(cfg.obs, systems=cfg.systems)
     floor = noise.measure(clean)
-    cal = fit(clean, floor)                 # clean only; never injected data
     nav = ephemeris.load_nav()
+    # Clean only; never injected data. Calibrated on masked epochs and with
+    # the post-fit residuals feature 2 now needs.
+    clean_masked = [masked_epoch(e, nav, cutoff_deg=cfg.el_mask_deg)
+                    for e in clean]
+    from ..rinex.solve import residual_panel
+    cal = fit(clean_masked, floor,
+              resid_panel=residual_panel(clean_masked, nav))
     weights = Weights()                     # untuned and flagged as such
     sta = np.array(USN8_ECEF, dtype=float)
     east, north, up = enu_basis(sta)
@@ -219,8 +230,12 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
     # The epochs scored per cell, and the clean solution at each of them: the
     # achieved-displacement baseline is the CLEAN solve at the same epoch, not
     # the surveyed position, so the solver's own metre-scale bias cancels.
+    from ..geometry.engine import set_el_mask_deg
+    set_el_mask_deg(cfg.el_mask_deg)   # one mask angle for both halves
+
     idx0 = next(i for i, e in enumerate(clean) if e.time >= cfg.onset)
-    span = clean[idx0:idx0 + cfg.epochs_after_onset]
+    span = [masked_epoch(e, nav, cutoff_deg=cfg.el_mask_deg)
+            for e in clean[idx0:idx0 + cfg.epochs_after_onset]]
     base = {}
     for ep in span:
         sol = solve(ep, nav=nav)
@@ -244,15 +259,19 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
 
             # Warm the causal feature baselines on the epochs before onset so
             # the first scored epoch is not scored against an empty history.
+            injected = [masked_epoch(e, nav, cutoff_deg=cfg.el_mask_deg)
+                        for e in injected]
             fx = FeatureExtractor(cal)
             for ep in injected[max(0, idx0 - cfg.epochs_after_onset):idx0]:
-                fx.step(ep)
+                sol_w = solve(ep, nav=nav)
+                fx.step(ep, resid=(sol_w or {}).get("resid_m"))
 
             ratios, achieved, ratio_ach = [], [], []
             for ep, tr in zip(injected[idx0:idx0 + cfg.epochs_after_onset],
                               truth.iloc[idx0:idx0 + cfg.epochs_after_onset]
                               .itertuples()):
-                feats = fx.step(ep)["features"]
+                sol_ep = solve(ep, nav=nav)
+                feats = fx.step(ep, resid=(sol_ep or {}).get("resid_m"))["features"]
                 excluded = set(tr.spoofed_sv.split(",")) if tr.spoofed_sv else set()
                 in_h = [sv for sv in ep.df.index if sv[0] in cfg.systems_in_h]
                 los = los_frame(ep.time, in_h, nav)
@@ -281,7 +300,7 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
                 fh.write(json.dumps({
                     "type": "epoch", "domain": domain, "subset_size": n,
                     "carrier_rate_error": rate, "bearing_deg": bearing,
-                    "transients": False,
+                    "transients": False, "el_mask_deg": cfg.el_mask_deg,
                     "cmc_features_inactive": inactive,
                     "time": ep.time.isoformat() + "Z", "stage": tr.stage,
                     "n_spoofed": tr.n_spoofed, "excluded_sv": sorted(excluded),
@@ -306,7 +325,7 @@ def run_sweep(cfg: SweepConfig | None = None) -> Path:
             fh.write(json.dumps({
                 "type": "summary", "domain": domain, "subset_size": n,
                 "carrier_rate_error": rate, "bearing_deg": bearing,
-                "transients": False,
+                "transients": False, "el_mask_deg": cfg.el_mask_deg,
                 "cmc_features_inactive": inactive,
                 "inactive_note": ("carrier_rate_error = 0: spoofer is fully "
                                   "carrier-coherent; pseudorange_residual and "
