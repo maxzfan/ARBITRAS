@@ -24,7 +24,7 @@ the geometry term itself stays fixed; it has no weights).
 Two FSR readings, per §10's definition ("the arbitrated state is below
 NOMINAL"): `dirichlet_sweep` compares raw confidence against the NOMINAL
 floor (fast, what the tests pin); the CLI's `--arbitrate` mode replays
-the console arbiter (hysteresis, dwell, recovery gating) per draw via
+the console arbitras (hysteresis, dwell, recovery gating) per draw via
 `console.replay.arbitrate` — that one is the §10 headline number.
 
 Epoch format: (features: dict[str, float], geometry) — geometry is passed
@@ -176,7 +176,7 @@ def report(result: dict) -> str:
 def arbitrated_fsr(records: list[dict], n_draws: int = 1000,
                    seed: int = 20260905) -> dict:
     """§10's FSR, verbatim: fraction of CLEAN-replay epochs whose ARBITRATED
-    state is below NOMINAL — through the console arbiter (hysteresis, dwell,
+    state is below NOMINAL — through the console arbitras (hysteresis, dwell,
     recovery gating), once per weight/blend draw. Same draw sequence as
     dirichlet_sweep under the same seed.
 
@@ -242,7 +242,7 @@ def main(argv=None) -> None:
     ap.add_argument("--plot", default=None, metavar="PATH",
                     help="write FSR / detection distribution histograms")
     ap.add_argument("--arbitrate", action="store_true",
-                    help="also replay the console arbiter per draw on the "
+                    help="also replay the console arbitras per draw on the "
                          "clean stream — §10's FSR definition verbatim "
                          "(hysteresis included)")
     args = ap.parse_args(argv)
@@ -299,7 +299,7 @@ def main(argv=None) -> None:
         a = arbitrated_fsr(recs, n_draws=args.n_draws)
         print(f"arbitrated FSR (§10 headline, {a['n_draws']} draws x "
               f"{a['n_epochs']} clean epochs, thresholds from "
-              f"console.arbiter.states):\n"
+              f"console.arbitras.states):\n"
               f"  min/median/max: {a['fsr_min']:.4f} / {a['fsr_median']:.4f}"
               f" / {a['fsr_max']:.4f}   downgrade events median "
               f"{a['downgrade_events_median']:.0f} max "

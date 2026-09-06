@@ -1,6 +1,6 @@
 """Tests for the transport and replay layers.
 
-These exist because a tick-based stale timeout shipped undetected: the arbiter
+These exist because a tick-based stale timeout shipped undetected: the arbitras
 was correct and fully tested, and the bug lived entirely in follow(). Nothing
 below touches an observable either -- this is all §5 contract shape.
 """
@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from console.arbiter.machine import Arbiter
-from console.arbiter.states import TrustState
+from console.arbitras.machine import Arbitras
+from console.arbitras.states import TrustState
 from console.replay import arbitrate, false_surrender_rate, time_to_alert
 from console.server import decide, follow, read_epochs
 
@@ -65,14 +65,14 @@ def test_follow_does_not_report_silence_while_producer_is_healthy(tmp_path):
         f"healthy producer reported as silent: {got.count(None)} false stale signals"
     )
 
-    arb = Arbiter()
+    arb = Arbitras()
     for e in got:
         d = arb.step(e)
     assert d.state is TrustState.NOMINAL, "clean data must not cost authority"
 
 
 def test_follow_reports_silence_once_per_window(tmp_path):
-    """Silence must still reach the arbiter -- once per window, not once per poll."""
+    """Silence must still reach the arbitras -- once per window, not once per poll."""
     p = tmp_path / "live.jsonl"
     p.write_text("")
     got = collect(p, stale_after=0.2, seconds=0.75)
@@ -106,7 +106,7 @@ def test_read_epochs_preserves_malformed_lines_as_missing(tmp_path):
 
 def test_layer_off_suppresses_arbitration_for_video_beat_2():
     """design.md §11a beat 2: the layer is OFF and nothing alarms."""
-    arb = Arbiter()
+    arb = Arbitras()
     epoch = json.loads(line(0.05))
     payload = decide(arb, epoch, layer_on=False)
     assert payload["state"] == "NOMINAL", "beat 2 must show no alarm"
@@ -123,7 +123,7 @@ def test_layer_off_suppresses_arbitration_for_video_beat_2():
 def test_layer_off_keeps_satellite_positions_but_not_trust_flags():
     """Positions are what the receiver sees; trusted flags are what the layer
     decides. Beat 2 shows the full constellation with nothing dark."""
-    arb = Arbiter()
+    arb = Arbitras()
     epoch = json.loads(line(0.05))
     epoch["geometry"] = {
         "information_ratio": 0.2, "excluded_sv": ["G07"], "displacement_bound_m": 90.0,
@@ -138,7 +138,7 @@ def test_layer_off_keeps_satellite_positions_but_not_trust_flags():
 
 
 def test_layer_on_arbitrates_and_explains():
-    arb = Arbiter()
+    arb = Arbitras()
     epoch = json.loads(line(0.05))
     payload = decide(arb, epoch, layer_on=True)
     assert payload["state"] == "SURRENDERED"
@@ -156,7 +156,7 @@ def test_unverifiable_claim_is_withheld_from_display(monkeypatch):
                             "path": "geometry.displacement_bound_m"}]}
 
     monkeypatch.setattr(srv, "explain", fake_explain)
-    payload = srv.decide(Arbiter(), json.loads(line(0.4, bound=41.2)), layer_on=True)
+    payload = srv.decide(Arbitras(), json.loads(line(0.4, bound=41.2)), layer_on=True)
     assert payload["explanation_verified"] is False
     assert "900" not in payload["explanation"]["detail"]
     assert payload["explanation_failures"]
@@ -164,7 +164,7 @@ def test_unverifiable_claim_is_withheld_from_display(monkeypatch):
 
 def test_threshold_provenance_is_stamped_on_every_epoch():
     """So a placeholder threshold cannot reach the video unnoticed."""
-    payload = decide(Arbiter(), json.loads(line(0.9)), layer_on=True)
+    payload = decide(Arbitras(), json.loads(line(0.9)), layer_on=True)
     assert payload["threshold_provenance"]
     assert payload["thresholds"]["NOMINAL"]
 
@@ -220,7 +220,7 @@ def test_layer_on_passes_the_terrain_block_to_the_wire():
     epoch = json.loads(line(0.60))
     epoch["terrain"] = TERRAIN_BLOCK
     epoch["features"]["terrain_mismatch"] = 1.0
-    payload = decide(Arbiter(), epoch, layer_on=True)
+    payload = decide(Arbitras(), epoch, layer_on=True)
     assert payload["terrain"] == TERRAIN_BLOCK
     assert payload["terrain"]["sensor"]["source"] == "simulated"
     assert payload["features"]["terrain_mismatch"] == 1.0
@@ -232,7 +232,7 @@ def test_layer_off_strips_the_terrain_block_and_the_advisory():
     epoch = json.loads(line(0.60))
     epoch["terrain"] = TERRAIN_BLOCK
     epoch["features"]["terrain_mismatch"] = 1.0
-    payload = decide(Arbiter(), epoch, layer_on=False)
+    payload = decide(Arbitras(), epoch, layer_on=False)
     assert payload["terrain"] == {}
     assert payload["advisory"] is None
     assert payload["pursuing"] is None

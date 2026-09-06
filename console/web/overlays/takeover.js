@@ -2,8 +2,8 @@
  *
  * SURRENDERED means control is with the operator (design.md §8). This overlay
  * lets a REAL PERSON drive the TRUE vehicle in the presentation frame while
- * autonomy is withdrawn, and hands back when the arbiter climbs to DEGRADED.
- * ARBITER never commands motion: every metre driven here is a human's input
+ * autonomy is withdrawn, and hands back when the arbitras climbs to DEGRADED.
+ * ARBITRAS never commands motion: every metre driven here is a human's input
  * (keyboard / gamepad / touch) or, when nobody is at the controls, a scripted
  * stand-in that follows the route at half speed and is labelled as such.
  *
@@ -13,7 +13,7 @@
  *
  * Controls: T take / hand back control · W/S or ↑/↓ throttle · A/D or ←/→ steer ·
  * gamepad left stick · touch: drag on the pane. Hand-back is allowed only when
- * the state is DEGRADED or NOMINAL (the arbiter's call, not the operator's).
+ * the state is DEGRADED or NOMINAL (the arbitras's call, not the operator's).
  */
 (function () {
   const ORDER = {SURRENDERED: 0, RESTRICTED: 1, DEGRADED: 2, NOMINAL: 3};
@@ -146,6 +146,6 @@
     };
   }
 
-  window.ARBITER_OVERLAY = window.ARBITER_OVERLAY || {};
-  window.ARBITER_OVERLAY.takeover = { id: 'takeover', mount };
+  window.ARBITRAS_OVERLAY = window.ARBITRAS_OVERLAY || {};
+  window.ARBITRAS_OVERLAY.takeover = { id: 'takeover', mount };
 })();

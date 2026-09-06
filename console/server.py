@@ -8,7 +8,7 @@
 Then open http://localhost:8420
 
 Hard reset (design.md §11a, "under five seconds"): each /events connection gets
-a fresh Arbiter and replays from epoch 0, so a browser reload IS the reset.
+a fresh Arbitras and replays from epoch 0, so a browser reload IS the reset.
 Press r in the console. Nothing to restart server-side between takes.
 
 Transport is one JSON object per line, per design.md §5. This process never
@@ -22,9 +22,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from console.arbiter.explain import explain, verify
-from console.arbiter.machine import Arbiter
-from console.arbiter.states import THRESHOLD_PROVENANCE, THRESHOLDS, TrustState
+from console.arbitras.explain import explain, verify
+from console.arbitras.machine import Arbitras
+from console.arbitras.states import THRESHOLD_PROVENANCE, THRESHOLDS, TrustState
 from console import mission
 from console import missions as mission_registry
 
@@ -60,7 +60,7 @@ def follow(path: Path, stale_after: float = 2.0, poll: float = 0.05):
     Yields None ONLY after `stale_after` seconds of genuine silence, and at most
     once per such window -- not once per poll.
 
-    This distinction is the whole bug it fixes. The arbiter treats every None as
+    This distinction is the whole bug it fixes. The arbitras treats every None as
     a missing epoch and steps authority down after STALE_GRACE_TICKS of them
     (design.md §5, "silence is not consent"). If the tail yields None on every
     poll timeout, a perfectly healthy producer that emits slower than the poll
@@ -71,7 +71,7 @@ def follow(path: Path, stale_after: float = 2.0, poll: float = 0.05):
     Set --stale-after to roughly 3x Track A's actual emit interval at the 18:30
     integration checkpoint.
 
-    The wall clock lives here and not in Arbiter on purpose: the arbiter stays
+    The wall clock lives here and not in Arbitras on purpose: the arbitras stays
     pure and deterministic so Track C's Dirichlet sweep replays it identically
     every draw (design.md §10).
     """
@@ -142,7 +142,7 @@ def numbers(clean_path=Path("out/clean.jsonl"), attack_path=Path("out/carryoff.j
     else:
         row("FALSE SURRENDER RATE", None, "", f"{clean_path} missing")
     row("STATION", "USN8 · 2026-08-20 · 30 S · 5 CONSTELLATIONS", "", "design.md §4")
-    row("THRESHOLDS", THRESHOLD_PROVENANCE.split(":")[0], "", "console/arbiter/states.py")
+    row("THRESHOLDS", THRESHOLD_PROVENANCE.split(":")[0], "", "console/arbitras/states.py")
     v = {"rows": rows, "note": "computed from the streams on disk at server start; every value carries its source"}
     _NUMBERS_CACHE.update(key=key, v=v)
     return v
@@ -168,7 +168,7 @@ def terrain_map(path: Path = Path("data/terrain_usn8.npz")) -> dict | None:
     return t
 
 
-def decide(arb: Arbiter, epoch, layer_on: bool) -> dict:
+def decide(arb: Arbitras, epoch, layer_on: bool) -> dict:
     """One arbitration + explanation + verification, ready for the wire."""
     d = arb.step(epoch)
     payload = d.to_dict()
@@ -347,7 +347,7 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
         self.end_headers()
 
-        arb = Arbiter()      # fresh per connection: reload == hard reset
+        arb = Arbitras()      # fresh per connection: reload == hard reset
         delay = 1.0 / max(rate, 0.1)
         # Track F: ?mission=<name> replays that mission's stream (or its
         # fallback until generated); --source still wins in tail mode.

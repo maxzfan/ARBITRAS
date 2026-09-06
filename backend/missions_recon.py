@@ -21,9 +21,9 @@ believed fix should not move; any motion of the fix is the spoof, and the
 direction it moves is the direction of the emitter (the receiver is pulled
 toward the repeater it is solving on). The scout therefore:
 
-1. **Anchors** on the last fix taken while the arbiter still trusted the
+1. **Anchors** on the last fix taken while the arbitras still trusted the
    signal (the last NOMINAL epoch before a downgrade -- ``console.replay.arbitrate``
-   is the reference arbiter, so the anchor epoch is exactly what the console
+   is the reference arbitras, so the anchor epoch is exactly what the console
    shows) and dead-reckons from it with its own odometry. Time-to-alert is 0
    epochs on this stream, so the anchor fix is clean; a late alert would
    anchor on a spoofed fix, which is the stated risk of the method.
@@ -46,7 +46,7 @@ toward the repeater it is solving on). The scout therefore:
    independent -- one is RF-free odometry from a fix taken before the attack,
    the other is a trusted-subset solve of this epoch's ranges.
 5. Stamps the spot report: state, constellations in the trusted set, PL, and
-   "clock in holdover" when the arbiter's ``clock_discipline`` is false.
+   "clock in holdover" when the arbitras's ``clock_discipline`` is false.
 
 ## Frames
 
@@ -87,7 +87,7 @@ import sys
 from pathlib import Path
 from statistics import median
 
-from console.arbiter.states import TrustState
+from console.arbitras.states import TrustState
 from console.mission import LAT, LON, M_PER_DEG_LAT, M_PER_DEG_LON
 from console.missions import RECON, route_point
 from console.replay import arbitrate
@@ -410,7 +410,7 @@ def section(m: dict) -> str:
 
 Added by `backend/missions_recon.py` (RECON's post-pass, `register_augment`);
 measured on this stream by `python -m backend.missions_recon`. The anchor is the
-last NOMINAL fix (arbiter transitions: {tr}) carried by odometry -- the route in
+last NOMINAL fix (arbitras transitions: {tr}) carried by odometry -- the route in
 the presentation frame, zero in the stream frame -- and the anchor cross-check
 and the Galileo re-solve are independent: one is RF-free odometry from a fix
 taken before the attack, the other the trusted-subset solve of each epoch's

@@ -406,6 +406,6 @@
     };
   }
 
-  window.ARBITER_ENV = window.ARBITER_ENV || {};
-  window.ARBITER_ENV.combat = { id: 'combat', spec: SPEC, build };
+  window.ARBITRAS_ENV = window.ARBITRAS_ENV || {};
+  window.ARBITRAS_ENV.combat = { id: 'combat', spec: SPEC, build };
 })();

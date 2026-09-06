@@ -248,7 +248,7 @@ COMBAT = Mission(
         "name": "Crude high-power step, then authorisation revoked",
         "mechanism": "A 15 dB spoofer throws every GPS range to a position 250 m east in one epoch; the joint solution lands 98 m past the phase line.",
         "watch": "signal strength, cross-constellation, GPS dropped as a constellation, protection level of the Galileo fix",
-        "response": "Autonomy withdrawn on a crude attack; the operator drives the advance on the Galileo corrected fix ARBITER stands behind (PL 8 m); fire-control input marked conditional.",
+        "response": "Autonomy withdrawn on a crude attack; the operator drives the advance on the Galileo corrected fix ARBITRAS stands behind (PL 8 m); fire-control input marked conditional.",
     },
     mechanism="takeover",
     beats=(

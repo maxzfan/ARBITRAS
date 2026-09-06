@@ -6,8 +6,8 @@ registers itself:
 
 ```js
 (function () {
-  window.ARBITER_ENV = window.ARBITER_ENV || {};
-  window.ARBITER_ENV.recon = { id: 'recon', spec: SPEC, build: build };
+  window.ARBITRAS_ENV = window.ARBITRAS_ENV || {};
+  window.ARBITRAS_ENV.recon = { id: 'recon', spec: SPEC, build: build };
   ...
 })();
 ```

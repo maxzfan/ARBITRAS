@@ -7,8 +7,8 @@ mission-specific HUD, `console/web/overlays/<mission>.js`. Classic script:
 
 ```js
 (function () {
-  window.ARBITER_OVERLAY = window.ARBITER_OVERLAY || {};
-  window.ARBITER_OVERLAY.recon = { id: 'recon', mount: mount };
+  window.ARBITRAS_OVERLAY = window.ARBITRAS_OVERLAY || {};
+  window.ARBITRAS_OVERLAY.recon = { id: 'recon', mount: mount };
 })();
 ```
 
@@ -26,7 +26,7 @@ carries a contract path.
 | `THREE` | three.js r147 namespace |
 | `scene` | the console's scene; add your objects to it; frame x = East, y = Up, z = South |
 | `mission` | the `/mission?name=` object (route, props, gain, behaviour, attack, beats, scene) |
-| `helpers` | `ARBITER_HELPERS.forMission(mission)`: `toScene(e,n,y)`, `routePoint(s)`, `lateralOffset(e,n)`, `azel`, `INSET_LAYER`, ... |
+| `helpers` | `ARBITRAS_HELPERS.forMission(mission)`: `toScene(e,n,y)`, `routePoint(s)`, `lateralOffset(e,n)`, `azel`, `INSET_LAYER`, ... |
 | `heightAt(x, z)` | terrain height in scene frame (from the environment module) |
 | `latLonToEnu(lat, lon)` / `enuToLatLon(e, n)` | route.js conversions bound to the mission |
 | `labels` | an absolutely positioned HTML layer you may append `div.skl`-styled labels to; position them with `project` |

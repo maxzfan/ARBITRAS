@@ -185,6 +185,6 @@
     };
   }
 
-  window.ARBITER_ENV = window.ARBITER_ENV || {};
-  window.ARBITER_ENV.logistics = { id: 'logistics', spec: SPEC, build };
+  window.ARBITRAS_ENV = window.ARBITRAS_ENV || {};
+  window.ARBITRAS_ENV.logistics = { id: 'logistics', spec: SPEC, build };
 })();

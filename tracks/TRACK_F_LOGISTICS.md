@@ -113,7 +113,7 @@ worst-residual satellite and re-solve until Track D's chi-square `residual_test`
 capped at n−(3+k)−1 drops; run the same 35 s script and look for the spoofed six isolated
 through the whole attack.
 
-### What ARBITER sees (RE-SCORED, k=1, 0.2 m/s, shipped thresholds — VERIFIED)
+### What ARBITRAS sees (RE-SCORED, k=1, 0.2 m/s, shipped thresholds — VERIFIED)
 Features ≥ 0.30 salience: `cross_constellation` and `cn0_anomaly` at +0 (0.30 / 0.37,
 the capture epoch; C/N0 lead-in max 0.31 so never the headline), `pseudorange_residual`
 and `code_carrier_divergence` from +1. Explanation headline through the alert: "Range

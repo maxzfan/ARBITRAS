@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>ARBITER</title>
+<title>ARBITRAS</title>
 <style>
   /* Vendored so the console runs offline (design.md §14: venue wifi is a risk).
      font-display:block avoids a flash of fallback metrics mid-capture. */
@@ -181,7 +181,7 @@
      to epoch (a canvas resize clears the drawing buffer and paints one black
      frame, and the scene jumps when the pane's aspect changes). The height is
      the tallest layout observed: every §5 record in out/{demo,carryoff,clean,
-     live}.jsonl replayed through the arbiter (641 distinct explanations) and
+     live}.jsonl replayed through the arbitras (641 distinct explanations) and
      rendered at viewport widths 1100-1920 needs at most 3 headline lines and
      4 detail lines; 4 detail lines (13px x 1.62) is the taller column, plus the
      15px vertical padding and the 1px top border (border-box). Longer text is
@@ -1078,7 +1078,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
       if (status.ground === 'fallback') notes.push('GROUND FALLBACK · untextured');
       statusRef.current({note: notes.join(' · '),
         attrib: (status.model === 'loaded' ? 'Vehicle: 4x4 UGV, own CAD (Blender) · ' : '')
-                + ((m.scene && (window.ARBITER_ENV || {})[m.scene.env] && (window.ARBITER_ENV || {})[m.scene.env].spec.attribution) || 'Sky, ground: Poly Haven, CC0'),
+                + ((m.scene && (window.ARBITRAS_ENV || {})[m.scene.env] && (window.ARBITRAS_ENV || {})[m.scene.env].spec.attribution) || 'Sky, ground: Poly Haven, CC0'),
         ...status}); };
     report();
 
@@ -1089,7 +1089,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
     // Track F (console/web/env/CONTRACT.md): the mission's environment module,
     // when one is loaded, supplies terrain, ground, set dressing, sky colours,
     // fog, HDR and exposure; the inline prairie below stays as the fallback.
-    const envMod = (window.ARBITER_ENV || {})[((m.scene || {}).env) || ''] || null;
+    const envMod = (window.ARBITRAS_ENV || {})[((m.scene || {}).env) || ''] || null;
     const spec = envMod ? envMod.spec : null;
     const fogColor = spec ? new T.Color(spec.fog.color) : new T.Color(ENV.horizon);
     renderer.toneMapping = T.ACESFilmicToneMapping;
@@ -1132,7 +1132,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
     const TW = (maxE - minE) + 1000, TD = (maxN - minN) + 1000, TCx = (minE + maxE)/2, TCz = -(minN + maxN)/2;
     let envHandle = null, groundMat = null, rockMat = null;   // materials exist only on the inline path
     if (envMod) {
-      envHandle = envMod.build({THREE:T, scene, renderer, mission:m, helpers: ARBITER_HELPERS.forMission(m),
+      envHandle = envMod.build({THREE:T, scene, renderer, mission:m, helpers: ARBITRAS_HELPERS.forMission(m),
         terrain: terrain || null,
         report: sst => { if (!alive) return; Object.assign(status, sst); report(); if (st.inset) st.inset.dirty = true; }});
       terrainHeight = envHandle.heightAt; st.terrainHeight = terrainHeight; st.env = envHandle;
@@ -1234,7 +1234,7 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
     const hasBackdrop = !!(spec && spec.backdrop);
     if (hasBackdrop) {
       status.backdrop = 'loading';
-      withTimeout(ARBITER_HELPERS.loadBackdrop(spec.backdrop, sunSpec.az), 25000, 'backdrop').then(b => {
+      withTimeout(ARBITRAS_HELPERS.loadBackdrop(spec.backdrop, sunSpec.az), 25000, 'backdrop').then(b => {
         if (!alive) return;
         if (st.gradientSky) { scene.remove(st.gradientSky); st.gradientSky.geometry.dispose(); st.gradientSky.material.dispose(); st.gradientSky = null; }
         scene.add(b.mesh); st.backdrop = b.mesh;
@@ -1490,12 +1490,12 @@ function EnvScene({sky, epochIndex, D, Dc, mission, orbit, onStatus, credential,
     // Track F mission overlay (console/web/overlays/CONTRACT.md): the console
     // half of a correction mechanism, or the operator takeover. It draws only
     // what its mechanism adds; drive() may move the TRUE vehicle in the
-    // presentation frame under a human's command, never ARBITER's.
-    const ovMod = (window.ARBITER_OVERLAY || {})[m.mechanism === 'takeover' ? 'takeover' : m.name] || null;
+    // presentation frame under a human's command, never ARBITRAS's.
+    const ovMod = (window.ARBITRAS_OVERLAY || {})[m.mechanism === 'takeover' ? 'takeover' : m.name] || null;
     st.overlay = null;
     if (ovMod) {
       try {
-        st.overlay = ovMod.mount({THREE:T, scene, mission:m, helpers: ARBITER_HELPERS.forMission(m),
+        st.overlay = ovMod.mount({THREE:T, scene, mission:m, helpers: ARBITRAS_HELPERS.forMission(m),
           heightAt: (x, z) => terrainHeight(x, z), latLonToEnu: (la, lo) => R.latLonToEnu(m, la, lo), enuToLatLon: (e, n) => R.enuToLatLon(m, e, n),
           labels: lab.current, project, glowTexture,
           colors: {truth:'#7FA8CC', believed:'#E4551F', corrected:'#6FCF97', amber:'#E8A21C', red:'#D62119', dim:'#8794A2'},

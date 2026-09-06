@@ -2,7 +2,7 @@
 
 Two NOMINAL epochs, then a 100 m eastward step of the believed fix with a
 250 m jump in the GPS clock and four GPS satellites dropped: confidence 0.3
-puts the arbiter in SURRENDERED (progress gain 0 -> stationary in the frame).
+puts the arbitras in SURRENDERED (progress gain 0 -> stationary in the frame).
 """
 import math
 

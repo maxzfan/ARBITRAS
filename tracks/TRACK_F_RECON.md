@@ -83,7 +83,7 @@ tail, NOMINAL from +96, pre-lapse window confidence 0.87–0.90, 0/45 below NOMI
 **Recommendation: meaconing is the stream; the offset repeater is a README-table variant behind a
 flag** (injector extension F-R7, cut first).
 
-### What ARBITER sees — with the constellation-level exclusion (F-R1b), VERIFIED
+### What ARBITRAS sees — with the constellation-level exclusion (F-R1b), VERIFIED
 Rule `odd_constellation(channels)`: for the clock channels (and separately the position
 channels), constellation S is distrusted when both channels touching S are ≥ L × their calibrated
 scale and the channel not touching S is < L. Scale = each channel's clean-day p99 of trailing |z|
@@ -110,7 +110,7 @@ Ratio 0.68–0.80 (median 0.719) with H = G+E+C, k 3→2 (CLAUDE.md's 0.653 was 
 13.8 → 14.6 m median (E+C geometry is nearly as good); displacement 0.000 m throughout; the C/N0
 spike at +90 is the repeater switching off (−8 dB), itself an event. Time-to-alert 0 epochs.
 `next_best_observation` = **"G"** on 90/90 epochs — it ranks readmission (design.md §6b), which is
-correct, but `console/arbiter/machine.py` prints it as "Reweight toward G": the spoofed
+correct, but `console/arbitras/machine.py` prints it as "Reweight toward G": the spoofed
 constellation. Fixed in F-R2 with a derived `geometry.reweight_toward` (argmax over trusted
 constellations of norm_info of that constellation's own rows, one determinant each): **E on 90/90
 attack epochs** (E 2.40, C 1.24; pre-attack G 1.35, E 2.73).

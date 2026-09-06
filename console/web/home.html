@@ -1,7 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ARBITER</title>
+<title>ARBITRAS</title>
 <style>
   /* Track F routing page (tracks/TRACK_F.md §1): hero, mission selector, console.
      Same vendored type and palette as the console so the two read as one product. */
@@ -115,7 +115,7 @@
 </style>
 
 <nav>
-  <a class="wordmark" href="#platform">ARBITER</a>
+  <a class="wordmark" href="#platform">ARBITRAS</a>
   <div class="links">
     <a href="#platform">Platform</a><a href="#missions">Missions</a><a href="#method">Method</a><a href="#limits">Limits</a>
   </div>
@@ -137,7 +137,7 @@
 </section>
 
 <section class="missions" id="missions">
-  <p class="tag">Four missions. Four attacks from the same threat model. One arbiter deciding, every epoch, how much authority the vehicle keeps.</p>
+  <p class="tag">Four missions. Four attacks from the same threat model. One arbitras deciding, every epoch, how much authority the vehicle keeps.</p>
   <div class="row" id="missionRow"><canvas id="tilesCanvas"></canvas></div>
   <i class="corner bl"></i><i class="corner br"></i>
 </section>
@@ -149,7 +149,7 @@
     <div class="right" id="mRight"></div>
   </div>
   <div class="empty" id="consoleEmpty">SELECT A MISSION</div>
-  <iframe id="consoleFrame" title="ARBITER console" style="display:none" allow="fullscreen"></iframe>
+  <iframe id="consoleFrame" title="ARBITRAS console" style="display:none" allow="fullscreen"></iframe>
 </section>
 
 <footer id="limits">
@@ -158,7 +158,7 @@
     <li>The attacks are synthetic: the injector writes them into real RINEX observables from a static reference station. The route, the vehicles and the environments are a presentation frame; only the measured displacement between believed and true position separates the tracks.</li>
     <li>One station, one day, one injector, open sky. Thresholds are measured separation points for USN8 on 2026-08-20 and generalise no further than that sentence.</li>
     <li>Headline numbers above are computed from the streams on disk at server start and carry their source. Where a stream is missing the value is blank, never typed in.</li>
-    <li>Operator takeover moves a vehicle in the presentation frame under a human's command; ARBITER itself never commands motion. Automatic corrections act on the corrected fix and are gated by its protection level.</li>
+    <li>Operator takeover moves a vehicle in the presentation frame under a human's command; ARBITRAS itself never commands motion. Automatic corrections act on the corrected fix and are gated by its protection level.</li>
   </ol>
   <div class="fine">Built at DNHacks, 5–6 September 2026 · Vehicle: 4x4 UGV, own CAD · Sky and ground: Poly Haven, CC0 · No imagery anywhere on this page</div>
 </footer>
@@ -191,7 +191,7 @@
 (function () {
   const QS = new URLSearchParams(location.search);
   const POST = QS.get('post') !== '0', SHADOW = QS.get('shadow') !== '0', ENVMAP = QS.get('envmap') !== '0';
-  const T = THREE, H = ARBITER_HELPERS, R = Route, D2R = Math.PI / 180;
+  const T = THREE, H = ARBITRAS_HELPERS, R = Route, D2R = Math.PI / 180;
   const MECH = {takeover: ['take', 'Operator takeover'], stationary: ['auto', 'Automatic · stationary deduction'], terrain: ['auto', 'Automatic · terrain-referenced']};
   const MODEL = '/vendor/asset-ugv.draco.glb';
   const info = {hero: {}, tiles: {}, model: 'loading'};
@@ -290,7 +290,7 @@
   // ---------------------------------------------------------------- hero
   async function hero() {
     const canvas = document.getElementById('heroCanvas'), sec = document.getElementById('platform');
-    const env = (window.ARBITER_ENV || {}).logistics; if (!env) return;
+    const env = (window.ARBITRAS_ENV || {}).logistics; if (!env) return;
     const m = await (await fetch('/mission?name=logistics')).json();
     const spec = env.spec, renderer = rig(canvas, spec, {shadows:true});
     const scene = new T.Scene(), cam = new T.PerspectiveCamera(48, 1, 0.5, 1600);
@@ -370,8 +370,8 @@
     for (const ms of missions) {
       const col = row.querySelector(`[data-mission="${ms.name}"]`), tileEl = col && col.querySelector('.tile');
       if (!tileEl) continue;
-      const envMod = (window.ARBITER_ENV || {})[ms.scene.env] || (window.ARBITER_ENV || {}).logistics;
-      const pending = !((window.ARBITER_ENV || {})[ms.scene.env]);
+      const envMod = (window.ARBITRAS_ENV || {})[ms.scene.env] || (window.ARBITRAS_ENV || {}).logistics;
+      const pending = !((window.ARBITRAS_ENV || {})[ms.scene.env]);
       if (pending) tileEl.querySelector('.note').textContent = 'preview · scripted · env pending, prairie stand-in';
       const m = await (await fetch('/mission?name=' + ms.name)).json();
       let terrain = null;

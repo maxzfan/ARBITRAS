@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>ARBITER env preview</title>
+<title>ARBITRAS env preview</title>
 <style>
   html,body{margin:0;height:100%;background:#0B0D0F;color:#EEF2F6;font:12px/1.5 ui-monospace,Menlo,monospace;overflow:hidden}
   #view{position:absolute;inset:0}
@@ -50,13 +50,13 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
 (async function () {
   const QS = new URLSearchParams(location.search);
   const envName = QS.get('env') || 'logistics', missionName = QS.get('mission') || envName;
-  const T = THREE, H = ARBITER_HELPERS, hud = document.getElementById('hud');
+  const T = THREE, H = ARBITRAS_HELPERS, hud = document.getElementById('hud');
   const say = s => { hud.textContent = s; };
 
   const s = document.createElement('script'); s.src = '/env/' + envName + '.js';
   await new Promise((res, rej) => { s.onload = res; s.onerror = () => rej(new Error('env module /env/' + envName + '.js failed to load')); document.head.appendChild(s); });
-  const mod = (window.ARBITER_ENV || {})[envName];
-  if (!mod) throw new Error('env module did not register window.ARBITER_ENV.' + envName);
+  const mod = (window.ARBITRAS_ENV || {})[envName];
+  if (!mod) throw new Error('env module did not register window.ARBITRAS_ENV.' + envName);
 
   const m = await (await fetch('/mission?name=' + missionName)).json();
   let terrain = null;

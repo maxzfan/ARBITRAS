@@ -4,7 +4,7 @@ Per injected-run epoch the stream gives the believed and clean-truth
 positions (`_solution.displacement_m`, the differential-WLS distance) and
 the analytic `geometry.displacement_bound_m` over the same epoch's
 trusted geometry. The bound is a bound on UNDETECTED displacement: it
-claims nothing once the arbiter has left NOMINAL. Claim 2a therefore
+claims nothing once the arbitras has left NOMINAL. Claim 2a therefore
 holds iff empirical <= bound at every epoch whose ARBITRATED state is
 NOMINAL — checked explicitly and printed, not eyeballed off a plot.
 design.md §10: "If the empirical number ever exceeds the bound, the
@@ -81,7 +81,7 @@ def main(argv=None) -> None:
     import argparse
 
     from console.replay import arbitrate
-    from console.arbiter.states import TrustState
+    from console.arbitras.states import TrustState
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("stream", help="injected replay JSONL (out/carryoff.jsonl)")
@@ -98,7 +98,7 @@ def main(argv=None) -> None:
         return (t, emp, r["geometry"].get("displacement_bound_m"))
 
     every = [_ep(r) for r in recs if "_solution" in r]
-    # The bound only claims epochs the arbiter still trusts (NOMINAL).
+    # The bound only claims epochs the arbitras still trusts (NOMINAL).
     nominal = [_ep(r) for r, d in zip(recs, decisions)
                if "_solution" in r and d.state is TrustState.NOMINAL]
     result = check_epochs(nominal)
@@ -118,7 +118,7 @@ def main(argv=None) -> None:
 
     plot(every, Path(args.plot))
     print(f"wrote {args.plot} (full run, both lines; the bound makes no "
-          f"claim after the arbiter leaves NOMINAL)")
+          f"claim after the arbitras leaves NOMINAL)")
 
 
 if __name__ == "__main__":

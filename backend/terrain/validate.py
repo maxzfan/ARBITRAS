@@ -123,7 +123,7 @@ def fire_fraction(records, idx=None, level: float = FIRE_LEVEL) -> float:
 
 
 def sensor_quality_curve(clean, carry, rmap, diags, windows, sigma_uere) -> list[dict]:
-    from console.arbiter.states import THRESHOLDS, TrustState
+    from console.arbitras.states import THRESHOLDS, TrustState
     nominal = THRESHOLDS[TrustState.NOMINAL]
     w = Weights.equal(FEATURE_NAMES + OPTIONAL_FEATURE_NAMES)
     attack = attack_indices(carry)

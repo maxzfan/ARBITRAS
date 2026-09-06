@@ -41,7 +41,7 @@ You own `backend/geometry/` and `backend/measurement/`. You produce the
 the confidence score and it is NOT on the cut list.
 
 ## Setup (~10 min, unattended)
-    git clone https://github.com/maxzfan/ARBITER.git && cd ARBITER
+    git clone https://github.com/maxzfan/ARBITRAS.git && cd ARBITRAS
     bash bootstrap.sh
     source .venv/bin/activate
 
@@ -138,7 +138,7 @@ displacement_bound_m, next_best_observation.
     source .venv/bin/activate
     python -m backend.demo            # -> out/clean.jsonl, out/carryoff.jsonl,
     # -> out/clean.jsonl (2880), out/carryoff.jsonl (2880), out/demo.jsonl (240: 12:00–14:00 UTC, onset 12:30)
-    python -m console.replay out/demo.jsonl      # arbiter timeline, headless
+    python -m console.replay out/demo.jsonl      # arbitras timeline, headless
     python -m console.replay out/clean.jsonl     # FSR on the clean day
 Field-by-field provenance: docs/stream_provenance.md.
 
@@ -153,7 +153,7 @@ Open design question for the pick: attack floor is 0.36, so SURRENDERED < 0.25 n
 fires on signal alone for a 1–3 dB carry-off — either raise the lower thresholds into
 the attack distribution, or decide that RESTRICTED is the correct ceiling for a subtle
 spoofer and only the credential layer forces surrender (§8 supports this reading).
-The single swap point is console/arbiter/states.py (THRESHOLDS + THRESHOLD_PROVENANCE —
+The single swap point is console/arbitras/states.py (THRESHOLDS + THRESHOLD_PROVENANCE —
 set provenance off "PLACEHOLDER" to clear the console banner). Hysteresis
 (RECOVERY_EPOCHS=10, MIN_DWELL=5) made the bad threshold sticky; re-check FSR after the pick.
 Confidence is currently equal-weight, β=1 (weights_tuned=false) — the Dirichlet sweep

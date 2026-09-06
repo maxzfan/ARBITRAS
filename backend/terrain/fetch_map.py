@@ -98,7 +98,7 @@ def fetch(lat: float, lon: float, radius_m: float, cache_path) -> list[dict]:
         return json.loads(cache_path.read_text())["elements"]
     data = urllib.parse.urlencode({"data": overpass_query(lat, lon, radius_m)}).encode()
     req = urllib.request.Request(OVERPASS, data=data,
-                                 headers={"User-Agent": "ARBITER-terrain-fetch/0.1"})
+                                 headers={"User-Agent": "ARBITRAS-terrain-fetch/0.1"})
     with urllib.request.urlopen(req, timeout=120) as r:
         payload = json.loads(r.read().decode())
     payload["fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

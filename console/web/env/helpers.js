@@ -3,7 +3,7 @@
  *
  * Extracted from index.html so that every environment module builds against
  * ONE implementation of noise, texture/HDR loading and the scene frame.
- * Classic script: defines window.ARBITER_HELPERS. Requires window.THREE and
+ * Classic script: defines window.ARBITRAS_HELPERS. Requires window.THREE and
  * window.Route (route.js) to be loaded first.
  *
  * Scene frame everywhere: x = East, y = Up, z = South (North is -z).
@@ -127,7 +127,7 @@
   const _relief = {};
   function reliefGrid(id) {
     if (_relief[id] !== undefined) return _relief[id];
-    const src = (root.ARBITER_RELIEF || {})[id]; if (!src) return (_relief[id] = null);
+    const src = (root.ARBITRAS_RELIEF || {})[id]; if (!src) return (_relief[id] = null);
     const bin = atob(src.b64), n = src.n, data = new Float32Array(n * n);
     for (let i = 0; i < n * n; i++) { let v = bin.charCodeAt(2*i) | (bin.charCodeAt(2*i + 1) << 8); if (v & 0x8000) v -= 0x10000; data[i] = (v + src.offset) * src.scale + src.lo; }
     return (_relief[id] = {n, size: src.size_m, data});
@@ -328,6 +328,6 @@ void main() {`)
     };
   }
 
-  root.ARBITER_HELPERS = {D2R, INSET_LAYER, FALLBACK, makeNoise, mulberry32, smooth, azel, toScene,
+  root.ARBITRAS_HELPERS = {D2R, INSET_LAYER, FALLBACK, makeNoise, mulberry32, smooth, azel, toScene,
                           roundedRect, loadTexture, loadHDR, loadBackdrop, withTimeout, antiTile, reliefGrid, forMission};
 })(typeof self !== 'undefined' ? self : this);

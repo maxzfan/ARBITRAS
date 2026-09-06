@@ -26,7 +26,7 @@ CLAUDE.md hard constraints, in particular the imagery rule.
 
 ## Why this track exists
 
-Every evidence channel ARBITER has today enters through the antenna. C/N0,
+Every evidence channel ARBITRAS has today enters through the antenna. C/N0,
 residuals, code-minus-carrier, cross-constellation, the information ratio, the
 protection level -- all of them are functions of the same RF input the spoofer
 controls. The credential layer is independent but says nothing about
@@ -190,7 +190,7 @@ extension and costs about the same.
 position on the class sequence plus odometry, produce an independent position
 posterior, compare it with GNSS. This is TERCOM/SITAN with classes instead of
 elevation and it is where the channel is genuinely powerful -- but it needs an
-odometry input ARBITER does not have, and a static receiver yields one
+odometry input ARBITRAS does not have, and a static receiver yields one
 observation forever. Roadmap. Step 3 above is its measurement model, so B is
 the first step toward C, not a detour.
 
@@ -247,8 +247,8 @@ Rules:
 | `backend/detection/confidence.py` | `anomaly()` must renormalise weights over **scored** features. Today a missing key reads `0.0`, so a sensorless run would silently score as if the terrain agreed -- the exact failure feature 2's NaN rule exists to prevent | A |
 | `backend/geometry/engine.py` or the emitter | `min` rule, `bound_source`, `residual_bound_m`. One function; settle which at integration, as Track D did for PL | C |
 | `backend/correction/gate.py` | check 6 `terrain_consistent`: corrected-position overlap `L` above the floor fit on the clean run. `null` when unavailable; the AND is unchanged | D |
-| `console/arbiter/machine.py` | `Decision` passes `terrain` through like `geometry`; DEGRADED advisory gains one sentence from `nearest_boundary`. Advisory only, never a motion command | B |
-| `console/arbiter/explain.py` | `FEATURE_PHRASE["terrain_mismatch"] = "the ground under the vehicle does not match the map at the reported position"`; claims carry `terrain.match_likelihood` | B |
+| `console/arbitras/machine.py` | `Decision` passes `terrain` through like `geometry`; DEGRADED advisory gains one sentence from `nearest_boundary`. Advisory only, never a motion command | B |
+| `console/arbitras/explain.py` | `FEATURE_PHRASE["terrain_mismatch"] = "the ground under the vehicle does not match the map at the reported position"`; claims carry `terrain.match_likelihood` | B |
 | `backend/measurement/displacement.py` | none -- reads `displacement_bound_m` | C |
 | `backend/measurement/sweep.py` | Dirichlet over five weights when the feature is scored; `weight_sensitive_fraction` unchanged in meaning | C |
 | `docs/stream_provenance.md` | three rows: map (measured, public raster, checksum), sensor (simulated, `M` swept), extent/boundary (derived from the map) | — |
@@ -289,7 +289,7 @@ not:
   position.
 - **The footprint covariance `Sigma` is borrowed** from the trusted-subset `G`.
   Below NOMINAL it is the frozen `G`, same rule as everything else.
-- **The sensor posterior is independent.** It is the only input in ARBITER
+- **The sensor posterior is independent.** It is the only input in ARBITRAS
   that the RF channel cannot reach. Its own attack surface is physical (change
   the ground) or supply-chain (poison the map, hence the signature).
 
@@ -303,7 +303,7 @@ figure is a curve over the diagonal of `M`, and every record says
 
 1. **Calibration run** (clean day, static receiver, simulated sensor at the
    antenna): distribution of `mismatch_t`, saturation at p99, `W` chosen by
-   hand, FSR contribution through the arbiter. Note the believed position
+   hand, FSR contribution through the arbitras. Note the believed position
    jitters 0.73 m median / 2.19 m max on the clean day (stream provenance),
    which the footprint absorbs -- if the clean-run mismatch is not pure
    confusion noise, the footprint is wrong.
@@ -353,7 +353,7 @@ on the far side of a boundary (1.0 under `M = I`).
 `available: false` produces byte-identical `confidence` to today's stream;
 the extended fixture round-trips `console.replay` with zero verifier fires.
 
-**E4 -- consumers** (arbiter passthrough, advisory sentence, explanation
+**E4 -- consumers** (arbitras passthrough, advisory sentence, explanation
 phrase, gate check 6, ~1.5 h). Acceptance: `test_machine.py` invariants
 untouched; the advisory appears in DEGRADED only; check 6 `null` leaves
 `correction_ok` unchanged.
@@ -476,7 +476,7 @@ Nothing here ran for the submission video. Every terrain record is stamped
 10. **Pre-existing state exposed, not caused**: the shipped `out/*.jsonl`
     (21:08) carry `pseudorange_residual = 0.0` throughout — `backend/demo.py`
     calls the extractor without the post-fit residual panel that
-    `backend/replay.py` supplies — so nothing is excluded, the arbiter never
+    `backend/replay.py` supplies — so nothing is excluded, the arbitras never
     leaves NOMINAL under the carry-off, and `backend.measurement.displacement`
     reads 2,792/2,880 FAIL against the residual bound with or without
     terrain. README §Results predates those streams. Track A/B seam; left

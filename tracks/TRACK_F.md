@@ -2,7 +2,7 @@
 
 **Status: built on `track_f`; F-0b threshold session outstanding.** One
 scrolling page: a hero that says what
-ARBITER is, a four-way mission selector, and the existing console parametrised
+ARBITRAS is, a four-way mission selector, and the existing console parametrised
 by mission. Each mission is a different UGV task in a different environment,
 a different attack from the design.md §7 model, and a different meaning of
 "course correct". The §5 contract does not change. Nothing on screen claims
@@ -44,7 +44,7 @@ backend/demo.py, docs/stream_provenance.md; then the four mission files.
    pin and shows only what the vehicle reports (believed ghost, corrected
    pin with its PL ring); a scripted operator drives at half speed when
    nobody is at the controls, labelled as such; outcome panel at the end.
-   ARBITER never commands motion; the human does.
+   ARBITRAS never commands motion; the human does.
 
 2. **Page structure.** The console (`index.html`) is under concurrent
    editing by another session (new 4x4 UGV model, Track E consumers), so
@@ -177,7 +177,7 @@ Half an hour. Do it first and alone; regenerate; re-run `console.replay` and
 the §10 displacement check. Nothing below is built on a stream without it.
 
 **F-0b -- the thresholds pre-date the feature-2 rewrite.**
-`console/arbiter/states.py` (14:06) was fit on the old feature; with F-0a in,
+`console/arbitras/states.py` (14:06) was fit on the old feature; with F-0a in,
 the clean day at 0.643 gives **FSR 4.10 %** (118 of 2,880 epochs, 5 events,
 one false SURRENDERED at 06:57 with 12 satellites excluded). The demo window
 12:00-15:05 is clean-event-free, so demos run meanwhile, but the README's
@@ -202,7 +202,7 @@ its own choice and its cost.
 
 **F-0d -- the DEGRADED advisory misreads `next_best_observation`.** Under a
 GPS drop the field correctly names "G" (readmission recovers the most
-information, §6b), and `console/arbiter/machine.py` prints "Reweight toward
+information, §6b), and `console/arbitras/machine.py` prints "Reweight toward
 G" -- the spoofed constellation. RECON's F-R2 adds a derived
 `geometry.reweight_toward` (argmax over trusted constellations of their own
 rows' information, one determinant each: "E" on 90/90 meaconing epochs) and
@@ -238,7 +238,7 @@ no tile animation. Never a fake tile.
 
 ### Hero (layer 1)
 
-Full viewport, dark. Black nav bar: wordmark `ARBITER` left in the display
+Full viewport, dark. Black nav bar: wordmark `ARBITRAS` left in the display
 face; centre `+ PLATFORM  + MISSIONS  + METHOD  + LIMITS` (in-page anchors:
 hero, selector, console, footer); right `RESET` (reload = hard reset, as
 today).
@@ -281,7 +281,7 @@ README). **Populate it from the F-0a regeneration, not from today's README
 
 ### Selector (layer 2)
 
-Tagline, sans: "Four missions. Four attacks. One arbiter." Then four equal
+Tagline, sans: "Four missions. Four attacks. One arbitras." Then four equal
 columns, `▸ RECON` · `▸ LOGISTICS` · `▸ CASEVAC` · `▸ COMBAT`, each a tile.
 
 **Tiles are live, from ONE renderer.** A single `<canvas>` spans the row;
@@ -439,7 +439,7 @@ keeps its module-level names bound to the logistics mission so
 
 `/mission?name=<name>` (default `logistics`); `/events?mission=<name>` picks
 `mission.stream` unless `--source` was given (tail mode keeps working for
-Track A live). Unknown mission: 404 listing the registry. One `Arbiter` per
+Track A live). Unknown mission: 404 listing the registry. One `Arbitras` per
 connection as today. Optional per-mission `rate_schedule`
 (`[(epoch, eps), ...]`) consumed in `_events` so an onset can play in slow
 motion (LOGISTICS F-L5); captioned as a presentation device.
@@ -537,7 +537,7 @@ once two missions replay end to end.
 
 - The §5 contract and the backend/console boundary. Mission data rides on
   `/mission`, never in the stream.
-- The arbiter's invariants. Thresholds change only through the §10 session
+- The arbitras's invariants. Thresholds change only through the §10 session
   (F-0b), in `states.py`, with provenance.
 - What "measured" means: D and D_c from the stream; everything else framed
   and captioned. The receiver never moved.

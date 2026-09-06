@@ -364,6 +364,6 @@
     };
   }
 
-  window.ARBITER_ENV = window.ARBITER_ENV || {};
-  window.ARBITER_ENV.recon = { id: 'recon', spec: SPEC, build };
+  window.ARBITRAS_ENV = window.ARBITRAS_ENV || {};
+  window.ARBITRAS_ENV.recon = { id: 'recon', spec: SPEC, build };
 })();

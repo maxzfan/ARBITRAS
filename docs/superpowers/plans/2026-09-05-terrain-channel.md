@@ -4,7 +4,7 @@
 
 **Goal:** Add a fifth, non-RF evidence channel — a simulated terrain-class sensor checked against a signed pre-map at the believed position — producing one feature, one map-derived displacement bound, one DEGRADED advisory input and one correction-gate check, off by default and byte-for-byte inert when off.
 
-**Architecture:** New package `backend/terrain/` owns the raster maths (E1), the confusion-matrix simulator (E2) and the per-epoch channel (E3). Existing seams get additive hooks: an optional feature name and weight renormalisation in `backend/detection`, an `extra_checks` hook in `backend/correction`, a `terrain` passthrough plus one advisory sentence in `console/arbiter` (E4). `backend/terrain/validate.py` rescoring existing streams post hoc gives the E5 curves without re-running the solver per sweep point.
+**Architecture:** New package `backend/terrain/` owns the raster maths (E1), the confusion-matrix simulator (E2) and the per-epoch channel (E3). Existing seams get additive hooks: an optional feature name and weight renormalisation in `backend/detection`, an `extra_checks` hook in `backend/correction`, a `terrain` passthrough plus one advisory sentence in `console/arbitras` (E4). `backend/terrain/validate.py` rescoring existing streams post hoc gives the E5 curves without re-running the solver per sweep point.
 
 **Tech Stack:** Python 3.12, numpy, scipy.ndimage (flood fill), matplotlib (rasterising OSM polygons via `matplotlib.path`, plots), `cryptography` (Ed25519 map signature — to be added to `bootstrap.sh`), Overpass API over `urllib` for the map fetch.
 
@@ -1162,11 +1162,11 @@ git commit -m "correction: extra_checks hook so Track E's terrain_consistent ent
 
 ---
 
-### Task 6: Console consumers — arbiter passthrough, DEGRADED advisory, explanation phrase
+### Task 6: Console consumers — arbitras passthrough, DEGRADED advisory, explanation phrase
 
 **Files:**
-- Modify: `console/arbiter/machine.py` (`Decision.terrain`, `_emit`, `step`)
-- Modify: `console/arbiter/explain.py` (`FEATURE_PHRASE`, terrain sentence + claim)
+- Modify: `console/arbitras/machine.py` (`Decision.terrain`, `_emit`, `step`)
+- Modify: `console/arbitras/explain.py` (`FEATURE_PHRASE`, terrain sentence + claim)
 - Test: `console/tests/test_machine.py` (append), `console/tests/test_explain.py` (create if absent; check for an existing explain test file first and append there instead)
 
 **Interfaces:**
@@ -1174,7 +1174,7 @@ git commit -m "correction: extra_checks hook so Track E's terrain_consistent ent
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `console/tests/test_machine.py` (it already imports `Arbiter`, `TrustState`; check for an `epoch(...)` helper and reuse it, else build dicts inline as below):
+Append to `console/tests/test_machine.py` (it already imports `Arbitras`, `TrustState`; check for an `epoch(...)` helper and reuse it, else build dicts inline as below):
 
 ```python
 def _ep(conf, terrain=None, geometry=None):
@@ -1194,28 +1194,28 @@ TERRAIN = {"available": True, "match_likelihood": 0.1,
 
 
 def test_terrain_block_passes_through_and_advises_only_in_degraded():
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(_ep(0.60, TERRAIN, geometry={"next_best_observation": "E"}))
     assert d.state is TrustState.DEGRADED
     assert d.terrain == TERRAIN
     assert "should read water 38 m to the north-east" in d.advisory
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(_ep(0.95, TERRAIN))
     assert d.state is TrustState.NOMINAL and d.advisory is None
-    arb = Arbiter()
+    arb = Arbitras()
     d = arb.step(_ep(0.30, TERRAIN))
     assert d.state is not TrustState.DEGRADED and d.advisory is None
 
 
 def test_sensorless_epoch_has_empty_terrain():
-    assert Arbiter().step(_ep(0.95)).terrain == {}
+    assert Arbitras().step(_ep(0.95)).terrain == {}
 ```
 
 Explain test (new or appended):
 
 ```python
-from console.arbiter.explain import FEATURE_PHRASE, explain, verify
-from console.arbiter.machine import Arbiter
+from console.arbitras.explain import FEATURE_PHRASE, explain, verify
+from console.arbitras.machine import Arbitras
 
 
 def test_terrain_mismatch_has_an_operator_phrase():
@@ -1229,7 +1229,7 @@ def test_terrain_disagreement_is_named_and_verifiable():
           "terrain": {"available": True, "match_likelihood": 0.12,
                       "sensed": {"class": "grass", "p": {"grass": 1.0}},
                       "map_at_position": {"class": "paved", "p": {"paved": 1.0}}}}
-    d = Arbiter().step(ep)
+    d = Arbitras().step(ep)
     ex = explain(d)
     assert ex["headline"].startswith(FEATURE_PHRASE["terrain_mismatch"].capitalize())
     assert "reads grass; the map has paved" in ex["detail"]
@@ -1244,7 +1244,7 @@ Expected: AttributeError `Decision has no attribute terrain` / assertion on phra
 
 - [ ] **Step 3: Implement**
 
-`console/arbiter/machine.py`:
+`console/arbitras/machine.py`:
 - `Decision`: add `terrain: dict = field(default_factory=dict)` after `geometry`.
 - Add helper near the top:
 
@@ -1271,7 +1271,7 @@ def compass(bearing_deg: float) -> str:
   and `terrain=terrain or {}` in the `Decision(...)` constructor.
 - `step()`: the stale path passes `{}` for terrain; the live path passes `epoch.get("terrain") or {}`.
 
-`console/arbiter/explain.py`:
+`console/arbitras/explain.py`:
 - `FEATURE_PHRASE["terrain_mismatch"] = "the ground under the vehicle does not match the map at the reported position"`.
 - After the geometry paragraph, before the advisory:
 
@@ -1295,7 +1295,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add console/arbiter/machine.py console/arbiter/explain.py console/tests
+git add console/arbitras/machine.py console/arbitras/explain.py console/tests
 git commit -m "console: Track E consumers — terrain passthrough, DEGRADED boundary advisory, explanation phrase with a verifiable claim"
 ```
 
@@ -1634,7 +1634,7 @@ def fetch(lat: float, lon: float, radius_m: float, cache_path) -> list[dict]:
         return json.loads(cache_path.read_text())["elements"]
     data = urllib.parse.urlencode({"data": overpass_query(lat, lon, radius_m)}).encode()
     req = urllib.request.Request(OVERPASS, data=data,
-                                 headers={"User-Agent": "ARBITER-terrain-fetch/0.1"})
+                                 headers={"User-Agent": "ARBITRAS-terrain-fetch/0.1"})
     with urllib.request.urlopen(req, timeout=120) as r:
         payload = json.loads(r.read().decode())
     payload["fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -1780,14 +1780,14 @@ Append to `tests/test_stream.py` (or wherever the fixture→replay round-trip te
 ```python
 def test_fixture_terrain_block_round_trips_with_zero_verifier_fires():
     import json
-    from console.arbiter.explain import explain, verify
-    from console.arbiter.machine import Arbiter
+    from console.arbitras.explain import explain, verify
+    from console.arbitras.machine import Arbitras
     ep = json.loads(open("fixtures/epoch.json").read())
     assert ep["terrain"]["available"] is True
     assert ep["geometry"]["bound_source"] in ("residual", "terrain")
     assert "terrain_mismatch" in ep["features"]
     assert ep["geometry"]["correction"]["checks"]["terrain_consistent"] in (True, False, None)
-    d = Arbiter().step(ep)
+    d = Arbitras().step(ep)
     ok, failures = verify(explain(d), ep)
     assert ok, failures
 ```
@@ -2067,7 +2067,7 @@ def _state_names(decisions) -> list[str]:
 
 
 def sensor_quality_curve(clean, carry, rmap, diags, windows, sigma_uere) -> list[dict]:
-    from console.arbiter.states import THRESHOLDS, TrustState
+    from console.arbitras.states import THRESHOLDS, TrustState
     nominal = THRESHOLDS[TrustState.NOMINAL]
     w = Weights.equal(FEATURE_NAMES + OPTIONAL_FEATURE_NAMES)
     attack = [i for i, r in enumerate(carry) if (r.get("_attack") or {}).get("stage") in ("CAPTURE", "LOCKED", "WALK")]
@@ -2299,6 +2299,6 @@ git commit -m "docs: Track E resolution, README roadmap section for the simulate
 
 ## Self-review
 
-**Spec coverage.** Map maths (steps 1, 5, 7, 8) → Task 1. Sensor → Task 2. Feature, calibration, bound rule, gate check (steps 3, 4, 6) → Tasks 3–5. Contract extension and byte-identity → Tasks 3, 9. Consumers (arbiter, explanation) → Task 6. Signed map → Task 7. Real raster and the cut rule → Task 8. Provenance rows → Task 9. Measurement plan items 1–4 → Task 10; item 5 (map-resolution sweep) is covered by re-running Task 8 with `--cell 10 --out data/terrain_usn8_c10.npz` and Task 10 with `--map` pointing at it — stated in Task 11's README section as done or not done. README limitations → Task 11. Web console rendering is not in TRACK_E.md's E1–E5 and is not planned here.
+**Spec coverage.** Map maths (steps 1, 5, 7, 8) → Task 1. Sensor → Task 2. Feature, calibration, bound rule, gate check (steps 3, 4, 6) → Tasks 3–5. Contract extension and byte-identity → Tasks 3, 9. Consumers (arbitras, explanation) → Task 6. Signed map → Task 7. Real raster and the cut rule → Task 8. Provenance rows → Task 9. Measurement plan items 1–4 → Task 10; item 5 (map-resolution sweep) is covered by re-running Task 8 with `--cell 10 --out data/terrain_usn8_c10.npz` and Task 10 with `--map` pointing at it — stated in Task 11's README section as done or not done. README limitations → Task 11. Web console rendering is not in TRACK_E.md's E1–E5 and is not planned here.
 
 **Type consistency.** `TerrainChannel.step(believed_lla: dict|None, hdop: float|None)` used identically in Tasks 4, 9, 10; `gate_check(corrected_lla)` bound as `extra_checks` in Task 9 matches Task 5's `Callable[[dict|None], dict]`; `apply_bound(geom, block)` returns the same dict object in Tasks 4, 9, 10; `Weights.equal(names)` and `OPTIONAL_FEATURE_NAMES` from Task 3 used in Tasks 9, 10; `record(..., terrain=)` from Task 3 used in Task 9; `load_verified(path, pub)` from Task 7 used in Tasks 9, 10.

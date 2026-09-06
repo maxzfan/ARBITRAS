@@ -1,11 +1,11 @@
-# ARBITER
+# ARBITRAS
 
 **A**uthenticated **R**anging, **B**ounded **I**ntegrity, **T**iered **E**xecution **R**ights.
 
 Spoof detection is solved. What happens in the ninety seconds after detection
 is not.
 
-ARBITER sits between a GNSS receiver and an autonomy stack and continuously
+ARBITRAS sits between a GNSS receiver and an autonomy stack and continuously
 scores positional trust, then degrades the vehicle's authority in stages —
 full autonomy, coast on inertial, finish the leg, hold position — rather than
 making one binary trust decision.
@@ -48,7 +48,7 @@ flagged, and it was never beaten while the system still trusted the signal
 ![empirical vs bound](docs/plots/displacement_empirical_vs_bound.png)
 
 **Continuity — false surrender rate: 0.0000** (0 of 2,880 clean epochs below
-NOMINAL through the arbiter, hysteresis included). Reported per convention as
+NOMINAL through the arbitras, hysteresis included). Reported per convention as
 a distribution over 1,000 Dirichlet draws of the four feature weights and the
 feature/geometry blend, never a point: raw-confidence FSR min/median/max
 **0.000 / 0.000 / 0.282**; arbitrated FSR median **0.0000**, max 0.460 in the
@@ -215,15 +215,15 @@ sits at the misread level); a windowed check is the next iteration.
 `out/*.jsonl` (regenerated 21:08 today) carry `pseudorange_residual = 0.0` on
 every epoch — `backend/demo.py` scores features without the post-fit residual
 panel that `backend/replay.py` supplies — so no satellite is ever excluded,
-the arbiter stays NOMINAL through the carry-off, and the §10 check reads
+the arbitras stays NOMINAL through the carry-off, and the §10 check reads
 **2,792 / 2,880** against the residual bound with or without the terrain
 channel. The results section above predates those streams. Terrain neither
 causes nor fixes this; the terrain pipeline inherits it.
 
-## Missions (Track F) — one arbiter, four theatres
+## Missions (Track F) — one arbitras, four theatres
 
 `python -m console.server` now opens a routing page at `/`: a hero that
-says what ARBITER is (every headline number computed from the streams on
+says what ARBITRAS is (every headline number computed from the streams on
 disk at server start, with its source), a four-way mission selector whose
 tiles render each mission's own environment from one WebGL renderer, and
 the console itself at `/console?mission=<name>` in the third section.
@@ -235,7 +235,7 @@ Scope, decisions and measured numbers: `tracks/TRACK_F.md` and the four
 | **LOGISTICS** | Intermediate carry-off, cross-corridor, six GPS SVs, 0.2 m/s | **Operator takeover** without a trusted fix: corridor breach withdraws autonomy, a person drives the convoy (keyboard / gamepad / touch; a scripted stand-in when nobody is at the controls, labelled), hand-back at DEGRADED | DEGRADED 65, SURRENDERED 67, staircase 180/190/200, credential lapse 390 |
 | **RECON** | Repeater at a 300 m standoff re-radiating all GPS (offset meaconing) | **Automatic, stationary deduction**: GPS is the odd constellation out and is dropped wholesale; the scout keeps a Galileo fix; at an observation point the drag of the believed fix while stationary is the spoof and points at the emitter | 12 GPS out at onset, information ratio 0.80, Galileo fix within 1 m with PL 7.4 m while the believed fix is 118 m out; stationary deduction: anchor agrees with the Galileo fix to 0.46 m median, emitter bearing 85° (90° injected), path delay 259 m (300 m injected); nothing excluded once the repeater stops |
 | **CASEVAC** | Carrier-coherent carry-off along the route toward the collection point | **Automatic, terrain-referenced**: Track E's signed pre-map and simulated class sensor; each class boundary the sensor crosses pins arc length along the known route | SURRENDERED 62 (code−carrier blind, residual + geometry catch it), staircase 150/160/170; terrain fix: 7 boundary pins, fix error 2.25 m median after the first pin, believed pin claims the CCP at 84, terrain confirms arrival at 264 (0.5 m); sensor SIMULATED |
-| **COMBAT** | Crude 15 dB step on all GPS, 250 m commanded (98 m achieved: Galileo anchors the joint fix) | **Operator takeover on the corrected fix**: autonomy withdrawn (three features saturate), the operator drives on the Galileo fix ARBITER stands behind; fire-control input marked conditional | SURRENDERED 60 (two states skipped), 12 GPS out, PL 7.4 m, staircase 86/96/106 |
+| **COMBAT** | Crude 15 dB step on all GPS, 250 m commanded (98 m achieved: Galileo anchors the joint fix) | **Operator takeover on the corrected fix**: autonomy withdrawn (three features saturate), the operator drives on the Galileo fix ARBITRAS stands behind; fire-control input marked conditional | SURRENDERED 60 (two states skipped), 12 GPS out, PL 7.4 m, staircase 86/96/106 |
 
 Every mission stream is real USN8 observables with the attack injected in
 the measurement domain: `python -m backend.missions --mission all`
@@ -287,7 +287,7 @@ without a reason.
    deep-attack quartile reads SURRENDERED.
 
 The provenance string is stamped into every emitted decision
-(`console/arbiter/states.py` is the single swap point). The Dirichlet sweep
+(`console/arbitras/states.py` is the single swap point). The Dirichlet sweep
 above is the answer to "you picked the weights that make this work":
 arXiv 2607.05415 showed composite PNT scores flip winners in up to 22% of
 re-weighting draws; we report the whole distribution and the exact fraction
@@ -391,7 +391,7 @@ Stated properly, not softened:
 
 The Stoics distinguish the impression (*phantasia*) from the assent
 (*sunkatathesis*). A spoofed vehicle's error is not in perceiving — the
-spoofed signal is genuinely there — but in assenting to it. ARBITER is a
+spoofed signal is genuinely there — but in assenting to it. ARBITRAS is a
 discipline of assent: perception continues under attack; authority is what
 gets withdrawn. (Epictetus, tr. Carter 1758; Marcus Aurelius, tr. Long
 1877 — both public domain.)

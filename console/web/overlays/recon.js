@@ -171,6 +171,6 @@
     return {epoch, tick, hud, status, dispose};
   }
 
-  window.ARBITER_OVERLAY = window.ARBITER_OVERLAY || {};
-  window.ARBITER_OVERLAY.recon = {id: 'recon', mount};
+  window.ARBITRAS_OVERLAY = window.ARBITRAS_OVERLAY || {};
+  window.ARBITRAS_OVERLAY.recon = {id: 'recon', mount};
 })();

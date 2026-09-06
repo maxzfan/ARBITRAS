@@ -5,7 +5,7 @@ You own the thresholds mapping confidence -> state, and what to do with
 `geometry.next_best_observation`.
 
 ## Setup (~10 min, unattended)
-    git clone https://github.com/maxzfan/ARBITER.git && cd ARBITER
+    git clone https://github.com/maxzfan/ARBITRAS.git && cd ARBITRAS
     bash bootstrap.sh
     source .venv/bin/activate
 
@@ -63,19 +63,19 @@ two-hour video block into three.
     python -m pytest console/tests -q       # 23 invariant tests
 
 ## Layout
-    console/arbiter/states.py    thresholds -- THE SINGLE SWAP POINT for 21:00
-    console/arbiter/machine.py   the arbiter; 5 invariants; pure and importable
-    console/arbiter/explain.py   templated explanation + the claim verifier
+    console/arbitras/states.py    thresholds -- THE SINGLE SWAP POINT for 21:00
+    console/arbitras/machine.py   the arbitras; 5 invariants; pure and importable
+    console/arbitras/explain.py   templated explanation + the claim verifier
     console/replay.py            headless replay; arbitrate() + false_surrender_rate()
     console/server.py            tails/replays JSONL, arbitrates, serves SSE
     console/web/index.html       React console (vendored React -- runs offline)
     console/fixture_stream.py    SYNTHETIC dev stream. Not data. Stamped _synthetic.
 
 ## Decisions made, and why
-- **The state machine is Python, not JS.** §10's FSR needs the arbiter replayed
+- **The state machine is Python, not JS.** §10's FSR needs the arbitras replayed
   over 2,880 epochs per Dirichlet draw. Track C imports `console.replay`. If the
-  arbiter lived in React, FSR would be uncomputable.
-- **Each SSE connection gets a fresh Arbiter and replays from epoch 0**, so a
+  arbitras lived in React, FSR would be uncomputable.
+- **Each SSE connection gets a fresh Arbitras and replays from epoch 0**, so a
   browser reload IS the hard reset (§11a, "under five seconds"). Press `r`.
   Nothing restarts server-side between takes.
 - **`?layer=off` serves video beat 2** from the same stream: arbitration is
@@ -117,7 +117,7 @@ Epoch 445 is video beat 4: clean sky, confidence 0.93, stands down anyway.
 - [ ] `EMIT_LATERAL_ADVISORY` in machine.py is the cut-order item 3 switch.
 
 ## FIXED — tail-mode staleness was tick-based (2026-09-05 11:1x)
-`follow()` yielded None on every 0.2 s poll timeout. The arbiter treats each
+`follow()` yielded None on every 0.2 s poll timeout. The arbitras treats each
 None as a missing epoch and steps authority down after STALE_GRACE_TICKS of
 them, so **a healthy producer emitting slower than the poll interval was driven
 to SURRENDERED on clean data.** Appending 3 epochs produced 29 events, 17 of
@@ -127,9 +127,9 @@ Staleness is now wall-clock against the expected epoch cadence: one None per
 `--stale-after` window (default 2.0 s), and tail mode is paced by the producer
 rather than by `--rate`. Same test now yields 4 events, all justified.
 
-**The wall clock lives in `follow()`, not in `Arbiter`.** The arbiter stays pure
+**The wall clock lives in `follow()`, not in `Arbitras`.** The arbitras stays pure
 and deterministic so Track C's Dirichlet sweep replays it identically on every
-draw. Putting a timeout inside the arbiter would have made FSR non-reproducible.
+draw. Putting a timeout inside the arbitras would have made FSR non-reproducible.
 
 **At the 18:30 checkpoint: set `--stale-after` to ~3x Track A's actual emit
 interval.** The 2.0 s default is a guess about a producer that does not exist yet.

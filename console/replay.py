@@ -1,9 +1,9 @@
-"""Headless replay of the arbiter over a contract stream.
+"""Headless replay of the arbitras over a contract stream.
 
     python -m console.replay out/fixture_stream.jsonl
 
 This is the interface Track C's Dirichlet sweep (design.md §10) calls: it needs
-to replay the arbiter over all 2,880 epochs once per weight draw, with no
+to replay the arbitras over all 2,880 epochs once per weight draw, with no
 server, no browser and no I/O per epoch.
 
     from console.replay import arbitrate, false_surrender_rate
@@ -16,8 +16,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable, Optional
 
-from console.arbiter.machine import Arbiter
-from console.arbiter.states import TrustState
+from console.arbitras.machine import Arbitras
+from console.arbitras.states import TrustState
 
 
 def load(path) -> list:
@@ -35,7 +35,7 @@ def load(path) -> list:
 
 
 def arbitrate(epochs: Iterable) -> list:
-    arb = Arbiter()
+    arb = Arbitras()
     return [arb.step(e) for e in epochs]
 
 

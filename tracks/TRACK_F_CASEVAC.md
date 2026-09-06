@@ -19,7 +19,7 @@ WLS, extractor fed the post-fit residual as `backend/replay.py` does, `CrossCons
 **Shared finding, blocks every mission, not only this one.** `backend/demo.py` calls
 `fx.step(ep)` with no `resid=` and `fit(clean, floor)` with no `resid_panel`, so in every
 demo-generated stream feature 2 (`pseudorange_residual`, the post-fit residual since commit
-76293c9) is 0.000 on every epoch, `distrusted()` excludes nothing, and the arbiter never leaves
+76293c9) is 0.000 on every epoch, `distrusted()` excludes nothing, and the arbitras never leaves
 NOMINAL on signal: tonight's `out/demo.jsonl` (21:08) has attack-window confidence min 0.774 /
 p50 0.802 and its only transition is the credential force at epoch 390 (`python -m
 console.replay out/demo.jsonl`). Re-run on my slice with the demo wiring: TTA = None, 90/90
@@ -49,7 +49,7 @@ one along the route, so the corridor overlay never fires (lateral offset stays ~
 unprotected stack halts 240 m short in the open, reporting success.
 
 The operator's question is therefore two questions: *may the vehicle keep driving on this
-position*, and, at the end, *may it declare arrival and stop*. ARBITER answers the first with
+position*, and, at the end, *may it declare arrival and stop*. ARBITRAS answers the first with
 the trust state and the second with the Track D gate: "at CCP" is a claim about the corrected
 fix and its protection level, never about the believed pin. Advisory only, never a motion
 command (design.md §8).
@@ -91,7 +91,7 @@ displacement 0.0 m instead of 7.6 m; feature 3 0.71 at +1 vs 0.29; attack-window
 p50 0.178 vs 0.199. Exclusions, displacement, correction gate and recovery are identical.
 Coherence costs the detector exactly one epoch (30 s of file time) and 7.6 m.
 
-### What ARBITER sees
+### What ARBITRAS sees
 State trajectory, epochs from onset (k=1 demo distrust rule, current thresholds 0.643 /
 0.548 / 0.518; VERIFIED on the 60-epoch mission run):
 - +0 CAPTURE: conf 0.865, NOMINAL; correction_ok true, PL 4.56 m.
@@ -229,7 +229,7 @@ Provenance rows to add to `docs/stream_provenance.md` (casevac section):
   scene={"palette":"dusk","ambience":"medevac"})`. Attack card: name "Coherent carry-off,
   along-track"; mechanism "six GPS satellites captured at +2 dB, believed position walked 1 m/s
   along the route heading; code and carrier stay coherent"; watch "post-fit residual, distrusted
-  count, information ratio, protection level"; ARBITER does "surrenders at +2, withdraws the
+  count, information ratio, protection level"; ARBITRAS does "surrenders at +2, withdraws the
   corrected fix, refuses to confirm arrival until the gate re-grants".
 - Props rendering: `EnvScene` gains a `props` pass — ring (`radius_m`) as a flat torus on the
   terrain, red-cross panel + litter mesh at `ccp`/`litter`, a tent primitive at `aid_station`;

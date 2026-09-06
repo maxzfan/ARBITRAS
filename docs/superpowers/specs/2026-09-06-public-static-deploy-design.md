@@ -41,7 +41,7 @@ Pages behind our own domain.
 
 **Why this is not a mock.** `Arbitras` is pure and deterministic in
 `(stream, layer)` — a property Track C already depends on, since its
-Dirichlet sweep replays the arbiter identically on every draw. The
+Dirichlet sweep replays the arbitras identically on every draw. The
 pre-rendered NDJSON is therefore byte-identical to what the live server
 would have pushed, and §5 of this document makes the build prove it rather
 than assert it.
@@ -67,7 +67,7 @@ session is holding. Worth doing in a calmer week; §4 keeps the shim small
 enough to delete when that happens.
 
 **Port `Arbitras` to JavaScript.** Rejected outright. It creates a second
-implementation of the arbiter, when the existence of exactly one is what
+implementation of the arbitras, when the existence of exactly one is what
 makes the Track C guarantee meaningful.
 
 ## 3. Build output and path map
@@ -155,7 +155,7 @@ checks it.
 1. **Byte-identity.** For each of the ten stream/layer files, replay through
    `console.server.decide()` a second time and diff against what was
    written. Any drift fails the build. This is the check that keeps the
-   determinism argument honest as the arbiter changes.
+   determinism argument honest as the arbitras changes.
 2. **MIME probe.** After deploy, `HEAD` one file per asset class against the
    live URL: `.hdr` must arrive as an opaque byte stream for `RGBELoader`,
    and `draco_decoder.wasm` as `application/wasm`. Both fail *silently* in

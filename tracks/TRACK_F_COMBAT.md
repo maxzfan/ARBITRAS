@@ -8,7 +8,7 @@ to this mission and are fixed once, page-wide, before it is built. Environment
 (terrain, sky, ground, vegetation) is assigned in TRACK_F.md §2 and overrides
 the palette hints below.
 
-## COMBAT — armed recon: a crude 15 dB step throws the fix 98 m past a phase line, ARBITER holds; the operator then withdraws authority under a clean sky
+## COMBAT — armed recon: a crude 15 dB step throws the fix 98 m past a phase line, ARBITRAS holds; the operator then withdraws authority under a clean sky
 
 Experiment: `scratchpad/combat_exp.py` (+ `clean_wired_fsr.py`), USN8 2026-08-20, slice
 [1440,1700) = 260 epochs 12:00:00→14:09:30, onset 12:30:00 (idx 60), 20-epoch attack, five
@@ -49,7 +49,7 @@ crossing a phase line — the control measure that coordinates fires and manoeuv
 it. A 98 m error is a wrong grid and a false "crossed PL AMBER" report.
 
 The operator's question is PROJECT.md §1's, sharpened: *may this vehicle's position feed
-fire control right now, and who says so?* ARBITER answers with two independent inputs
+fire control right now, and who says so?* ARBITRAS answers with two independent inputs
 (PROJECT.md §2, Claim 1): a signal-derived confidence and a cryptographic credential.
 COMBAT alone shows the credential dominate in the direction no signal can override — the
 operator withdraws authorisation under a clean sky and the vehicle holds anyway.
@@ -106,7 +106,7 @@ reads 0.61 because `aggregate()` averages over the 12 tracked GPS) — the "15 d
 ±0.5 dB floor" signature — and it is the literal §7 "all SVs at once" for a spoofer that
 generates a constellation. Fall back to top-6 only if RECON takes the all-GPS step.
 
-### What ARBITER sees
+### What ARBITRAS sees
 Feature-2-wired pipeline, all_gps (top-6 in brackets where different). Offsets from onset.
 
 | off | stage | \|D\| m | conf | cn0 | resid | cmc | xc | IR | excl | bound | corr_ok | state |
@@ -304,6 +304,6 @@ COMBAT cannot be shown at all: mark the tile "not built".
   0.643 is 4.10 % with one false surrender (06:57). Re-measure per §10 before quoting.
 - REVOKED is scripted. TESLA has no revocation message; the modelled mechanism is an
   authenticated withdrawal assertion verified after the disclosure lag — T1 protocol
-  logic, not built. The demo shows the arbiter's response, not the protocol.
+  logic, not built. The demo shows the arbitras's response, not the protocol.
 - Phase lines, objective, hold and halting are a presentation frame; the receiver never
   moved; the TLE-category alert-limit provenance is doctrine from memory, unverified.

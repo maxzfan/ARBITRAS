@@ -12,7 +12,7 @@
  * the mission's frame conversion (a pure conversion), heights from heightAt.
  */
 (function () {
-  window.ARBITER_OVERLAY = window.ARBITER_OVERLAY || {};
+  window.ARBITRAS_OVERLAY = window.ARBITRAS_OVERLAY || {};
 
   const PATH = 'terrain.route_fix';
   const fmt = (v, d = 0) => (v == null || !isFinite(v)) ? '—' : (Math.abs(v) < 0.05 && d === 0 ? '0' : v.toFixed(d));
@@ -180,5 +180,5 @@
     return { epoch, tick, hud, status, dispose };
   }
 
-  window.ARBITER_OVERLAY.casevac = { id: 'casevac', mount };
+  window.ARBITRAS_OVERLAY.casevac = { id: 'casevac', mount };
 })();

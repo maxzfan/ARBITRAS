@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Serve the ARBITER mission page publicly from this machine through a
+# Serve the ARBITRAS mission page publicly from this machine through a
 # Cloudflare quick tunnel (no account, random *.trycloudflare.com URL).
 #
 #     bash deploy/public.sh            # prints the public URL; Ctrl-C stops everything

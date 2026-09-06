@@ -39,7 +39,7 @@ State timeline: `python -m console.replay out/recon.jsonl`.
 
 Added by `backend/missions_recon.py` (RECON's post-pass, `register_augment`);
 measured on this stream by `python -m backend.missions_recon`. The anchor is the
-last NOMINAL fix (arbiter transitions: 60 NOMINAL→SURRENDERED, 84 SURRENDERED→RESTRICTED, 94 RESTRICTED→DEGRADED, 104 DEGRADED→NOMINAL) carried by odometry -- the route in
+last NOMINAL fix (arbitras transitions: 60 NOMINAL→SURRENDERED, 84 SURRENDERED→RESTRICTED, 94 RESTRICTED→DEGRADED, 104 DEGRADED→NOMINAL) carried by odometry -- the route in
 the presentation frame, zero in the stream frame -- and the anchor cross-check
 and the Galileo re-solve are independent: one is RF-free odometry from a fix
 taken before the attack, the other the trusted-subset solve of each epoch's

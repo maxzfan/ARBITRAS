@@ -11,7 +11,7 @@ import pytest
 from backend.demo import (ATTACK_EPOCHS, DISCLOSURE_LAG_INTERVALS, LEGIBLE_EPOCHS,
                           PENDING_EPOCHS, POST_EXPIRED_EPOCHS, POST_VALID_EPOCHS,
                           PRE_EPOCHS, T_INT_EPOCHS)
-from console.arbiter.states import TrustState
+from console.arbitras.states import TrustState
 from console.replay import arbitrate
 
 DEMO = Path("out/demo.jsonl")
