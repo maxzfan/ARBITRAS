@@ -168,7 +168,7 @@ def terrain_map(path: Path = Path("data/terrain_usn8.npz")) -> dict | None:
     return t
 
 
-def decide(arb: Arbitras, epoch, layer_on: bool) -> dict:
+def decide(arb: Arbitras, epoch, layer_on: bool, guide=None) -> dict:
     """One arbitration + explanation + verification, ready for the wire."""
     d = arb.step(epoch)
     payload = d.to_dict()
