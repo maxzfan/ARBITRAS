@@ -30,7 +30,7 @@ SCRIPTED, `_attack` the injector's truth log). Differences for this stream:
 | confidence lead-in min | 0.8224 |
 | confidence attack p50 / p95 | 0.523 / 0.598 |
 | excluded satellites during attack (median / max) | 12.0 / 12 |
-| correction_ok during attack / after | 30/30 / 390/420 |
+| correction_ok during attack / after | 30/30 / 420/420 |
 
 Attack epochs by stage: {'WALK': 29, 'CAPTURE': 1}.
 State timeline: `python -m console.replay out/recon.jsonl`.
