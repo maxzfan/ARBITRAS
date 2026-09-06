@@ -208,6 +208,11 @@ def decide(arb: Arbiter, epoch, layer_on: bool) -> dict:
         payload["geometry_divergence"] = None
         payload["implied_state"] = None
         payload["reason"] = "layer_off"
+        # Track E: the terrain verdict and the DEGRADED advisory built on it
+        # are the layer's output too (tracks/TRACK_E.md); off means off.
+        payload["terrain"] = {}
+        payload["advisory"] = None
+        payload["pursuing"] = None
 
     payload["layer_on"] = layer_on
     payload["thresholds"] = {s.name: v for s, v in THRESHOLDS.items()}

@@ -114,6 +114,13 @@
          border:1px solid var(--accent);color:var(--accent);letter-spacing:.04em}
   .sv span.none{border-color:var(--line);color:var(--faint)}
   .c-drop .lbl{white-space:normal;line-height:1.35}
+  /* Track E terrain cell: present only when the epoch carries a terrain block. */
+  .c-terrain{flex:0 0 196px;min-width:196px}
+  .c-terrain .kv b{max-width:96px;overflow:hidden;text-overflow:ellipsis}
+  .c-terrain .kv{margin:3px 0}
+  .frows.five{gap:4px}
+  .kv b.hot,.kv span.hot{color:var(--accent)}
+  .boundlbl .bsrc{display:block;color:var(--faint);margin-top:2px;letter-spacing:.08em}
 
   /* ---- stage: map pane + sky pane ------------------------------------ */
   .stage{flex:1;position:relative;min-height:0;overflow:hidden;display:flex}
@@ -349,6 +356,12 @@ const FEATURE_LABEL = {
   cn0_anomaly:'C/N0 anomaly', pseudorange_residual:'range residual',
   code_carrier_divergence:'code−carrier', cross_constellation:'cross-constel',
 };
+// Track E (tracks/TRACK_E.md): the fifth feature is shown only when the epoch
+// carries a terrain block, i.e. the channel is on for that mission. The sensor
+// behind it is SIMULATED and the label says so.
+const TERRAIN_FEATURE = {terrain_mismatch:'terrain · sim'};
+const COMPASS8 = ['N','NE','E','SE','S','SW','W','NW'];
+const compass8 = b => (b == null || !isFinite(b)) ? '—' : COMPASS8[Math.round((((b % 360) + 360) % 360) / 45) % 8];
 const niceStep = s => {
   const p = Math.pow(10, Math.floor(Math.log10(s))), n = s / p;
   return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * p;
@@ -1732,18 +1745,22 @@ function Confidence({conf, credential, thresholds, state}) {
     </div>`;
 }
 
-function Features({features}) {
+function Features({features, terrain}) {
   // Rows are always rendered so the strip height never depends on content.
   // CLAUDE.md: the composite is never shown without these four alongside it.
+  // Track E adds a fifth row while the epoch carries a terrain block; its value
+  // reads — on epochs the channel could not score (fix off the map), never a
+  // stale number.
+  const labels = terrain && terrain.available ? {...FEATURE_LABEL, ...TERRAIN_FEATURE} : FEATURE_LABEL;
   return html`
     <div className="cell c-feat">
       <div className="lbl">Which signal diverged</div>
-      <div className="frows">
-        ${Object.keys(FEATURE_LABEL).map(k => {
+      <div className=${'frows' + (Object.keys(labels).length > 4 ? ' five' : '')}>
+        ${Object.keys(labels).map(k => {
           const v = features && typeof features[k] === 'number' ? features[k] : null;
           return html`
             <div className="frow" key=${k}>
-              <div className="n">${FEATURE_LABEL[k]}</div>
+              <div className="n" title=${'features.' + k}>${labels[k]}</div>
               <div className="fb"><span style=${{
                 width: v == null ? '0%' : (v*100).toFixed(1)+'%',
                 background: v != null && v > .45 ? 'var(--accent)' : 'var(--faint)'}}></span></div>
@@ -1754,17 +1771,28 @@ function Features({features}) {
     </div>`;
 }
 
-function Geometry({geometry, divergence, tracked}) {
+function Geometry({geometry, divergence, tracked, terrain}) {
   const g = geometry || {};
   const drift = divergence && divergence.ratio_delta != null ? divergence.ratio_delta : null;
+  // Track E: displacement_bound_m = min(residual bound, map extent) and
+  // geometry.bound_source names the binding channel. The big number keeps its
+  // meaning; both bounds are shown and the binding one is named under it.
+  const tOn = !!(terrain && terrain.available);
+  const src = g.bound_source || 'residual';
+  const otherV = src === 'terrain' ? g.residual_bound_m : (terrain || {}).consistent_extent_m;
+  const otherK = src === 'terrain' ? 'residual' : 'map extent';
   return html`
     <div className="cell c-geom">
       <div className="lbl">Trusted geometry</div>
       <div className="geo">
         <div className="boundwrap">
-          <div className=${'bound' + (g.displacement_bound_m != null ? '' : ' none')}>
+          <div className=${'bound' + (g.displacement_bound_m != null ? '' : ' none')}
+               title=${tOn ? 'geometry.displacement_bound_m · bound_source ' + src : 'geometry.displacement_bound_m'}>
             ${g.displacement_bound_m != null ? g.displacement_bound_m.toFixed(0) : '—'}</div>
-          <div className="boundlbl">m displacement bound</div>
+          <div className="boundlbl">m displacement bound${tOn && html`
+            <span className="bsrc" title="geometry.bound_source">from ${src === 'terrain' ? 'map extent' : 'residual'}</span>
+            <span className="bsrc" title=${src === 'terrain' ? 'geometry.residual_bound_m' : 'terrain.consistent_extent_m'}>
+              ${otherK} ${otherV != null ? otherV.toFixed(0) + ' m' : '—'}</span>`}</div>
         </div>
         <div className="geokv">
           <div className="kv"><span>information ratio</span>
@@ -1775,6 +1803,44 @@ function Geometry({geometry, divergence, tracked}) {
           <div className="kv"><span>drift from last trusted</span>
             <b>${drift != null ? drift.toFixed(3) : '—'}</b></div>
         </div>
+      </div>
+    </div>`;
+}
+
+function TerrainCell({terrain, geometry, state}) {
+  // Track E (tracks/TRACK_E.md): the terrain channel's readout. Rendered only
+  // while the epoch carries a block; the console renders and never computes.
+  // Every value carries its contract path in the tooltip. The sensor is
+  // SIMULATED and the title says so; nearest_boundary is a prediction the
+  // mission can test ("pursue" in DEGRADED), never a motion command. The
+  // sensor sits at the receiver (static, the antenna); the map is read at the
+  // believed fix -- the two disagreeing is the detection.
+  if (!terrain || !terrain.available) return null;
+  const t = terrain;
+  const sensed = t.sensed && t.sensed.class, mapped = t.map_at_position && t.map_at_position.class;
+  const disagree = !!(sensed && mapped && sensed !== mapped);
+  const L = t.match_likelihood, nb = t.nearest_boundary;
+  const chk = (((geometry || {}).correction || {}).checks || {}).terrain_consistent;
+  const pursue = state === 'DEGRADED' && !!nb;
+  const src = (t.sensor && t.sensor.source) || 'simulated';
+  const signed = !!(t.map && t.map.signed);
+  const mapTitle = t.map ? `terrain.map · ${t.map.id} · ${t.map.cell_m} m cells · ${signed ? 'Ed25519 signed' : 'UNSIGNED'}` : 'terrain.map';
+  return html`
+    <div className="cell c-terrain">
+      <div className="lbl" title=${'terrain.sensor.source = ' + src}>Terrain · ${src}</div>
+      <div className="geokv">
+        <div className="kv"><span>sensed</span>
+          <b className=${disagree ? 'hot' : ''} title="terrain.sensed.class (sensor at the receiver)">${sensed || '—'}</b></div>
+        <div className="kv"><span>map at fix</span>
+          <b className=${disagree ? 'hot' : ''} title="terrain.map_at_position.class (pre-map at the believed fix)">${mapped || '—'}</b></div>
+        <div className="kv"><span>match L</span>
+          <b title="terrain.match_likelihood">${L != null ? L.toFixed(2) : '—'}</b></div>
+        <div className="kv"><span className=${pursue ? 'hot' : ''}
+             title="terrain.nearest_boundary: if the reported position is right, the sensor should read this class at this distance and bearing. DEGRADED pursues it (advisory only, never a motion command).">
+            ${nb ? (pursue ? 'test ' : 'next ') + nb.distance_m.toFixed(0) + ' m ' + compass8(nb.bearing_deg) : 'next boundary'}</span>
+          <b className=${pursue ? 'hot' : ''} title="terrain.nearest_boundary.class_beyond">${nb ? nb.class_beyond : '—'}</b></div>
+        <div className="kv"><span>${signed ? 'fix on signed map' : 'fix on map'}</span>
+          <b title=${'geometry.correction.checks.terrain_consistent · ' + mapTitle}>${chk === true ? 'yes' : chk === false ? 'NO' : '—'}</b></div>
       </div>
     </div>`;
 }
@@ -1883,7 +1949,7 @@ function App() {
   // must move on the epoch it happens: trust state, credential, layer badge,
   // banners, explanation, and the 3D scene (which lerps between epochs and
   // needs every one). `s` is the same object sampled at DISPLAY_HZ for the
-  // digits, so the composite confidence, the four sub-scores, the geometry
+  // digits, so the composite confidence, the sub-scores, the geometry
   // block, the dropped set and the HUD counts are always read from ONE epoch
   // (never mixed) and hold still long enough to be read. `s` trails `d` by at
   // most one display interval, except on a state/credential/layer change,
@@ -1938,10 +2004,11 @@ function App() {
            it changes; the snapshot is republished on that same epoch. */ null}
       <${Confidence} conf=${conf} credential=${d && d.credential_status}
                      thresholds=${s && s.thresholds} state=${state}/>
-      <${Features} features=${s && s.features}/>
+      <${Features} features=${s && s.features} terrain=${s && s.terrain}/>
       <${Geometry} geometry=${s && s.geometry} divergence=${s && s.geometry_divergence}
-                   tracked=${s && s.satellites_tracked}/>
+                   tracked=${s && s.satellites_tracked} terrain=${s && s.terrain}/>
       <${Dropped} geometry=${s && s.geometry}/>
+      <${TerrainCell} terrain=${s && s.terrain} geometry=${s && s.geometry} state=${state}/>
       <${MissionCell} hud=${hud}/>
     </div>
 
@@ -1953,7 +2020,7 @@ function App() {
                                 orbit=${ORBIT} onStatus=${setEnvStatus} credential=${credShown} terrain=${terrain || null}
                                 payload=${d} state=${state} onHud=${setHud} Dc=${Dc}/>`
             : html`<div className="idle">loading mission</div>`}
-          <div className="rcap">Rendered scene · route and motion are a presentation frame; the receiver is static · position divergence and satellites are from data · terrain and vehicle model illustrative</div>
+          <div className="rcap">Rendered scene · route and motion are a presentation frame; the receiver is static · position divergence and satellites are from data · terrain and vehicle model illustrative${d && d.terrain && d.terrain.available ? ' · terrain sensor simulated' : ''}</div>
           <div className="attrib">${envStatus.attrib}</div>
         </div>`}
       ${showMap && html`

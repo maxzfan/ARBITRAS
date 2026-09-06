@@ -481,6 +481,15 @@ Nothing here ran for the submission video. Every terrain record is stamped
     reads 2,792/2,880 FAIL against the residual bound with or without
     terrain. README §Results predates those streams. Track A/B seam; left
     untouched by this track.
-11. **Not built**: web console rendering of the terrain block (not in E1–E5);
-    the map-resolution sweep at 10 m; the trajectory (particle-filter) form;
-    the CUSUM sequential test. All remain roadmap.
+11. **Web console rendering landed on `track_f`** (2026-09-06, not in
+    E1–E5): while the epoch carries a block, the strip shows a fifth feature
+    bar (`terrain · sim`), the displacement bound's source
+    (`geometry.bound_source`) with the non-binding bound beside it, and a
+    `Terrain · simulated` cell — sensed class at the receiver, map class at the
+    believed fix, match likelihood, the nearest boundary as the testable
+    prediction (`test …` in DEGRADED, `next …` otherwise) and gate check 6 on
+    the signed map — every value tooltipped with its contract path. With the
+    trust layer off, `console/server.py` strips the block and the advisory
+    like every other layer output. **Still not built**: the map-resolution
+    sweep at 10 m; the trajectory (particle-filter) form; the CUSUM
+    sequential test. Those remain roadmap.

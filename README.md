@@ -128,6 +128,15 @@ a confusion-matrix simulation on a real map**, stamped `sensor.source:
 (design.md §11b). Scope, derivations and the build record are in
 `tracks/TRACK_E.md`; the code is `backend/terrain/`.
 
+On the CASEVAC mission stream the channel is on (`backend/missions.py`,
+confusion diagonal 0.85 stated) and the console renders it: a fifth feature
+bar labelled `terrain · sim`, the displacement bound's source with the
+non-binding bound beside it, and a `Terrain · simulated` cell — sensed class
+at the receiver, map class at the believed fix, match likelihood, the next
+boundary as a testable prediction, gate check 6 on the signed map — each value
+tooltipped with its contract path. With the trust layer off the block leaves
+the wire with everything else the layer produces.
+
 **What it adds, additively.** A fifth feature `terrain_mismatch` (1 − L/L_max
 between the sensor posterior and the map posterior under the fix's HDOP
 footprint), a `terrain` block, a map-derived displacement bound combined with

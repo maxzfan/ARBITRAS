@@ -116,7 +116,12 @@ SIMULATED); props by kind and the corrected third track in the console;
 selector accordion; `/` → home, `/console` → console; README Missions
 section. Two runner bugs fixed on the way: `python -m backend.missions` ran
 as a second module copy so augments never registered; the emitter cast a
-nested feature dict to float.
+nested feature dict to float. Then the Track E terrain channel's readout in
+the console strip (fifth feature bar, bound source under the displacement
+bound, `Terrain · simulated` cell; TRACK_E.md item 11), and the layer-off
+branch of `console/server.py` now strips the terrain block and the advisory.
+At W = 1 the simulated sensor's misreads (1 − diag = 15%) show as single-epoch
+spikes of the terrain bar on clean epochs; `terrain_window` is the F-0b knob.
 
 Not done: F-0b threshold session (RECON/COMBAT onset confidence 0.49 sits
 below RESTRICTED because three features saturate while the derived half
