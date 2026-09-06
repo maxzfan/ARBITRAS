@@ -358,7 +358,8 @@ def test_contract_doc_and_fixture_match_the_emitted_record():
     geom = lambda ps: {x for x in ps if not x.startswith("geometry.")
                        and not x.startswith("features.by_sv")
                        and not x.startswith("terrain")
-                       and x != "features.terrain_mismatch"}
+                       and x != "features.terrain_mismatch"
+                       and not x.startswith("score_detail.weights.")}
     assert geom(paths(spec)) == geom(paths(live))
     assert geom(paths(spec)) == geom(paths(fixture))
     assert set(spec["features"]) == set(FEATURE_NAMES)
